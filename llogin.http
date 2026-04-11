@@ -1,0 +1,28 @@
+GET http://localhost:3000/auth/getme
+Accept: application/json
+Authorization:  Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI4IiwiaWF0IjoxNzc1MjcyOTYzLCJleHAiOjE3NzUyNzY1NjN9.DFl8RkDSL-CA7EGh-rL29PhFBvYBMuqYr7SebZKMUJE
+###
+POST http://localhost:3000/auth/verify-otp
+Content-Type: application/json
+
+{"phone":  "09123456781", "code":  "00000"}
+
+###
+POST http://localhost:3000/auth/send-otp
+Content-Type: application/json
+
+{"phone":  "09123456781"}
+
+###
+### GET request to example server
+GET https://examples.http-client.intellij.net/get
+    ?generated-in=WebStorm
+
+###
+#{
+#  "message": "user logined successfull",
+#  "data": {
+#    "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI4IiwiaWF0IjoxNzc1MjcyOTYzLCJleHAiOjE3NzUyNzY1NjN9.DFl8RkDSL-CA7EGh-rL29PhFBvYBMuqYr7SebZKMUJE",
+#    "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI4IiwiaWF0IjoxNzc1MjcyOTYzLCJleHAiOjE3Nzc4NjQ5NjN9.JF94S1bCBWh1IxCj7Kufc4JdNUc9m8I9NpU4uNDBCPs"
+#  }
+#}
