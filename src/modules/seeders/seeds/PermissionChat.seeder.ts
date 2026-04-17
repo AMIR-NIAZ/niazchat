@@ -1,9 +1,9 @@
 import { DataSource, DeepPartial } from 'typeorm';
 import { Seeder } from '../seeder.base';
-import { PermissionChatEnum } from 'src/common/enums/permissionChat.entity';
-import { PermissionChst } from 'src/modules/chats/entities/permission_chat.entity';
+import { PermissionChatEnum } from 'src/common/enums/permissionChat.enum';
+import { PermissionChat } from 'src/modules/chats/entities/permission_chat.entity';
 
-const permissionChats: DeepPartial<PermissionChst[]> = [
+const permissionChats: DeepPartial<PermissionChat[]> = [
     {
         name: PermissionChatEnum.BAN_USER,
     },
@@ -22,7 +22,7 @@ export class PermmisionChatSeeder extends Seeder {
 
     async run(options?: { onlyIfEmpty?: boolean }): Promise<void> {
         const PermissionChatRepository =
-            this.dataSource.getRepository(PermissionChst);
+            this.dataSource.getRepository(PermissionChat);
 
         if (options?.onlyIfEmpty) {
             console.log('PermissionChat seeder skipped: Data already exists.');
