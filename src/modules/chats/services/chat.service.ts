@@ -17,6 +17,10 @@ import { Message } from 'src/modules/messages/entities/message.entity';
 import { WsException } from '@nestjs/websockets';
 import * as fs from 'fs';
 import { RoleChat } from '../entities/role_chat.entity';
+import { PermissionChatDto } from '../dtos/permissionChat.dto';
+import { PermissionChat } from '../entities/permission_chat.entity';
+import { PermissionChatEnum } from '../../../common/enums/permissionChat.enum';
+import { PermissionAdmin } from '../entities/permission_admin.entity';
 
 @Injectable()
 export class ChatService {
@@ -31,6 +35,10 @@ export class ChatService {
         private readonly messageRepository: Repository<Message>,
         @InjectRepository(RoleChat)
         private readonly roleChatRepository: Repository<RoleChat>,
+        @InjectRepository(PermissionChat)
+        private readonly permissionChatRepository: Repository<PermissionChat>,
+        @InjectRepository(PermissionAdmin)
+        private readonly permissionAdminRepository: Repository<PermissionAdmin>,
     ) {}
 
     async createGroup(dto: createChatDto, user: JwtPayload) {
@@ -192,7 +200,7 @@ export class ChatService {
         });
         if (!banRole) throw new NotFoundException('ban role not found');
 
-        member.role.id = banRole.id;
+        member.role = banRole;
         await this.memberRepository.save(member);
 
         return { message: 'user baned successfully' };
@@ -287,10 +295,171 @@ export class ChatService {
                 }
             }
         } catch (err) {
-            throw new InternalServerErrorException();
+            throw new InternalServerErrorException(err);
         }
 
         userData.avatars = [];
         await this.chatRepository.save(userData);
+    }
+
+    async addAdmin(memberId: number, permission: PermissionChatDto) {
+        const member = await this.memberRepository.findOne({
+            where: {
+                id: memberId,
+                chat: {
+                    type: Not(TypeChatEnum.PRIVATE),
+                },
+            },
+        });
+        if (!member) throw new NotFoundException('member not found');
+
+        const adminRole = await this.roleChatRepository.findOne({
+            where: {
+                name: RoleChatEnum.ADMIN,
+            },
+        });
+        if (!adminRole) throw new NotFoundException('admin role not found');
+
+        try {
+            member.role = adminRole;
+            await this.memberRepository.save(member);
+            await this.setPermissions(memberId, permission.permissions);
+        } catch (err) {
+            throw new InternalServerErrorException(err);
+        }
+
+        return { message: 'admin added successfully' };
+    }
+
+    async removeAdmin(memberId: number) {
+        const member = await this.memberRepository.findOne({
+            where: {
+                id: memberId,
+                chat: {
+                    type: Not(TypeChatEnum.PRIVATE),
+                },
+            },
+        });
+        if (!member) throw new NotFoundException('member not found');
+
+        const userRole = await this.roleChatRepository.findOne({
+            where: {
+                name: RoleChatEnum.USER,
+            },
+        });
+        if (!userRole) throw new NotFoundException('user role not found');
+
+        try {
+            member.role = userRole;
+            await this.memberRepository.save(member);
+            await this.setPermissions(memberId);
+        } catch (err) {
+            throw new InternalServerErrorException(err);
+        }
+
+        return { message: 'admin removed successfully' };
+    }
+
+    async addPermissionforAdmin(
+        memberId: number,
+        permissionDto: PermissionChatDto,
+    ) {
+        const permissions = permissionDto.permissions;
+        const adminRole = await this.roleChatRepository.findOne({
+            where: { name: RoleChatEnum.BAN },
+        });
+        if (!adminRole) throw new NotFoundException('admin role not found');
+
+        const member = await this.memberRepository.findOne({
+            where: {
+                id: memberId,
+                chat: {
+                    type: Not(TypeChatEnum.PRIVATE),
+                },
+                role: { id: adminRole.id },
+            },
+        });
+        if (!member) throw new NotFoundException('member not found');
+
+        const permissinAdmin = await this.permissionAdminRepository.find({
+            where: {
+                member: { id: member.id },
+            },
+        });
+        const existingPermissions = permissinAdmin.map(
+            (p) => p.permission.name,
+        );
+        const mergedPermissions = <PermissionChatEnum[]>[
+            ...new Set([...existingPermissions, ...permissions]),
+        ];
+        await this.setPermissions(member.id, mergedPermissions);
+        return { message: 'permissions added successfully' };
+    }
+
+    async deletePermissionforAdmin(
+        memberId: number,
+        permissionDto: PermissionChatDto,
+    ) {
+        let permissions = permissionDto.permissions;
+        const member = await this.memberRepository.findOne({
+            where: {
+                id: memberId,
+                chat: {
+                    type: Not(TypeChatEnum.PRIVATE),
+                },
+            },
+        });
+        if (!member) throw new NotFoundException('member not found');
+
+        const permissinAdmin = await this.permissionAdminRepository.find({
+            where: {
+                member: { id: member.id },
+            },
+        });
+
+        const newPermissions = permissinAdmin
+            .filter((per) =>
+                permissions.includes(per.permission.name as PermissionChatEnum),
+            )
+            .map((perData) => perData.permission.name as PermissionChatEnum);
+        await this.setPermissions(member.id, newPermissions);
+
+        return { message: 'permissions deleted successfully' };
+    }
+
+    async getAdminPermissions(memberId: number) {
+        const permissions = await this.permissionAdminRepository.find({
+            where: { member: { id: memberId } },
+            relations: ['permission'],
+        });
+
+        return {
+            permissions: permissions.map((p) => p.permission.name),
+        };
+    }
+
+    private async setPermissions(
+        adminId: number,
+        permissions?: PermissionChatEnum[],
+    ) {
+        await this.permissionAdminRepository.delete({
+            member: { id: adminId },
+        });
+
+        if (!permissions) return true;
+
+        for (const per of permissions) {
+            const perData = await this.permissionChatRepository.findOne({
+                where: {
+                    name: per,
+                },
+            });
+            if (!perData) throw new NotFoundException('permission not found');
+
+            await this.permissionAdminRepository.save({
+                member: { id: adminId },
+                permission: { id: perData.id },
+            });
+        }
     }
 }

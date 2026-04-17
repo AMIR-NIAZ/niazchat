@@ -28,15 +28,27 @@ export class ManagerChatGuard implements CanActivate {
         const userPayloade = request.user;
 
         const chatId: number = +request.params.chatId;
-        if (!chatId) throw new BadRequestException('chat id not valid');
+        const memberId: number = +request.params.memberId;
+        let member: ChatMember | null;
 
-        const member = await this.memberRepository.findOne({
-            where: {
-                user: { id: userPayloade.sub },
-                chat: { id: chatId },
-            },
-        });
-        if (!member) throw new ForbiddenException();
+        if (chatId) {
+            member = await this.memberRepository.findOne({
+                where: {
+                    user: { id: userPayloade.sub },
+                    chat: { id: chatId },
+                },
+            });
+            if (!member) throw new ForbiddenException();
+        } else if (memberId) {
+            member = await this.memberRepository.findOne({
+                where: {
+                    id: memberId,
+                },
+            });
+            if (!member) throw new ForbiddenException();
+        } else {
+            throw new BadRequestException('chat id not valid');
+        }
 
         const manageRole = await this.roleChatRepository.findOne({
             where: { name: RoleChatEnum.MANAGER },

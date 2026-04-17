@@ -12,6 +12,8 @@ import { JwtService } from '@nestjs/jwt';
 import { ChatSeen } from './entities/chats_seen.entity';
 import { Message } from '../messages/entities/message.entity';
 import { RoleChat } from './entities/role_chat.entity';
+import { PermissionChat } from './entities/permission_chat.entity';
+import { PermissionAdmin } from './entities/permission_admin.entity';
 
 @Module({
     imports: [
@@ -22,6 +24,8 @@ import { RoleChat } from './entities/role_chat.entity';
             ChatSeen,
             Message,
             RoleChat,
+            PermissionChat,
+            PermissionAdmin,
         ]),
     ],
     providers: [
