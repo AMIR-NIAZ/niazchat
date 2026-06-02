@@ -11,14 +11,16 @@ import { Server } from 'socket.io';
 import { ReactionDto } from '../dto/reaction.dto';
 import { SocketAuth } from 'src/common/types/SocketAuth.type';
 import { wsPayload } from 'src/common/guards/wsGuards/wsPayload.guard';
+import { wsIsMemberChat } from 'src/common/guards/wsGuards/wsIsmemberChat.guard';
+import { wsIsBanMember } from 'src/common/guards/wsGuards/wsIsBanMember.guard';
 
 @WebSocketGateway()
+@UseGuards(wsPayload, wsIsMemberChat, wsIsBanMember)
 export class ReactionsGateway {
     @WebSocketServer()
     server: Server;
     constructor(private readonly reactionsService: ReactionsService) {}
 
-    @UseGuards(wsPayload)
     @SubscribeMessage('Reaction')
     async create(
         @ConnectedSocket() client: SocketAuth,
@@ -34,7 +36,6 @@ export class ReactionsGateway {
             .emit('reaction', { react: userAction });
     }
 
-    @UseGuards(wsPayload)
     @SubscribeMessage('noReaction')
     async remove(
         @ConnectedSocket() client: SocketAuth,

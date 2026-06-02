@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { PUBLIC_KEY } from 'src/common/decorators/public.decorator';
 import { ROLE_KEY } from 'src/common/decorators/role.decorator';
 import { RoleEnum } from 'src/common/enums/role.enum';
+import { RequestAuth } from 'src/common/types/RequestAuth.type';
 
 @Injectable()
 export class RoleGurd implements CanActivate {
@@ -15,11 +16,12 @@ export class RoleGurd implements CanActivate {
         );
         if (publicMethod) return true;
 
-        const userRole: string = context.switchToHttp().getRequest().user?.role;
+        const http = context.switchToHttp();
+        const userRole: string = http.getRequest<RequestAuth>().user.role;
         const requiredRoles: string[] =
             this.reflector.get(ROLE_KEY, context.getHandler()) || [];
 
-        if (userRole == RoleEnum.OWNER) return true;
+        if (userRole === RoleEnum.OWNER) return true;
         if (requiredRoles.includes(RoleEnum.ALL)) return true;
 
         return requiredRoles.includes(userRole);

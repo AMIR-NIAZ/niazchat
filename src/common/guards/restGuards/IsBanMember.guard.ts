@@ -14,7 +14,7 @@ import { RoleChatEnum } from '../../enums/roleChat.enum';
 import { RoleChat } from 'src/modules/chats/entities/role_chat.entity';
 
 @Injectable()
-export class IsBanChst implements CanActivate {
+export class IsBanMember implements CanActivate {
     constructor(
         @InjectRepository(ChatMember)
         private readonly memberRepository: Repository<ChatMember>,

@@ -14,6 +14,10 @@ import { deleteMessageDto } from '../dtos/deleteMessage.dto';
 import { Chat } from 'src/modules/chats/entities/chat.entity';
 import { TypeChatEnum } from 'src/common/enums/typeChat.enum';
 import { User } from 'src/modules/auth/entities/user.entity';
+import { WsException } from '@nestjs/websockets';
+import { TypeMessageEnum } from 'src/common/enums/typeMessage.enum';
+import { TypeMessage } from '../entities/typeMessage.entity';
+import fs from 'fs';
 
 @Injectable()
 export class MessageService {
@@ -26,22 +30,53 @@ export class MessageService {
         private readonly chatRepository: Repository<Chat>,
         @InjectRepository(User)
         private readonly userRepository: Repository<User>,
+        @InjectRepository(TypeMessage)
+        private readonly typeMessageRepository: Repository<TypeMessage>,
     ) {}
 
     async create(user: JwtPayload, dto: CreateMessageDto) {
-        const { chatId, content, reply, userId } = dto;
-        if (chatId) {
-            return this.sendGap(chatId, user, reply, content);
-        } else if (userId) {
-            return this.sendPv(userId, user, reply, content);
+        let { chatId, content, reply, userId, type } = dto;
+
+        if (
+            type === TypeMessageEnum.IMAGE ||
+            type === TypeMessageEnum.FILE ||
+            type === TypeMessageEnum.VIDEO
+        ) {
+            const imageBuffer = Buffer.from(content, 'base64');
+            content = await this.saveFile(imageBuffer, type);
         }
+
+        if (chatId) {
+            return this.sendChat(chatId, user, reply, content, type);
+        } else if (userId) {
+            return this.sendPv(userId, user, reply, content, type);
+        }
+
+        throw new BadRequestException();
     }
 
-    private async sendGap(
+    private async saveFile(
+        buffer: Buffer,
+        type: TypeMessageEnum,
+    ): Promise<string> {
+        const uploadPath = `./uploads/messages/${type}s`;
+        const uniqueName = `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+        const fullPath = `${uploadPath}/${uniqueName}`;
+
+        if (!fs.existsSync(uploadPath)) {
+            fs.mkdirSync(uploadPath, { recursive: true });
+        }
+
+        fs.writeFileSync(fullPath, buffer);
+        return `/uploads/images/${uniqueName}`;
+    }
+
+    private async sendChat(
         chatId: number,
         user: JwtPayload,
         reply: number | undefined,
         content: string,
+        type: TypeMessageEnum,
     ) {
         const isMember = await this.memberRepository.findOne({
             where: {
@@ -58,11 +93,16 @@ export class MessageService {
             if (!exists) throw new NotFoundException('reply message not found');
         }
 
+        const typeData = await this.typeMessageRepository.findOneOrFail({
+            where: { name: type },
+        });
+
         const newMessage = await this.messageRepository.save({
             content,
             sender: { id: user.sub },
             chat: { id: chatId },
             replyTo: { id: reply },
+            type: { id: typeData.id },
         });
 
         return newMessage;
@@ -73,6 +113,7 @@ export class MessageService {
         user: JwtPayload,
         reply: number | undefined,
         content: string,
+        type: TypeMessageEnum,
     ) {
         const hasUserReceiver = await this.userRepository.findOne({
             where: { id: userId },
@@ -114,11 +155,16 @@ export class MessageService {
             finalChatId = newPrivateChat.id;
         }
 
+        const typeData = await this.typeMessageRepository.findOneOrFail({
+            where: { name: type },
+        });
+
         const newMessage = await this.messageRepository.save({
             content,
             sender: { id: user.sub },
             chat: { id: finalChatId },
             replyTo: { id: reply },
+            type: { id: typeData.id },
         });
 
         return newMessage;
@@ -134,7 +180,7 @@ export class MessageService {
                 sender: { id: user.sub },
             },
         });
-        if (!message) throw new NotFoundException('message not found');
+        if (!message) throw new WsException('message not found');
 
         await this.messageRepository.update(messageId, {
             content: newContent,
@@ -158,21 +204,12 @@ export class MessageService {
                 isDeleted: false,
             },
         });
-        if (!message) throw new NotFoundException('message not found');
+        if (!message) throw new WsException('message not found');
 
         await this.messageRepository.update(messageId, { isDeleted: true });
     }
 
-    async getAllByChats(user: JwtPayload, chatId: number) {
-        const member = await this.memberRepository.findOne({
-            where: {
-                chat: { id: chatId },
-                user: { id: user.sub },
-            },
-        });
-
-        if (!member) throw new BadRequestException();
-
+    async getAllByChats(chatId: number) {
         return await this.messageRepository.find({
             where: {
                 chat: { id: chatId },

@@ -1,7 +1,6 @@
 import {
     ConnectedSocket,
     MessageBody,
-    OnGatewayConnection,
     SubscribeMessage,
     WebSocketGateway,
     WebSocketServer,
@@ -12,8 +11,13 @@ import { CreateMessageDto } from '../dtos/createMessage.dto';
 import { EditMessageDto } from '../dtos/EditMessage.dto';
 import { deleteMessageDto } from '../dtos/deleteMessage.dto';
 import { SocketAuth } from 'src/common/types/SocketAuth.type';
+import { wsPayload } from 'src/common/guards/wsGuards/wsPayload.guard';
+import { ParseIntPipe, UseGuards } from '@nestjs/common';
+import { wsIsMemberChat } from 'src/common/guards/wsGuards/wsIsmemberChat.guard';
+import { wsIsBanMember } from 'src/common/guards/wsGuards/wsIsBanMember.guard';
 
-@WebSocketGateway()
+@WebSocketGateway({ maxHttpBufferSize: 1e8 })
+@UseGuards(wsPayload, wsIsBanMember)
 export class MessageGateway {
     constructor(private readonly messageService: MessageService) {}
 
@@ -34,6 +38,7 @@ export class MessageGateway {
     }
 
     @SubscribeMessage('editMessage')
+    @UseGuards(wsIsMemberChat)
     async editMessage(
         @ConnectedSocket() client: SocketAuth,
         @MessageBody() dto: EditMessageDto,
@@ -49,6 +54,7 @@ export class MessageGateway {
     }
 
     @SubscribeMessage('deleteMessage')
+    @UseGuards(wsIsMemberChat)
     async deleteMessage(
         @ConnectedSocket() client: SocketAuth,
         @MessageBody() dto: deleteMessageDto,
@@ -61,14 +67,12 @@ export class MessageGateway {
     }
 
     @SubscribeMessage('getMessages')
+    @UseGuards(wsIsMemberChat)
     async getMessages(
         @ConnectedSocket() client: SocketAuth,
-        @MessageBody() chatId: number,
+        @MessageBody('chatId', new ParseIntPipe()) chatId: number,
     ) {
-        const messages = await this.messageService.getAllByChats(
-            client.data.user,
-            chatId,
-        );
+        const messages = await this.messageService.getAllByChats(chatId);
 
         client.emit('getMessages', messages);
     }

@@ -1,5 +1,4 @@
 import {
-    BadRequestException,
     ForbiddenException,
     HttpException,
     HttpStatus,
@@ -8,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from '../entities/user.entity';
-import { Not, Repository } from 'typeorm';
+import { DataSource, Not, Repository } from 'typeorm';
 import { JwtPayload } from 'src/common/types/jwt-payload.type';
 import { JwtAppService } from './jwt.service';
 import { PhoneDto } from '../dtos/phone.dto';
@@ -18,17 +17,23 @@ import { VerifyDto } from '../dtos/verify.dto';
 import { UserStatusEnum } from 'src/common/enums/UserStatus.enum';
 import { Compare, Hash } from 'src/common/utils/hash.utils';
 import { Role } from '../entities/role.entity';
-import { RoleChatEnum } from 'src/common/enums/roleChat.enum';
 import { RoleEnum } from 'src/common/enums/role.enum';
 import { UserService } from './user.service';
+import { UserPermission } from '../entities/user_permissions.entity';
+import { Permission } from '../entities/permission.entity';
 
 @Injectable()
 export class AuthService {
     constructor(
+        private readonly dataSource: DataSource,
         @InjectRepository(User)
         private readonly userRepository: Repository<User>,
         @InjectRepository(Role)
         private readonly roleRepository: Repository<Role>,
+        @InjectRepository(Permission)
+        private readonly permissionRepository: Repository<Permission>,
+        @InjectRepository(UserPermission)
+        private readonly userPermissionRepository: Repository<UserPermission>,
         private readonly userService: UserService,
         private readonly jwtService: JwtAppService,
         private readonly cacheService: CacheService,
@@ -141,7 +146,7 @@ export class AuthService {
             refreshToken: undefined,
         });
 
-        this.userService.deleteAllAvatar(id);
+        await this.userService.deleteAllAvatar(id);
 
         return { message: `user baned is ${statusBaned.affected}` };
     }

@@ -5,6 +5,7 @@ import { OwnerSeeder } from '../seeds/Owner.seeder';
 import { RoleChatSeeder } from '../seeds/roleChat.seeder';
 import { PermmisionChatSeeder } from '../seeds/PermissionChat.seeder';
 import { PermmisionSeeder } from '../seeds/permission.seeder';
+import { TypeMessageSeeder } from '../seeds/TypeMessage.seeder';
 
 const SEEDERS = [
     OwnerSeeder,
@@ -12,6 +13,7 @@ const SEEDERS = [
     PermmisionSeeder,
     RoleChatSeeder,
     PermmisionChatSeeder,
+    TypeMessageSeeder,
 ];
 
 @Injectable()
@@ -34,9 +36,9 @@ export class SeederService {
 
         const seederInstance = new SeederClass(this.dataSource);
 
-        if (typeof (seederInstance as any).run === 'function') {
+        if (typeof seederInstance.run === 'function') {
             this.logger.log(`Running seeder: ${seederName}`);
-            await (seederInstance as any).run(options);
+            await seederInstance.run(options);
             this.logger.log(`Seeder ${seederName} finished successfully.`);
         } else {
             this.logger.error(

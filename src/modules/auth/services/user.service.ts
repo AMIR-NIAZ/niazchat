@@ -1,5 +1,4 @@
 import {
-    BadRequestException,
     Injectable,
     InternalServerErrorException,
     NotFoundException,
@@ -87,7 +86,7 @@ export class UserService {
                 }
             }
         } catch (err) {
-            throw new InternalServerErrorException();
+            throw new InternalServerErrorException((err as Error).message);
         }
 
         userData.avatars = [];

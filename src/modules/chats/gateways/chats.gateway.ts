@@ -1,7 +1,6 @@
 import {
     ConnectedSocket,
     MessageBody,
-    OnGatewayConnection,
     OnGatewayDisconnect,
     SubscribeMessage,
     WebSocketGateway,
@@ -14,16 +13,14 @@ import { UseGuards } from '@nestjs/common';
 import { Chat } from '../entities/chat.entity';
 import { SocketAuth } from 'src/common/types/SocketAuth.type';
 import { wsPayload } from 'src/common/guards/wsGuards/wsPayload.guard';
+import { wsIsMemberChat } from 'src/common/guards/wsGuards/wsIsmemberChat.guard';
 
 @WebSocketGateway()
-export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+@UseGuards(wsPayload)
+export class ChatGateway implements OnGatewayDisconnect {
     @WebSocketServer()
-    server: Server;
+    private server: Server;
     constructor(private readonly chatsService: ChatService) {}
-
-    handleConnection() {
-        console.log('clinet connected');
-    }
 
     @SubscribeMessage('getAllChats')
     async handleMessage(@ConnectedSocket() client: SocketAuth) {
@@ -34,8 +31,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         this.server.to(client.id).emit('getAllChats', chats);
     }
 
-    @UseGuards(wsPayload)
     @SubscribeMessage('joinChat')
+    @UseGuards(wsIsMemberChat)
     async joinChat(
         @ConnectedSocket() client: SocketAuth,
         @MessageBody() chatId: number,
@@ -55,13 +52,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         client.emit('chatInfo', chatInfo);
     }
 
-    async handleDisconnect(client: SocketAuth) {
-        if (client.rooms[1]) {
-            this.getMemberChat(client.rooms[1]);
-            await this.seenChat(client.rooms[1], client.data.user);
-        }
-    }
-
     private async getMemberChat(chatName: string) {
         const countUser = (await this.server.to(chatName).fetchSockets())
             .length;
@@ -76,5 +66,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             userId: user.sub,
             lastSeenId,
         });
+    }
+
+    async handleDisconnect(client: SocketAuth) {
+        if (client.rooms[1]) {
+            this.getMemberChat(client.rooms[1]);
+            await this.seenChat(client.rooms[1], client.data.user);
+        }
     }
 }

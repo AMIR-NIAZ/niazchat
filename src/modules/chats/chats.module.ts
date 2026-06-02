@@ -14,6 +14,10 @@ import { Message } from '../messages/entities/message.entity';
 import { RoleChat } from './entities/role_chat.entity';
 import { PermissionChat } from './entities/permission_chat.entity';
 import { PermissionAdmin } from './entities/permission_admin.entity';
+import { ManageChatsController } from './controllers/manageChats.controller';
+import { PermissionChatService } from './services/permissionChat.service';
+import { InviteLinkService } from './services/inviteLink.service';
+import { Link } from './entities/link.entity';
 
 @Module({
     imports: [
@@ -26,15 +30,18 @@ import { PermissionAdmin } from './entities/permission_admin.entity';
             RoleChat,
             PermissionChat,
             PermissionAdmin,
+            Link,
         ]),
     ],
     providers: [
         ChatService,
+        PermissionChatService,
+        InviteLinkService,
         ChatGateway,
         UserService,
         JwtAppService,
         JwtService,
     ],
-    controllers: [ChatsController],
+    controllers: [ChatsController, ManageChatsController],
 })
 export class ChatsModule {}

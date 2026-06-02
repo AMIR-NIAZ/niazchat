@@ -5,9 +5,8 @@ import {
     WebSocketGateway,
     WebSocketServer,
 } from '@nestjs/websockets';
-import { Socket, Server } from 'socket.io';
+import { Server } from 'socket.io';
 import { UserService } from '../services/user.service';
-import { JwtPayload } from 'src/common/types/jwt-payload.type';
 import { SocketAuth } from 'src/common/types/SocketAuth.type';
 
 @WebSocketGateway()

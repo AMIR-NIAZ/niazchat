@@ -1,4 +1,11 @@
-import { IsNumber, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+    IsEnum,
+    IsNumber,
+    IsOptional,
+    IsString,
+    MaxLength,
+} from 'class-validator';
+import { TypeMessageEnum } from 'src/common/enums/typeMessage.enum';
 
 export class CreateMessageDto {
     @IsNumber()
@@ -16,4 +23,8 @@ export class CreateMessageDto {
     @IsString()
     @MaxLength(5000)
     content: string;
+
+    @IsOptional()
+    @IsEnum(TypeMessageEnum)
+    type: TypeMessageEnum = TypeMessageEnum.TEXT;
 }

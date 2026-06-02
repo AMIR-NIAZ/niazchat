@@ -20,7 +20,9 @@ export class PayloadGuard implements CanActivate {
             PUBLIC_KEY,
             context.getHandler(),
         );
-        const request = context.switchToHttp().getRequest<Request>();
+        const Http = context.switchToHttp();
+        const request = Http.getRequest<Request>();
+
         let token: string = '';
         if (!publicMethod) {
             token = this.getToken(request);

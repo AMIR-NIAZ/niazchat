@@ -15,6 +15,9 @@ import { UserService } from './services/user.service';
 import { UserGateway } from './gateways/user.gateway';
 import { UserController } from './controllers/user.controller';
 import { Role } from './entities/role.entity';
+import { UserPermission } from './entities/user_permissions.entity';
+import { Permission } from './entities/permission.entity';
+import { PermissionService } from './services/permission.service';
 
 @Module({
     imports: [
@@ -22,12 +25,13 @@ import { Role } from './entities/role.entity';
             name: 'otp',
         }),
         CacheModule.register(),
-        TypeOrmModule.forFeature([User, Role]),
+        TypeOrmModule.forFeature([User, Role, UserPermission, Permission]),
     ],
     controllers: [AuthController, UserController],
     providers: [
         AuthService,
         UserService,
+        PermissionService,
         OtpService,
         OtpConsumer,
         MessageService,

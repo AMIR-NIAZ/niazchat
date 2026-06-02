@@ -86,7 +86,7 @@ async function bootstrap() {
         .command({
             command: 'list',
             describe: 'List all available seeders',
-            handler: async () => {
+            handler: () => {
                 const seeders = seederService.listSeeders();
                 console.log('Available seeders:');
                 seeders.forEach((seeder) => console.log(`- ${seeder}`));

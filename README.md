@@ -31,6 +31,19 @@
 $ npm install
 ```
 
+## seeders
+
+```bash
+# list all seeders
+$ npm run seed:list
+
+# run all seeders
+$ npm run seed:run-all
+
+# run one seeder
+$ npm run seed:run <seeder name>
+```
+
 ## Compile and run the project
 
 ```bash

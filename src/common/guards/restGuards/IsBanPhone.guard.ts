@@ -2,16 +2,12 @@ import {
     BadRequestException,
     CanActivate,
     ExecutionContext,
-    ForbiddenException,
     Injectable,
-    NotFoundException,
     UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { ChatMember } from '../../../modules/chats/entities/chat_members.entity';
 import { Repository } from 'typeorm';
 import { RequestAuth } from '../../types/RequestAuth.type';
-import { RoleChatEnum } from '../../enums/roleChat.enum';
 import { User } from 'src/modules/auth/entities/user.entity';
 import { UserStatusEnum } from 'src/common/enums/UserStatus.enum';
 

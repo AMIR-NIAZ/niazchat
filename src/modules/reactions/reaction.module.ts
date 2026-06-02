@@ -9,9 +9,20 @@ import { React } from './entities/react.entity';
 import { MessageReact } from './entities/message_react.entity';
 import { JwtAppService } from '../auth/services/jwt.service';
 import { JwtService } from '@nestjs/jwt';
+import { ChatMember } from '../chats/entities/chat_members.entity';
+import { RoleChat } from '../chats/entities/role_chat.entity';
 
 @Module({
-    imports: [TypeOrmModule.forFeature([User, Message, React, MessageReact])],
+    imports: [
+        TypeOrmModule.forFeature([
+            User,
+            Message,
+            React,
+            MessageReact,
+            ChatMember,
+            RoleChat,
+        ]),
+    ],
     providers: [ReactionsGateway, ReactionsService, JwtAppService, JwtService],
     controllers: [ReactionController],
 })

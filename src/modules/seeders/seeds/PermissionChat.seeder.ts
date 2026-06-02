@@ -5,6 +5,9 @@ import { PermissionChat } from 'src/modules/chats/entities/permission_chat.entit
 
 const permissionChats: DeepPartial<PermissionChat[]> = [
     {
+        name: PermissionChatEnum.ALL,
+    },
+    {
         name: PermissionChatEnum.BAN_USER,
     },
     {

@@ -9,14 +9,15 @@ import { JwtPayload } from '../../types/jwt-payload.type';
 export class wsPayload implements CanActivate {
     constructor(private readonly jwtService: JwtAppService) {}
     async canActivate(context: ExecutionContext): Promise<boolean> {
-        const client: SocketAuth = context.switchToWs().getClient();
+        const Ws = context.switchToWs();
+        const client: SocketAuth = Ws.getClient();
         const token: string = this.getToken(client);
 
         try {
             const payload: JwtPayload =
                 await this.jwtService.verifyAccessToken(token);
             client.data.user = payload;
-        } catch (error: unknown) {
+        } catch (error) {
             throw new WsException('token in valid');
         }
 
