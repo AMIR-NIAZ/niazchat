@@ -23,6 +23,7 @@ import { PermissionChatEnum } from 'src/common/enums/permissionChat.enum';
 import { PermissionChatService } from '../services/permissionChat.service';
 import { createLinkDto } from '../dtos/createLink.dto';
 import { InviteLinkService } from '../services/inviteLink.service';
+import { ChatId } from 'src/common/types/brands.type';
 
 @Controller('chats/manage')
 @UseGuards(ManagerChatGuard)
@@ -36,7 +37,7 @@ export class ManageChatsController {
     @Role([RoleEnum.ALL])
     @PermissionAdminChat([PermissionChatEnum.ALL])
     async addMemberByPhone(
-        @Param('groupId', ParseIntPipe) groupId: number,
+        @Param('groupId', ParseIntPipe) groupId: ChatId,
         @Param('userPhone') userPhone: string,
     ) {
         return await this.chatService.addMemberByPhone(groupId, userPhone);
@@ -59,7 +60,7 @@ export class ManageChatsController {
     )
     async uploadAvatar(
         @UploadedFile() file: Express.Multer.File,
-        @Param('chatId', ParseIntPipe) chatId: number,
+        @Param('chatId', ParseIntPipe) chatId: ChatId,
     ) {
         return await this.chatService.uploadAvatar(file.path, chatId);
     }
@@ -69,7 +70,7 @@ export class ManageChatsController {
     @PermissionAdminChat([PermissionChatEnum.CHANGE_INFO_CHAT])
     async deleteAvatar(
         @Body('avatar') avatar: string,
-        @Param('chatId', ParseIntPipe) chatId: number,
+        @Param('chatId', ParseIntPipe) chatId: ChatId,
     ) {
         return await this.chatService.deleteAvatar(chatId, avatar);
     }
@@ -91,13 +92,13 @@ export class ManageChatsController {
     @Get(':chatId/bans')
     @Role([RoleEnum.ALL])
     @PermissionAdminChat([PermissionChatEnum.BAN_USER])
-    async getAllBanUsers(@Param('chatId', ParseIntPipe) chatId: number) {
+    async getAllBanUsers(@Param('chatId', ParseIntPipe) chatId: ChatId) {
         return await this.chatService.getAllBanUser(chatId);
     }
 
     @Post('ban/:chatId')
     @Role([RoleEnum.ADMIN])
-    async ban(@Param('chatId', ParseIntPipe) chatId: number) {
+    async ban(@Param('chatId', ParseIntPipe) chatId: ChatId) {
         return await this.chatService.banChat(chatId);
     }
 
@@ -157,8 +158,8 @@ export class ManageChatsController {
 
     @Get('/:chatId/link')
     @Role([RoleEnum.ALL])
-    async getLinkChats(@Param('memberId', ParseIntPipe) memberId: number) {
-        return await this.linkService.getChatInviteLinks(memberId);
+    async getLinkChats(@Param('chatId', ParseIntPipe) chatId: ChatId) {
+        return await this.linkService.getChatInviteLinks(chatId);
     }
 
     @Delete('/:chatId/link/:linkId')

@@ -1,4 +1,6 @@
+import { UserId } from './brands.type';
+
 export interface JwtPayload {
-    sub: number;
+    sub: UserId;
     role: string;
 }

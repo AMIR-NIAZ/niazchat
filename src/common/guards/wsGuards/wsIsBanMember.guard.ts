@@ -2,11 +2,12 @@ import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ChatMember } from '../../../modules/chats/entities/chat_members.entity';
 import { Repository } from 'typeorm';
-import { RequestAuth } from '../../types/RequestAuth.type';
 import { RoleChatEnum } from '../../enums/roleChat.enum';
 import { RoleChat } from 'src/modules/chats/entities/role_chat.entity';
 import { SocketAuth } from 'src/common/types/SocketAuth.type';
 import { WsException } from '@nestjs/websockets';
+import { ChatId } from 'src/common/types/brands.type';
+import WebSocketData from 'src/common/types/websocket.type';
 
 @Injectable()
 export class wsIsBanMember implements CanActivate {
@@ -20,10 +21,10 @@ export class wsIsBanMember implements CanActivate {
     async canActivate(context: ExecutionContext): Promise<boolean> {
         const Ws = context.switchToWs();
         const client = Ws.getClient<SocketAuth>();
-        const data = Ws.getData();
+        const data: WebSocketData = Ws.getData();
         const userPayload = client.data.user;
 
-        const chatId = +(data?.chatId || data?.dto?.chatId);
+        const chatId = (data.chatId ? data.chatId : data.dto.chatId) as ChatId;
         if (!chatId) throw new WsException('chat id not valid');
 
         const IsBan = await this.memberRepository.findOne({

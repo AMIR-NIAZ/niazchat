@@ -19,6 +19,7 @@ import * as fs from 'fs';
 import { RoleChat } from '../entities/role_chat.entity';
 import { PermissionChat } from '../entities/permission_chat.entity';
 import { PermissionAdmin } from '../entities/permission_admin.entity';
+import { ChatId } from 'src/common/types/brands.type';
 
 @Injectable()
 export class ChatService {
@@ -79,7 +80,7 @@ export class ChatService {
         return { message: 'group created successfully' };
     }
 
-    async addMemberByPhone(chatId: number, userPhone: string) {
+    async addMemberByPhone(chatId: ChatId, userPhone: string) {
         const userRole = await this.roleChatRepository.findOne({
             where: { name: RoleChatEnum.USER },
         });
@@ -107,11 +108,11 @@ export class ChatService {
         return chats;
     }
 
-    async getInfoChat(id: number) {
+    async getInfoChat(id: ChatId) {
         return await this.chatRepository.findOne({ where: { id } });
     }
 
-    async uploadAvatar(avatar: string, chatId: number) {
+    async uploadAvatar(avatar: string, chatId: ChatId) {
         const chat = await this.chatRepository.findOne({
             where: {
                 type: Not(TypeChatEnum.PRIVATE),
@@ -126,7 +127,7 @@ export class ChatService {
         return { message: 'avatar updated successfully' };
     }
 
-    async deleteAvatar(chatId: number, avatarPath: string) {
+    async deleteAvatar(chatId: ChatId, avatarPath: string) {
         const chat = await this.chatRepository.findOne({
             where: {
                 type: Not(TypeChatEnum.PRIVATE),
@@ -146,7 +147,7 @@ export class ChatService {
         return { message: 'avatar updated successfully' };
     }
 
-    async seening(chatId: number, user: JwtPayload) {
+    async seening(chatId: ChatId, user: JwtPayload) {
         const lastMessage = await this.messageRepository.findOne({
             where: {
                 chat: { id: chatId },
@@ -222,7 +223,7 @@ export class ChatService {
         return { message: 'user on baned successfully' };
     }
 
-    async getAllBanUser(chatId: number) {
+    async getAllBanUser(chatId: ChatId) {
         const chat = await this.chatRepository.findOne({
             where: {
                 id: chatId,
@@ -250,7 +251,7 @@ export class ChatService {
         return { data: banUsers };
     }
 
-    async getAllUser(chatId: number) {
+    async getAllUser(chatId: ChatId) {
         const chat = await this.chatRepository.findOne({
             where: {
                 id: chatId,
@@ -278,7 +279,7 @@ export class ChatService {
         return { data: Users };
     }
 
-    async banChat(id: number) {
+    async banChat(id: ChatId) {
         const chat = await this.chatRepository.findOne({
             where: {
                 id,

@@ -1,7 +1,5 @@
 import { DataSource } from 'typeorm';
 import { Seeder } from '../seeder.base';
-import { RoleEnum } from 'src/common/enums/role.enum';
-import { User } from '../../auth/entities/user.entity';
 import { TypeMessageEnum } from 'src/common/enums/typeMessage.enum';
 import { TypeMessage } from 'src/modules/messages/entities/typeMessage.entity';
 

@@ -21,6 +21,7 @@ import { RequestAuth } from 'src/common/types/RequestAuth.type';
 import { IsBanPhone } from 'src/common/guards/restGuards/IsBanPhone.guard';
 import { PermissionsDto } from '../dtos/permission.dto';
 import { PermissionService } from '../services/permission.service';
+import { UserId } from 'src/common/types/brands.type';
 
 @Controller('auth')
 export class AuthController {
@@ -56,14 +57,14 @@ export class AuthController {
 
     @Put('ban/:id')
     @Role([RoleEnum.ADMIN])
-    async banUser(@Param('id') id: number) {
+    async banUser(@Param('id') id: UserId) {
         await this.authService.banUser(id);
     }
 
     @Post('users/:userId/admin')
     @Role([RoleEnum.OWNER])
     async addAdmin(
-        @Param('userId', ParseIntPipe) userId: number,
+        @Param('userId', ParseIntPipe) userId: UserId,
         @Body() dto: PermissionsDto,
     ) {
         return await this.permissionService.addAdmin(userId, dto);
@@ -71,7 +72,7 @@ export class AuthController {
 
     @Delete('users/:userId/admin')
     @Role([RoleEnum.OWNER])
-    async deleteAdmin(@Param('adminId', ParseIntPipe) adminId: number) {
+    async deleteAdmin(@Param('adminId', ParseIntPipe) adminId: UserId) {
         return await this.permissionService.deleteAdmin(adminId);
     }
 
@@ -84,7 +85,7 @@ export class AuthController {
     @Put('admins/:adminId/permissions')
     @Role([RoleEnum.OWNER])
     async updateAdminPermissions(
-        @Param('adminId', ParseIntPipe) adminId: number,
+        @Param('adminId', ParseIntPipe) adminId: UserId,
         @Body() dto: PermissionsDto,
     ) {
         return await this.permissionService.updateAdminPermissions(
@@ -95,7 +96,7 @@ export class AuthController {
 
     @Get('admins/:adminId/permissions')
     @Role([RoleEnum.OWNER])
-    async getPermissionsAdmin(@Param('adminId', ParseIntPipe) adminId: number) {
+    async getPermissionsAdmin(@Param('adminId', ParseIntPipe) adminId: UserId) {
         return await this.permissionService.getAdminPermissions(adminId);
     }
 }

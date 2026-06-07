@@ -11,6 +11,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { PERMISSION_CHAT_KEY } from 'src/common/decorators/PermissionAdminChat.decorator';
 import { PermissionChatEnum } from 'src/common/enums/permissionChat.enum';
 import { RoleChatEnum } from 'src/common/enums/roleChat.enum';
+import { ChatId } from 'src/common/types/brands.type';
 import { RequestAuth } from 'src/common/types/RequestAuth.type';
 import { ChatMember } from 'src/modules/chats/entities/chat_members.entity';
 import { PermissionAdmin } from 'src/modules/chats/entities/permission_admin.entity';
@@ -87,7 +88,7 @@ export class ManagerChatGuard implements CanActivate {
     }
 
     private async getMember(request: RequestAuth) {
-        const chatId: number = +request.params.chatId;
+        const chatId: ChatId = +request.params.chatId as ChatId;
         const memberId: number = +request.params.memberId;
         const userPayloade = request.user;
 

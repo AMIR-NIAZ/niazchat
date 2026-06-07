@@ -14,6 +14,7 @@ import { ChatMember } from '../entities/chat_members.entity';
 import { RoleChat } from '../entities/role_chat.entity';
 import { RoleChatEnum } from 'src/common/enums/roleChat.enum';
 import { createLinkDto } from '../dtos/createLink.dto';
+import { ChatId, UserId } from 'src/common/types/brands.type';
 
 @Injectable()
 export class InviteLinkService {
@@ -63,7 +64,7 @@ export class InviteLinkService {
         await this.LinkRepository.save(inviteLink);
     }
 
-    async getChatInviteLinks(chatId: number): Promise<Link[]> {
+    async getChatInviteLinks(chatId: ChatId): Promise<Link[]> {
         return await this.LinkRepository.find({
             where: {
                 chat: { id: chatId },
@@ -72,7 +73,7 @@ export class InviteLinkService {
         });
     }
 
-    async joinByInviteCode(code: string, userId: number): Promise<Chat> {
+    async joinByInviteCode(code: string, userId: UserId): Promise<Chat> {
         const inviteLink = await this.LinkRepository.findOne({
             where: {
                 code,
@@ -111,8 +112,8 @@ export class InviteLinkService {
     }
 
     private async isChatMember(
-        chatId: number,
-        userId: number,
+        chatId: ChatId,
+        userId: UserId,
     ): Promise<boolean> {
         const member = await this.chatRepository
             .createQueryBuilder('chat')
@@ -123,7 +124,7 @@ export class InviteLinkService {
         return !!member;
     }
 
-    private async addUserToChat(chatId: number, userId: number): Promise<void> {
+    private async addUserToChat(chatId: ChatId, userId: UserId): Promise<void> {
         const user = await this.userRepository.findOneBy({ id: userId });
         if (!user) throw new NotFoundException('user not found');
 

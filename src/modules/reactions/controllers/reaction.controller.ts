@@ -12,6 +12,7 @@ import { CreateReactDto } from '../dto/create-react.dto';
 import { Role } from 'src/common/decorators/role.decorator';
 import { RoleEnum } from 'src/common/enums/role.enum';
 import { IsPublic } from 'src/common/decorators/public.decorator';
+import { ReactId } from 'src/common/types/brands.type';
 
 @Controller('react')
 export class ReactionController {
@@ -27,14 +28,14 @@ export class ReactionController {
     @Role([RoleEnum.ADMIN])
     async update(
         @Body() dto: CreateReactDto,
-        @Param('reactId') reactId: number,
+        @Param('reactId') reactId: ReactId,
     ) {
         return await this.reactionService.update(dto, reactId);
     }
 
     @Delete(':reactId')
     @Role([RoleEnum.ADMIN])
-    async delete(@Param('reactId') reactId: number) {
+    async delete(@Param('reactId') reactId: ReactId) {
         return await this.reactionService.remove(reactId);
     }
 

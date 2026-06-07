@@ -18,6 +18,7 @@ import { WsException } from '@nestjs/websockets';
 import { TypeMessageEnum } from 'src/common/enums/typeMessage.enum';
 import { TypeMessage } from '../entities/typeMessage.entity';
 import fs from 'fs';
+import { ChatId, MessageId, UserId } from 'src/common/types/brands.type';
 
 @Injectable()
 export class MessageService {
@@ -35,15 +36,16 @@ export class MessageService {
     ) {}
 
     async create(user: JwtPayload, dto: CreateMessageDto) {
-        let { chatId, content, reply, userId, type } = dto;
+        const { chatId, reply, userId, type } = dto;
 
+        let content = dto.content;
         if (
             type === TypeMessageEnum.IMAGE ||
             type === TypeMessageEnum.FILE ||
             type === TypeMessageEnum.VIDEO
         ) {
             const imageBuffer = Buffer.from(content, 'base64');
-            content = await this.saveFile(imageBuffer, type);
+            content = this.saveFile(imageBuffer, type);
         }
 
         if (chatId) {
@@ -55,10 +57,7 @@ export class MessageService {
         throw new BadRequestException();
     }
 
-    private async saveFile(
-        buffer: Buffer,
-        type: TypeMessageEnum,
-    ): Promise<string> {
+    private saveFile(buffer: Buffer, type: TypeMessageEnum): string {
         const uploadPath = `./uploads/messages/${type}s`;
         const uniqueName = `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
         const fullPath = `${uploadPath}/${uniqueName}`;
@@ -72,9 +71,9 @@ export class MessageService {
     }
 
     private async sendChat(
-        chatId: number,
+        chatId: ChatId,
         user: JwtPayload,
-        reply: number | undefined,
+        reply: MessageId | undefined,
         content: string,
         type: TypeMessageEnum,
     ) {
@@ -109,9 +108,9 @@ export class MessageService {
     }
 
     private async sendPv(
-        userId: number,
+        userId: UserId,
         user: JwtPayload,
-        reply: number | undefined,
+        reply: MessageId | undefined,
         content: string,
         type: TypeMessageEnum,
     ) {
@@ -134,7 +133,7 @@ export class MessageService {
             chat.members.some((m) => m.user.id === userId),
         );
 
-        let finalChatId: number;
+        let finalChatId: ChatId;
         if (existingChat) {
             finalChatId = existingChat.id;
         } else {
@@ -209,7 +208,7 @@ export class MessageService {
         await this.messageRepository.update(messageId, { isDeleted: true });
     }
 
-    async getAllByChats(chatId: number) {
+    async getAllByChats(chatId: ChatId) {
         return await this.messageRepository.find({
             where: {
                 chat: { id: chatId },

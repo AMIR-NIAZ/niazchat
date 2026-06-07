@@ -14,6 +14,7 @@ import { Chat } from '../entities/chat.entity';
 import { SocketAuth } from 'src/common/types/SocketAuth.type';
 import { wsPayload } from 'src/common/guards/wsGuards/wsPayload.guard';
 import { wsIsMemberChat } from 'src/common/guards/wsGuards/wsIsmemberChat.guard';
+import { ChatId } from 'src/common/types/brands.type';
 
 @WebSocketGateway()
 @UseGuards(wsPayload)
@@ -35,7 +36,7 @@ export class ChatGateway implements OnGatewayDisconnect {
     @UseGuards(wsIsMemberChat)
     async joinChat(
         @ConnectedSocket() client: SocketAuth,
-        @MessageBody() chatId: number,
+        @MessageBody() chatId: ChatId,
     ) {
         const lastChat: string = Array.from(client.rooms)[1];
         if (lastChat) {
@@ -58,7 +59,7 @@ export class ChatGateway implements OnGatewayDisconnect {
         this.server.to(chatName).emit('countUsersOnline', countUser);
     }
 
-    private async seenChat(chatId: number, user: JwtPayload) {
+    private async seenChat(chatId: ChatId, user: JwtPayload) {
         const lastSeenId = await this.chatsService.seening(chatId, user);
 
         this.server.to(`chat:${chatId}`).emit('seen', {
@@ -69,9 +70,10 @@ export class ChatGateway implements OnGatewayDisconnect {
     }
 
     async handleDisconnect(client: SocketAuth) {
-        if (client.rooms[1]) {
-            this.getMemberChat(client.rooms[1]);
-            await this.seenChat(client.rooms[1], client.data.user);
+        const room = client.rooms[1];
+        if (room) {
+            this.getMemberChat(room);
+            await this.seenChat(room, client.data.user);
         }
     }
 }

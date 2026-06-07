@@ -1,9 +1,10 @@
 import { IsNumber } from 'class-validator';
+import { ChatId, MessageId } from 'src/common/types/brands.type';
 
 export class deleteMessageDto {
     @IsNumber()
-    messageId: number;
+    messageId: MessageId;
 
     @IsNumber()
-    chatId: number;
+    chatId: ChatId;
 }

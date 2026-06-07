@@ -5,11 +5,12 @@ import {
     IsOptional,
     Min,
 } from 'class-validator';
+import { ChatId } from 'src/common/types/brands.type';
 
 export class createLinkDto {
     @IsNumber()
     @IsNotEmpty()
-    chatId: number;
+    chatId: ChatId;
 
     @IsOptional()
     @IsNumber()

@@ -6,19 +6,20 @@ import {
     MaxLength,
 } from 'class-validator';
 import { TypeMessageEnum } from 'src/common/enums/typeMessage.enum';
+import { ChatId, MessageId, UserId } from 'src/common/types/brands.type';
 
 export class CreateMessageDto {
     @IsNumber()
     @IsOptional()
-    reply?: number;
+    reply?: MessageId;
 
     @IsOptional()
     @IsNumber()
-    chatId?: number;
+    chatId?: ChatId;
 
     @IsOptional()
     @IsNumber()
-    userId?: number;
+    userId?: UserId;
 
     @IsString()
     @MaxLength(5000)

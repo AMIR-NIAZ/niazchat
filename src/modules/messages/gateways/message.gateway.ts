@@ -15,6 +15,7 @@ import { wsPayload } from 'src/common/guards/wsGuards/wsPayload.guard';
 import { ParseIntPipe, UseGuards } from '@nestjs/common';
 import { wsIsMemberChat } from 'src/common/guards/wsGuards/wsIsmemberChat.guard';
 import { wsIsBanMember } from 'src/common/guards/wsGuards/wsIsBanMember.guard';
+import { ChatId } from 'src/common/types/brands.type';
 
 @WebSocketGateway({ maxHttpBufferSize: 1e8 })
 @UseGuards(wsPayload, wsIsBanMember)
@@ -70,7 +71,7 @@ export class MessageGateway {
     @UseGuards(wsIsMemberChat)
     async getMessages(
         @ConnectedSocket() client: SocketAuth,
-        @MessageBody('chatId', new ParseIntPipe()) chatId: number,
+        @MessageBody('chatId', new ParseIntPipe()) chatId: ChatId,
     ) {
         const messages = await this.messageService.getAllByChats(chatId);
 

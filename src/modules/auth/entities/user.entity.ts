@@ -3,9 +3,12 @@ import { UserStatusEnum } from 'src/common/enums/UserStatus.enum';
 import { ChatSeen } from 'src/modules/chats/entities/chats_seen.entity';
 import { Column, Entity, Index, ManyToOne, OneToMany } from 'typeorm';
 import { Role } from './role.entity';
+import { UserId } from 'src/common/types/brands.type';
 
 @Entity('users')
 export class User extends BaseEntity {
+    declare id: UserId;
+
     @Column({ nullable: true, default: 'بدون نام' })
     name: string;
 

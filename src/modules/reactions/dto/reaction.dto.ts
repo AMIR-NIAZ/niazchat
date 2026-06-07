@@ -1,12 +1,13 @@
 import { IsNumber } from 'class-validator';
+import { ChatId, MessageId, ReactId } from 'src/common/types/brands.type';
 
 export class ReactionDto {
     @IsNumber()
-    messageId: number;
+    messageId: MessageId;
 
     @IsNumber()
-    reactId: number;
+    reactId: ReactId;
 
     @IsNumber()
-    chatId: number;
+    chatId: ChatId;
 }

@@ -4,9 +4,12 @@ import { Message } from 'src/modules/messages/entities/message.entity';
 import { Column, Entity, OneToMany, OneToOne } from 'typeorm';
 import { ChatSeen } from './chats_seen.entity';
 import { ChatMember } from './chat_members.entity';
+import { ChatId } from 'src/common/types/brands.type';
 
 @Entity('chats')
 export class Chat extends BaseEntity {
+    declare id: ChatId;
+
     @Column({ nullable: true })
     title?: string;
 

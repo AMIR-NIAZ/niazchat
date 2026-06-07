@@ -11,6 +11,7 @@ import { Permission } from '../entities/permission.entity';
 import { UserPermission } from '../entities/user_permissions.entity';
 import { PermissionsDto } from '../dtos/permission.dto';
 import { RoleEnum } from 'src/common/enums/role.enum';
+import { UserId } from 'src/common/types/brands.type';
 
 @Injectable()
 export class PermissionService {
@@ -26,7 +27,7 @@ export class PermissionService {
         private readonly userPermissionRepository: Repository<UserPermission>,
     ) {}
 
-    async addAdmin(id: number, permissionsDto: PermissionsDto) {
+    async addAdmin(id: UserId, permissionsDto: PermissionsDto) {
         const ownerRole = await this.roleRepository.findOneOrFail({
             where: { name: RoleEnum.OWNER },
         });
@@ -99,7 +100,7 @@ export class PermissionService {
         }
     }
 
-    async deleteAdmin(id: number) {
+    async deleteAdmin(id: UserId) {
         const adminRole = await this.roleRepository.findOneOrFail({
             where: { name: RoleEnum.ADMIN },
         });
@@ -152,13 +153,13 @@ export class PermissionService {
         return { data: admins };
     }
 
-    async updateAdminPermissions(adminId: number, permission: PermissionsDto) {
+    async updateAdminPermissions(userId: UserId, permission: PermissionsDto) {
         const adminRole = await this.roleRepository.findOneOrFail({
             where: { name: RoleEnum.ADMIN },
         });
         const admin = await this.userRepository.findOne({
             where: {
-                id: adminId,
+                id: userId,
                 role: { id: adminRole.id },
             },
         });
@@ -196,7 +197,7 @@ export class PermissionService {
         return { message: 'Permissions updated successfully' };
     }
 
-    async getAdminPermissions(id: number) {
+    async getAdminPermissions(id: UserId) {
         const permissionsUser = await this.userPermissionRepository.find({
             where: {
                 user: { id },

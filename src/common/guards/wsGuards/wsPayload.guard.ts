@@ -18,7 +18,7 @@ export class wsPayload implements CanActivate {
                 await this.jwtService.verifyAccessToken(token);
             client.data.user = payload;
         } catch (error) {
-            throw new WsException('token in valid');
+            throw new WsException(`token in valid, ${error}`);
         }
 
         return true;

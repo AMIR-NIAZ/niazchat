@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from '../entities/user.entity';
-import { DataSource, Not, Repository } from 'typeorm';
+import { Not, Repository } from 'typeorm';
 import { JwtPayload } from 'src/common/types/jwt-payload.type';
 import { JwtAppService } from './jwt.service';
 import { PhoneDto } from '../dtos/phone.dto';
@@ -21,11 +21,11 @@ import { RoleEnum } from 'src/common/enums/role.enum';
 import { UserService } from './user.service';
 import { UserPermission } from '../entities/user_permissions.entity';
 import { Permission } from '../entities/permission.entity';
+import { UserId } from 'src/common/types/brands.type';
 
 @Injectable()
 export class AuthService {
     constructor(
-        private readonly dataSource: DataSource,
         @InjectRepository(User)
         private readonly userRepository: Repository<User>,
         @InjectRepository(Role)
@@ -125,7 +125,7 @@ export class AuthService {
         return user;
     }
 
-    async banUser(id: number) {
+    async banUser(id: UserId) {
         const role = await this.roleRepository.findOne({
             where: {
                 name: RoleEnum.OWNER,

@@ -8,6 +8,7 @@ import {
 import { Server } from 'socket.io';
 import { UserService } from '../services/user.service';
 import { SocketAuth } from 'src/common/types/SocketAuth.type';
+import { ChatId, UserId } from 'src/common/types/brands.type';
 
 @WebSocketGateway()
 export class UserGateway {
@@ -29,9 +30,9 @@ export class UserGateway {
     @SubscribeMessage('userTyping')
     typingStart(
         @ConnectedSocket() client: SocketAuth,
-        @MessageBody() chatId: number,
+        @MessageBody() chatId: ChatId,
     ) {
-        const userId: number = client.data.user.sub;
+        const userId: UserId = client.data.user.sub;
 
         client.to(`chat:${chatId}`).emit('typing:start', {
             chatId,
@@ -42,9 +43,9 @@ export class UserGateway {
     @SubscribeMessage('userEndTyping')
     typingStop(
         @ConnectedSocket() client: SocketAuth,
-        @MessageBody() chatId: number,
+        @MessageBody() chatId: ChatId,
     ) {
-        const userId: number = client.data.user.sub;
+        const userId: UserId = client.data.user.sub;
 
         client.to(`chat:${chatId}`).emit('typing:stop', {
             chatId,

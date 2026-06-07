@@ -9,6 +9,7 @@ import { Repository } from 'typeorm';
 import { JwtPayload } from 'src/common/types/jwt-payload.type';
 import { UpdateUserDto } from '../dtos/updateUser.dto';
 import * as fs from 'fs';
+import { UserId } from 'src/common/types/brands.type';
 
 @Injectable()
 export class UserService {
@@ -71,8 +72,8 @@ export class UserService {
         return { message: 'avatar updated successfully' };
     }
 
-    async deleteAllAvatar(id: number): Promise<void> {
-        const userData = await this.userRepository.findOneBy({ id });
+    async deleteAllAvatar(userId: UserId): Promise<void> {
+        const userData = await this.userRepository.findOneBy({ id: userId });
         if (!userData) throw new NotFoundException('User not found');
 
         try {

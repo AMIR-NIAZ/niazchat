@@ -12,6 +12,7 @@ import { ChatService } from '../services/chat.service';
 import { createChatDto } from '../dtos/createChat.dto';
 import { RequestAuth } from 'src/common/types/RequestAuth.type';
 import { InviteLinkService } from '../services/inviteLink.service';
+import { ChatId } from 'src/common/types/brands.type';
 
 @Controller('chats')
 export class ChatsController {
@@ -28,7 +29,7 @@ export class ChatsController {
 
     @Post('/:chatId/ban')
     @Role([RoleEnum.ADMIN])
-    async ban(@Param('chatId', ParseIntPipe) chatId: number) {
+    async ban(@Param('chatId', ParseIntPipe) chatId: ChatId) {
         return await this.chatService.banChat(chatId);
     }
 

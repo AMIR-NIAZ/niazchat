@@ -12,6 +12,7 @@ import { Repository } from 'typeorm';
 import { RequestAuth } from '../../types/RequestAuth.type';
 import { RoleChatEnum } from '../../enums/roleChat.enum';
 import { RoleChat } from 'src/modules/chats/entities/role_chat.entity';
+import { ChatId } from 'src/common/types/brands.type';
 
 @Injectable()
 export class IsBanMember implements CanActivate {
@@ -27,7 +28,7 @@ export class IsBanMember implements CanActivate {
         const request = Http.getRequest<RequestAuth>();
         const userPayload = request.user;
 
-        const chatId: number = +request.params.chatId;
+        const chatId: ChatId = +request.params.chatId as ChatId;
         if (!chatId) throw new BadRequestException('chat id not valid');
 
         const IsBan = await this.memberRepository.findOne({
