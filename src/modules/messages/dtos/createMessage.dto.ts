@@ -15,7 +15,7 @@ export class CreateMessageDto {
 
     @IsOptional()
     @IsNumber()
-    chatId?: ChatId;
+    chatId: ChatId;
 
     @IsOptional()
     @IsNumber()

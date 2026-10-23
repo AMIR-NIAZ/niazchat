@@ -19,6 +19,7 @@ import { TypeMessageEnum } from 'src/common/enums/typeMessage.enum';
 import { TypeMessage } from '../entities/typeMessage.entity';
 import fs from 'fs';
 import { ChatId, MessageId, UserId } from 'src/common/types/brands.type';
+import { ContentResolverService } from './content-resolver.service';
 
 @Injectable()
 export class MessageService {
@@ -33,41 +34,43 @@ export class MessageService {
         private readonly userRepository: Repository<User>,
         @InjectRepository(TypeMessage)
         private readonly typeMessageRepository: Repository<TypeMessage>,
-    ) {}
+        private readonly contentResolver: ContentResolverService,
 
-    async create(user: JwtPayload, dto: CreateMessageDto) {
+    ) { }
+
+
+    async create(
+        user: JwtPayload,
+        dto: CreateMessageDto,
+    ): Promise<Message> {
         const { chatId, reply, userId, type } = dto;
 
-        let content = dto.content;
-        if (
-            type === TypeMessageEnum.IMAGE ||
-            type === TypeMessageEnum.FILE ||
-            type === TypeMessageEnum.VIDEO
-        ) {
-            const imageBuffer = Buffer.from(content, 'base64');
-            content = this.saveFile(imageBuffer, type);
-        }
+        const content = await this.contentResolver.resolve(
+            dto.content,
+            type,
+        );
 
         if (chatId) {
-            return this.sendChat(chatId, user, reply, content, type);
-        } else if (userId) {
-            return this.sendPv(userId, user, reply, content, type);
+            return this.sendChat(
+                chatId,
+                user,
+                reply,
+                content,
+                type,
+            );
+        }
+
+        if (userId) {
+            return this.sendPv(
+                userId,
+                user,
+                reply,
+                content,
+                type,
+            );
         }
 
         throw new BadRequestException();
-    }
-
-    private saveFile(buffer: Buffer, type: TypeMessageEnum): string {
-        const uploadPath = `./uploads/messages/${type}s`;
-        const uniqueName = `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
-        const fullPath = `${uploadPath}/${uniqueName}`;
-
-        if (!fs.existsSync(uploadPath)) {
-            fs.mkdirSync(uploadPath, { recursive: true });
-        }
-
-        fs.writeFileSync(fullPath, buffer);
-        return `/uploads/images/${uniqueName}`;
     }
 
     private async sendChat(
@@ -177,19 +180,20 @@ export class MessageService {
                 id: messageId,
                 chat: { id: chatId },
                 sender: { id: user.sub },
+                isDeleted: false,
             },
+            relations: { type: true },
         });
         if (!message) throw new WsException('message not found');
 
-        await this.messageRepository.update(messageId, {
-            content: newContent,
-            isEdited: true,
-        });
+        if (message.type.name !== TypeMessageEnum.TEXT) {
+            throw new WsException('only text messages can be edited');
+        }
 
-        const newMessage = await this.messageRepository.findOne({
-            where: { id: messageId },
-        });
-        return newMessage;
+        message.content = newContent;
+        message.isEdited = true;
+
+        return this.messageRepository.save(message);
     }
 
     async delete(dto: deleteMessageDto, user: JwtPayload) {

@@ -19,7 +19,7 @@ import * as fs from 'fs';
 import { RoleChat } from '../entities/role_chat.entity';
 import { PermissionChat } from '../entities/permission_chat.entity';
 import { PermissionAdmin } from '../entities/permission_admin.entity';
-import { ChatId } from 'src/common/types/brands.type';
+import { ChatId, UserId } from 'src/common/types/brands.type';
 
 @Injectable()
 export class ChatService {
@@ -38,7 +38,7 @@ export class ChatService {
         private readonly permissionChatRepository: Repository<PermissionChat>,
         @InjectRepository(PermissionAdmin)
         private readonly permissionAdminRepository: Repository<PermissionAdmin>,
-    ) {}
+    ) { }
 
     async createGroup(dto: createChatDto, user: JwtPayload) {
         const { title, members } = dto;
@@ -299,7 +299,17 @@ export class ChatService {
         return { message: 'chat is ban successfully' };
     }
 
-    private async deleteAllAvatar(avatars: string[]): Promise<void> {
+    async getMemberIds(chatId: ChatId) {
+        const members = await this.memberRepository.find({
+            where: { chat: { id: chatId } },
+            relations: { user: true },
+            select: { id: true, user: { id: true } },
+        });
+
+        return members.map((m) => m.user.id);
+    }
+
+    private async deleteAllAvatar(avatars: string[]) {
         try {
             for (const img of avatars) {
                 const fileExists = await fs.promises

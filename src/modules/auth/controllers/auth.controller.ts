@@ -6,6 +6,7 @@ import {
     Headers,
     Param,
     ParseIntPipe,
+    Patch,
     Post,
     Put,
     Req,
@@ -82,7 +83,7 @@ export class AuthController {
         return await this.permissionService.getAllAdmins();
     }
 
-    @Put('admins/:adminId/permissions')
+    @Patch('admins/:adminId/permissions')
     @Role([RoleEnum.OWNER])
     async updateAdminPermissions(
         @Param('adminId', ParseIntPipe) adminId: UserId,

@@ -1,55 +1,36 @@
 import {
-    ConnectedSocket,
-    MessageBody,
-    SubscribeMessage,
+    OnGatewayConnection,
+    OnGatewayDisconnect,
     WebSocketGateway,
     WebSocketServer,
 } from '@nestjs/websockets';
 import { Server } from 'socket.io';
 import { UserService } from '../services/user.service';
 import { SocketAuth } from 'src/common/types/SocketAuth.type';
-import { ChatId, UserId } from 'src/common/types/brands.type';
+import { userRoom } from 'src/common/utils/roomCreator.utils';
 
 @WebSocketGateway()
-export class UserGateway {
+export class UserGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @WebSocketServer()
-    server: Server;
+    private server: Server;
 
-    constructor(private readonly userService: UserService) {}
+    constructor(private readonly userService: UserService) { }
 
-    @SubscribeMessage('onlineUser')
-    async onlineUser(@ConnectedSocket() client: SocketAuth) {
-        await this.userService.onlineUser(client.data.user);
+    async handleConnection(client: SocketAuth) {
+        const user = client.data.user;
+        if (!user) return;
+
+        await client.join(userRoom(user.sub));
+
+        const sockets = await this.server.in(userRoom(user.sub)).fetchSockets();
+        if (sockets.length === 1) await this.userService.onlineUser(user);
     }
 
-    @SubscribeMessage('offlineUser')
-    async offlineUser(@ConnectedSocket() client: SocketAuth) {
-        await this.userService.offlineUser(client.data.user);
-    }
+    async handleDisconnect(client: SocketAuth) {
+        const user = client.data.user;
+        if (!user) return;
 
-    @SubscribeMessage('userTyping')
-    typingStart(
-        @ConnectedSocket() client: SocketAuth,
-        @MessageBody() chatId: ChatId,
-    ) {
-        const userId: UserId = client.data.user.sub;
-
-        client.to(`chat:${chatId}`).emit('typing:start', {
-            chatId,
-            userId,
-        });
-    }
-
-    @SubscribeMessage('userEndTyping')
-    typingStop(
-        @ConnectedSocket() client: SocketAuth,
-        @MessageBody() chatId: ChatId,
-    ) {
-        const userId: UserId = client.data.user.sub;
-
-        client.to(`chat:${chatId}`).emit('typing:stop', {
-            chatId,
-            userId,
-        });
+        const remaining = await this.server.in(userRoom(user.sub)).fetchSockets();
+        if (remaining.length === 0) await this.userService.offlineUser(user);
     }
 }

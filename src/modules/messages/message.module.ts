@@ -10,6 +10,9 @@ import { JwtAppService } from '../auth/services/jwt.service';
 import { JwtService } from '@nestjs/jwt';
 import { RoleChat } from '../chats/entities/role_chat.entity';
 import { TypeMessage } from './entities/typeMessage.entity';
+import { TextContentHandler } from './strategis/TextContentHandler.strategy';
+import { FileContentHandler } from './strategis/FileContentHandler.strategy';
+import { CONTENT_HANDLERS, ContentResolverService } from './services/content-resolver.service';
 
 @Module({
     imports: [
@@ -22,6 +25,22 @@ import { TypeMessage } from './entities/typeMessage.entity';
             TypeMessage,
         ]),
     ],
-    providers: [MessageGateway, MessageService, JwtAppService, JwtService],
+    providers: [
+        MessageGateway,
+        MessageService,
+        JwtAppService,
+        JwtService,
+        TextContentHandler,
+        FileContentHandler,
+        {
+            provide: CONTENT_HANDLERS,
+            useFactory: (
+                textHandler: TextContentHandler,
+                fileHandler: FileContentHandler,
+            ) => [textHandler, fileHandler],
+            inject: [TextContentHandler, FileContentHandler],
+        },
+        ContentResolverService,
+    ],
 })
-export class MessageModule {}
+export class MessageModule { }

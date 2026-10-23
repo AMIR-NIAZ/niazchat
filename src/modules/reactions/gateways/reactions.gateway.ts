@@ -13,39 +13,33 @@ import { SocketAuth } from 'src/common/types/SocketAuth.type';
 import { wsPayload } from 'src/common/guards/wsGuards/wsPayload.guard';
 import { wsIsMemberChat } from 'src/common/guards/wsGuards/wsIsmemberChat.guard';
 import { wsIsBanMember } from 'src/common/guards/wsGuards/wsIsBanMember.guard';
+import { chatRoom } from 'src/common/utils/roomCreator.utils';
 
 @WebSocketGateway()
-@UseGuards(wsPayload, wsIsMemberChat, wsIsBanMember)
+@UseGuards(wsPayload, wsIsBanMember, wsIsMemberChat)
 export class ReactionsGateway {
     @WebSocketServer()
-    server: Server;
+    private server: Server;
+
     constructor(private readonly reactionsService: ReactionsService) {}
 
-    @SubscribeMessage('Reaction')
-    async create(
+    @SubscribeMessage('addReaction')
+    async addReaction(
         @ConnectedSocket() client: SocketAuth,
         @MessageBody() dto: ReactionDto,
     ) {
-        const userAction = await this.reactionsService.reaction(
-            dto,
-            client.data.user,
-        );
+        const reaction = await this.reactionsService.reaction(dto, client.data.user);
 
-        this.server
-            .to(`chat:${dto.chatId}`)
-            .emit('reaction', { react: userAction });
+        this.server.to(chatRoom(dto.chatId)).emit('reaction:added', reaction);
     }
 
-    @SubscribeMessage('noReaction')
-    async remove(
+    @SubscribeMessage('removeReaction')
+    async removeReaction(
         @ConnectedSocket() client: SocketAuth,
         @MessageBody() dto: ReactionDto,
     ) {
-        const reactDeleted = await this.reactionsService.unReaction(
-            dto,
-            client.data.user,
-        );
+        const removed = await this.reactionsService.unReaction(dto, client.data.user);
 
-        this.server.to(`chat:${dto.chatId}`).emit('reaction', reactDeleted);
+        this.server.to(chatRoom(dto.chatId)).emit('reaction:removed', removed);
     }
 }

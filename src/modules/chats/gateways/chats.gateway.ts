@@ -6,30 +6,36 @@ import {
     WebSocketGateway,
     WebSocketServer,
 } from '@nestjs/websockets';
-import { ChatService } from '../services/chat.service';
-import { Server } from 'socket.io';
-import { JwtPayload } from 'src/common/types/jwt-payload.type';
 import { UseGuards } from '@nestjs/common';
-import { Chat } from '../entities/chat.entity';
-import { SocketAuth } from 'src/common/types/SocketAuth.type';
+import { Server } from 'socket.io';
+import { ChatService } from '../services/chat.service';
 import { wsPayload } from 'src/common/guards/wsGuards/wsPayload.guard';
 import { wsIsMemberChat } from 'src/common/guards/wsGuards/wsIsmemberChat.guard';
+import { SocketAuth } from 'src/common/types/SocketAuth.type';
+import { JwtPayload } from 'src/common/types/jwt-payload.type';
+import { chatRoom } from 'src/common/utils/roomCreator.utils';
 import { ChatId } from 'src/common/types/brands.type';
 
 @WebSocketGateway()
 @UseGuards(wsPayload)
 export class ChatGateway implements OnGatewayDisconnect {
+    constructor(private readonly chatService: ChatService) { }
+
     @WebSocketServer()
     private server: Server;
-    constructor(private readonly chatsService: ChatService) {}
+
+    async handleDisconnect(client: SocketAuth) {
+        const user = client.data.user;
+        if (!user) return;
+
+        const chatId = client.data.chatId;
+        if (chatId) await this.onChatLeft(chatId, user);
+    }
 
     @SubscribeMessage('getAllChats')
-    async handleMessage(@ConnectedSocket() client: SocketAuth) {
-        const chats: Chat[] = await this.chatsService.getUserChats(
-            client.data.user,
-        );
-
-        this.server.to(client.id).emit('getAllChats', chats);
+    async getAllChats(@ConnectedSocket() client: SocketAuth) {
+        const chats = await this.chatService.getUserChats(client.data.user);
+        client.emit('getAllChats', chats);
     }
 
     @SubscribeMessage('joinChat')
@@ -38,42 +44,88 @@ export class ChatGateway implements OnGatewayDisconnect {
         @ConnectedSocket() client: SocketAuth,
         @MessageBody() chatId: ChatId,
     ) {
-        const lastChat: string = Array.from(client.rooms)[1];
-        if (lastChat) {
-            client.leave(lastChat);
-            await this.seenChat(chatId, client.data.user);
-            await this.getMemberChat(lastChat);
-        }
+        const user = client.data.user;
+        const prev = client.data.chatId;
 
-        client.join(`chat:${chatId}`);
-        await this.seenChat(chatId, client.data.user);
-        await this.getMemberChat(`chat:${chatId}`);
+        if (prev === chatId) return;
+        if (prev) await this.leaveCurrentChat(client);
 
-        const chatInfo = await this.chatsService.getInfoChat(chatId);
-        client.emit('chatInfo', chatInfo);
+        await client.join(chatRoom(chatId));
+        client.data.chatId = chatId;
+
+        await this.emitSeen(chatId, user);
+        await this.emitOnlineCount(chatId);
+
+        client.emit('chatInfo', await this.chatService.getInfoChat(chatId));
     }
 
-    private async getMemberChat(chatName: string) {
-        const countUser = (await this.server.to(chatName).fetchSockets())
-            .length;
-        this.server.to(chatName).emit('countUsersOnline', countUser);
+    @SubscribeMessage('leaveChat')
+    async leaveChat(@ConnectedSocket() client: SocketAuth) {
+        await this.leaveCurrentChat(client);
     }
 
-    private async seenChat(chatId: ChatId, user: JwtPayload) {
-        const lastSeenId = await this.chatsService.seening(chatId, user);
+    @SubscribeMessage('userTyping')
+    typingStart(
+        @ConnectedSocket() client: SocketAuth,
+        @MessageBody() chatId: ChatId,
+    ) {
+        this.broadcastTyping(client, chatId, 'typing:start');
+    }
 
-        this.server.to(`chat:${chatId}`).emit('seen', {
+    @SubscribeMessage('userEndTyping')
+    typingStop(
+        @ConnectedSocket() client: SocketAuth,
+        @MessageBody() chatId: ChatId,
+    ) {
+        this.broadcastTyping(client, chatId, 'typing:stop');
+    }
+
+    private broadcastTyping(
+        client: SocketAuth,
+        chatId: ChatId,
+        event: 'typing:start' | 'typing:stop',
+    ) {
+        if (client.data.chatId !== chatId) return;
+
+        client.to(chatRoom(chatId)).emit(event, {
+            chatId,
+            userId: client.data.user.sub,
+        });
+    }
+
+    private async leaveCurrentChat(client: SocketAuth) {
+        const chatId = client.data.chatId;
+        if (!chatId) return;
+
+        await client.leave(chatRoom(chatId));
+        client.data.chatId = undefined;
+
+        this.server.to(chatRoom(chatId)).emit('typing:stop', {
+            chatId,
+            userId: client.data.user.sub,
+        });
+        await this.onChatLeft(chatId, client.data.user);
+    }
+
+    private async onChatLeft(chatId: ChatId, user: JwtPayload) {
+        await this.emitSeen(chatId, user);
+        await this.emitOnlineCount(chatId);
+    }
+
+    private async emitSeen(chatId: ChatId, user: JwtPayload) {
+        const lastSeenId = await this.chatService.seening(chatId, user);
+        this.server.to(chatRoom(chatId)).emit('seen', {
             chatId,
             userId: user.sub,
             lastSeenId,
         });
     }
 
-    async handleDisconnect(client: SocketAuth) {
-        const room = client.rooms[1];
-        if (room) {
-            this.getMemberChat(room);
-            await this.seenChat(room, client.data.user);
-        }
+    private async emitOnlineCount(chatId: ChatId) {
+        const sockets = await this.server.in(chatRoom(chatId)).fetchSockets();
+        const count = new Set(
+            sockets.map((s) => (s.data as SocketAuth['data']).user.sub),
+        ).size;
+        this.server.to(chatRoom(chatId)).emit('countUsersOnline', count);
     }
 }
