@@ -18,6 +18,7 @@ import { ReactionsModule } from '../reactions/reaction.module';
 import { PayloadGuard } from 'src/common/guards/restGuards/payload.guard';
 import { RoleGurd } from 'src/common/guards/restGuards/role.guard';
 import { SeedersModule } from 'src/modules/seeders/seeders.module';
+import { HealthModule } from '../health/health.module';
 
 @Module({
     imports: [
@@ -36,6 +37,7 @@ import { SeedersModule } from 'src/modules/seeders/seeders.module';
         }),
         JwtModule.register({}),
         SeedersModule,
+        HealthModule,
         AuthModule,
         ChatsModule,
         MessageModule,

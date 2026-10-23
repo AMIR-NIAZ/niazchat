@@ -43,5 +43,6 @@ import { Link } from './entities/link.entity';
         JwtService,
     ],
     controllers: [ChatsController, ManageChatsController],
+    exports: [ChatService],
 })
 export class ChatsModule {}
