@@ -20,6 +20,7 @@ import { TypeMessage } from '../entities/typeMessage.entity';
 import fs from 'fs';
 import { ChatId, MessageId, UserId } from 'src/common/types/brands.type';
 import { ContentResolverService } from './content-resolver.service';
+import { toUserResponse } from 'src/modules/auth/utils/user-response.util';
 
 @Injectable()
 export class MessageService {
@@ -35,39 +36,19 @@ export class MessageService {
         @InjectRepository(TypeMessage)
         private readonly typeMessageRepository: Repository<TypeMessage>,
         private readonly contentResolver: ContentResolverService,
+    ) {}
 
-    ) { }
-
-
-    async create(
-        user: JwtPayload,
-        dto: CreateMessageDto,
-    ): Promise<Message> {
+    async create(user: JwtPayload, dto: CreateMessageDto): Promise<Message> {
         const { chatId, reply, userId, type } = dto;
 
-        const content = await this.contentResolver.resolve(
-            dto.content,
-            type,
-        );
+        const content = await this.contentResolver.resolve(dto.content, type);
 
         if (chatId) {
-            return this.sendChat(
-                chatId,
-                user,
-                reply,
-                content,
-                type,
-            );
+            return this.sendChat(chatId, user, reply, content, type);
         }
 
         if (userId) {
-            return this.sendPv(
-                userId,
-                user,
-                reply,
-                content,
-                type,
-            );
+            return this.sendPv(userId, user, reply, content, type);
         }
 
         throw new BadRequestException();
@@ -107,6 +88,7 @@ export class MessageService {
             type: { id: typeData.id },
         });
 
+        newMessage.sender = await this.loadSender(user.sub);
         return newMessage;
     }
 
@@ -169,6 +151,7 @@ export class MessageService {
             type: { id: typeData.id },
         });
 
+        newMessage.sender = await this.loadSender(user.sub);
         return newMessage;
     }
 
@@ -182,7 +165,7 @@ export class MessageService {
                 sender: { id: user.sub },
                 isDeleted: false,
             },
-            relations: { type: true },
+            relations: { type: true, sender: { profile: true } },
         });
         if (!message) throw new WsException('message not found');
 
@@ -193,7 +176,7 @@ export class MessageService {
         message.content = newContent;
         message.isEdited = true;
 
-        return this.messageRepository.save(message);
+        return this.serializeSender(await this.messageRepository.save(message));
     }
 
     async delete(dto: deleteMessageDto, user: JwtPayload) {
@@ -213,13 +196,74 @@ export class MessageService {
     }
 
     async getAllByChats(chatId: ChatId) {
-        return await this.messageRepository.find({
+        const messages = await this.messageRepository.find({
             where: {
                 chat: { id: chatId },
                 isDeleted: false,
             },
+            relations: { sender: { profile: true } },
+            select: {
+                id: true,
+                createdAt: true,
+                updatedAt: true,
+                content: true,
+                isEdited: true,
+                isDeleted: true,
+                sender: {
+                    id: true,
+                    phone: true,
+                    isOnline: true,
+                    lastSeen: true,
+                    status: true,
+                    createdAt: true,
+                    updatedAt: true,
+                    profile: {
+                        id: true,
+                        name: true,
+                        username: true,
+                        biografy: true,
+                        avatars: true,
+                    },
+                },
+            },
             order: { id: 'DESC' },
             take: 50,
         });
+
+        return messages.map((message) => this.serializeSender(message));
+    }
+
+    private serializeSender(message: Message): Message {
+        if (message.sender) {
+            message.sender = toUserResponse(message.sender) as unknown as User;
+        }
+        return message;
+    }
+
+    private async loadSender(userId: UserId): Promise<User> {
+        const sender = await this.userRepository.findOne({
+            where: { id: userId },
+            relations: { profile: true },
+            select: {
+                id: true,
+                phone: true,
+                isOnline: true,
+                lastSeen: true,
+                status: true,
+                createdAt: true,
+                updatedAt: true,
+                profile: {
+                    id: true,
+                    name: true,
+                    username: true,
+                    biografy: true,
+                    avatars: true,
+                },
+            },
+        });
+
+        if (!sender) throw new NotFoundException('sender not found');
+
+        return toUserResponse(sender) as unknown as User;
     }
 }

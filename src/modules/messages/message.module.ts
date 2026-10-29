@@ -12,10 +12,15 @@ import { RoleChat } from '../chats/entities/role_chat.entity';
 import { TypeMessage } from './entities/typeMessage.entity';
 import { TextContentHandler } from './strategis/TextContentHandler.strategy';
 import { FileContentHandler } from './strategis/FileContentHandler.strategy';
-import { CONTENT_HANDLERS, ContentResolverService } from './services/content-resolver.service';
+import {
+    CONTENT_HANDLERS,
+    ContentResolverService,
+} from './services/content-resolver.service';
+import { ChatsModule } from '../chats/chats.module';
 
 @Module({
     imports: [
+        ChatsModule,
         TypeOrmModule.forFeature([
             Message,
             ChatMember,
@@ -43,4 +48,4 @@ import { CONTENT_HANDLERS, ContentResolverService } from './services/content-res
         ContentResolverService,
     ],
 })
-export class MessageModule { }
+export class MessageModule {}

@@ -1,29 +1,18 @@
 import { BaseEntity } from 'src/common/entities/base.entity';
 import { UserStatusEnum } from 'src/common/enums/UserStatus.enum';
 import { ChatSeen } from 'src/modules/chats/entities/chats_seen.entity';
-import { Column, Entity, Index, ManyToOne, OneToMany } from 'typeorm';
+import { Column, Entity, Index, ManyToOne, OneToMany, OneToOne } from 'typeorm';
 import { Role } from './role.entity';
 import { UserId } from 'src/common/types/brands.type';
+import { UserProfile } from './user_profile.entity';
 
 @Entity('users')
 export class User extends BaseEntity {
     declare id: UserId;
 
-    @Column({ nullable: true, default: 'بدون نام' })
-    name: string;
-
     @Index({ unique: true })
     @Column({ unique: true })
     phone: string;
-
-    @Column({ nullable: true })
-    biografy: string;
-
-    @Column({ length: 30, unique: true, nullable: true })
-    username: string;
-
-    @Column('text', { array: true, default: '{}' })
-    avatars: string[];
 
     @Column({ default: false })
     isOnline: boolean;
@@ -46,4 +35,7 @@ export class User extends BaseEntity {
 
     @ManyToOne(() => Role, (role) => role.id)
     role: Role;
+
+    @OneToOne(() => UserProfile, (profile) => profile.user)
+    profile: UserProfile;
 }

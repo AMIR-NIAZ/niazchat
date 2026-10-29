@@ -1,21 +1,26 @@
 import {
+    ConflictException,
     Injectable,
     InternalServerErrorException,
     NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from '../entities/user.entity';
+import { UserProfile } from '../entities/user_profile.entity';
 import { Repository } from 'typeorm';
 import { JwtPayload } from 'src/common/types/jwt-payload.type';
 import { UpdateUserDto } from '../dtos/updateUser.dto';
 import * as fs from 'fs';
 import { UserId } from 'src/common/types/brands.type';
+import { toUserResponse } from '../utils/user-response.util';
 
 @Injectable()
 export class UserService {
     constructor(
         @InjectRepository(User)
         private readonly userRepository: Repository<User>,
+        @InjectRepository(UserProfile)
+        private readonly profileRepository: Repository<UserProfile>,
     ) {}
 
     async onlineUser(user: JwtPayload) {
@@ -30,40 +35,71 @@ export class UserService {
     }
 
     async getUserByUsername(username: string) {
-        const user = await this.userRepository.findOne({
+        const profile = await this.profileRepository.findOne({
             where: { username },
+            relations: { user: true },
+            select: {
+                id: true,
+                name: true,
+                username: true,
+                biografy: true,
+                avatars: true,
+                createdAt: true,
+                updatedAt: true,
+                user: {
+                    id: true,
+                    phone: true,
+                    isOnline: true,
+                    lastSeen: true,
+                    status: true,
+                    createdAt: true,
+                    updatedAt: true,
+                },
+            },
         });
-        if (!user) throw new NotFoundException('user not found');
+        if (!profile) throw new NotFoundException('user not found');
 
-        return { data: user };
+        return { data: toUserResponse({ ...profile.user, profile }) };
     }
 
     async updateUser(dto: UpdateUserDto, user: JwtPayload) {
-        const statusUpdate = await this.userRepository.update(user.sub, dto);
-        return { message: `user updated is ${statusUpdate.affected}` };
+        const profile = await this.getOrCreateProfile(user.sub);
+
+        if (dto.name !== undefined) profile.name = dto.name;
+        if (dto.username !== undefined) profile.username = dto.username;
+        if (dto.biografy !== undefined) profile.biografy = dto.biografy;
+
+        try {
+            await this.profileRepository.save(profile);
+        } catch (err) {
+            if (this.isUniqueViolation(err)) {
+                throw new ConflictException('username already exists');
+            }
+            throw new InternalServerErrorException((err as Error).message);
+        }
+
+        return { message: 'user updated is 1' };
     }
 
     async uploadAvatar(avatar: string, user: JwtPayload) {
-        const userData = await this.userRepository.findOneBy({ id: user.sub });
-        if (!userData) throw new NotFoundException();
+        const profile = await this.getOrCreateProfile(user.sub);
 
-        userData.avatars = [...userData.avatars, avatar];
-        await this.userRepository.save(userData);
+        profile.avatars = [...(profile.avatars ?? []), avatar];
+        await this.profileRepository.save(profile);
 
         return { message: 'avatar updated successfully' };
     }
 
     async deleteAvatar(avatarPath: string, user: JwtPayload) {
-        const userData = await this.userRepository.findOneBy({ id: user.sub });
-        if (!userData) throw new NotFoundException();
+        const profile = await this.getOrCreateProfile(user.sub);
 
-        if (!userData.avatars.includes(avatarPath))
+        if (!(profile.avatars ?? []).includes(avatarPath))
             throw new NotFoundException();
 
-        userData.avatars = userData.avatars.filter(
+        profile.avatars = profile.avatars.filter(
             (avatar) => avatar !== avatarPath,
         );
-        await this.userRepository.save(userData);
+        await this.profileRepository.save(profile);
 
         if (fs.existsSync(avatarPath)) {
             await fs.promises.unlink(avatarPath);
@@ -73,11 +109,11 @@ export class UserService {
     }
 
     async deleteAllAvatar(userId: UserId): Promise<void> {
-        const userData = await this.userRepository.findOneBy({ id: userId });
-        if (!userData) throw new NotFoundException('User not found');
+        const profile = await this.getOrCreateProfile(userId);
+        const avatars = profile.avatars ?? [];
 
         try {
-            for (const img of userData.avatars) {
+            for (const img of avatars) {
                 const fileExists = await fs.promises
                     .stat(img)
                     .then(() => true)
@@ -90,7 +126,34 @@ export class UserService {
             throw new InternalServerErrorException((err as Error).message);
         }
 
-        userData.avatars = [];
-        await this.userRepository.save(userData);
+        profile.avatars = [];
+        await this.profileRepository.save(profile);
+    }
+
+    private async getOrCreateProfile(userId: UserId): Promise<UserProfile> {
+        const existing = await this.profileRepository.findOne({
+            where: { user: { id: userId } },
+        });
+        if (existing) return existing;
+
+        try {
+            return await this.profileRepository.save(
+                this.profileRepository.create({ user: { id: userId } }),
+            );
+        } catch (err) {
+            if (this.isUniqueViolation(err)) {
+                const profile = await this.profileRepository.findOne({
+                    where: { user: { id: userId } },
+                });
+                if (profile) return profile;
+            }
+            throw new InternalServerErrorException((err as Error).message);
+        }
+    }
+
+    private isUniqueViolation(err: unknown): boolean {
+        const code = (err as { driverError?: { code?: string } }).driverError
+            ?.code;
+        return code === '23505';
     }
 }

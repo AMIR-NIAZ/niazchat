@@ -19,7 +19,8 @@ import * as fs from 'fs';
 import { RoleChat } from '../entities/role_chat.entity';
 import { PermissionChat } from '../entities/permission_chat.entity';
 import { PermissionAdmin } from '../entities/permission_admin.entity';
-import { ChatId, UserId } from 'src/common/types/brands.type';
+import { ChatId } from 'src/common/types/brands.type';
+import { toUserResponse } from 'src/modules/auth/utils/user-response.util';
 
 @Injectable()
 export class ChatService {
@@ -38,7 +39,7 @@ export class ChatService {
         private readonly permissionChatRepository: Repository<PermissionChat>,
         @InjectRepository(PermissionAdmin)
         private readonly permissionAdminRepository: Repository<PermissionAdmin>,
-    ) { }
+    ) {}
 
     async createGroup(dto: createChatDto, user: JwtPayload) {
         const { title, members } = dto;
@@ -244,11 +245,37 @@ export class ChatService {
                 chat: { id: chatId },
                 role: { id: roleBanChat.id },
             },
-            relations: ['user'],
+            relations: { user: { profile: true } },
+            select: {
+                id: true,
+                createdAt: true,
+                updatedAt: true,
+                user: {
+                    id: true,
+                    phone: true,
+                    isOnline: true,
+                    lastSeen: true,
+                    status: true,
+                    createdAt: true,
+                    updatedAt: true,
+                    profile: {
+                        id: true,
+                        name: true,
+                        username: true,
+                        biografy: true,
+                        avatars: true,
+                    },
+                },
+            },
             order: { updatedAt: 'DESC' },
         });
 
-        return { data: banUsers };
+        return {
+            data: banUsers.map((member) => ({
+                ...member,
+                user: toUserResponse(member.user),
+            })),
+        };
     }
 
     async getAllUser(chatId: ChatId) {
@@ -272,11 +299,37 @@ export class ChatService {
                 chat: { id: chatId },
                 role: Not({ id: roleBanChat?.id }),
             },
-            relations: ['user'],
+            relations: { user: { profile: true } },
+            select: {
+                id: true,
+                createdAt: true,
+                updatedAt: true,
+                user: {
+                    id: true,
+                    phone: true,
+                    isOnline: true,
+                    lastSeen: true,
+                    status: true,
+                    createdAt: true,
+                    updatedAt: true,
+                    profile: {
+                        id: true,
+                        name: true,
+                        username: true,
+                        biografy: true,
+                        avatars: true,
+                    },
+                },
+            },
             order: { updatedAt: 'DESC' },
         });
 
-        return { data: Users };
+        return {
+            data: Users.map((member) => ({
+                ...member,
+                user: toUserResponse(member.user),
+            })),
+        };
     }
 
     async banChat(id: ChatId) {

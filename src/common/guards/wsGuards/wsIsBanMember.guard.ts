@@ -32,6 +32,7 @@ export class wsIsBanMember implements CanActivate {
                 chat: { id: chatId },
                 user: { id: userPayload.sub },
             },
+            relations: { role: true },
         });
         if (!IsBan) throw new WsException('member not found');
 

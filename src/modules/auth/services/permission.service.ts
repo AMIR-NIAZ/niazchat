@@ -12,6 +12,7 @@ import { UserPermission } from '../entities/user_permissions.entity';
 import { PermissionsDto } from '../dtos/permission.dto';
 import { RoleEnum } from 'src/common/enums/role.enum';
 import { UserId } from 'src/common/types/brands.type';
+import { toUserResponse } from '../utils/user-response.util';
 
 @Injectable()
 export class PermissionService {
@@ -148,9 +149,26 @@ export class PermissionService {
             where: {
                 role: In([adminRole.id, ownerRole.id]),
             },
+            relations: { profile: true },
+            select: {
+                id: true,
+                phone: true,
+                isOnline: true,
+                lastSeen: true,
+                status: true,
+                createdAt: true,
+                updatedAt: true,
+                profile: {
+                    id: true,
+                    name: true,
+                    username: true,
+                    biografy: true,
+                    avatars: true,
+                },
+            },
         });
 
-        return { data: admins };
+        return { data: admins.map((admin) => toUserResponse(admin)) };
     }
 
     async updateAdminPermissions(userId: UserId, permission: PermissionsDto) {

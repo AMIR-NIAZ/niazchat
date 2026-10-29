@@ -7,6 +7,7 @@ import { ChatMember } from './entities/chat_members.entity';
 import { ChatGateway } from './gateways/chats.gateway';
 import { UserService } from '../auth/services/user.service';
 import { User } from '../auth/entities/user.entity';
+import { UserProfile } from '../auth/entities/user_profile.entity';
 import { JwtAppService } from '../auth/services/jwt.service';
 import { JwtService } from '@nestjs/jwt';
 import { ChatSeen } from './entities/chats_seen.entity';
@@ -25,6 +26,7 @@ import { Link } from './entities/link.entity';
             Chat,
             ChatMember,
             User,
+            UserProfile,
             ChatSeen,
             Message,
             RoleChat,

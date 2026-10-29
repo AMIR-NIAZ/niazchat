@@ -9,6 +9,7 @@ import { CacheModule } from '@nestjs/cache-manager';
 import { OtpService } from './services/otp.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from './entities/user.entity';
+import { UserProfile } from './entities/user_profile.entity';
 import { JwtAppService } from './services/jwt.service';
 import { JwtService } from '@nestjs/jwt';
 import { UserService } from './services/user.service';
@@ -25,7 +26,13 @@ import { PermissionService } from './services/permission.service';
             name: 'otp',
         }),
         CacheModule.register(),
-        TypeOrmModule.forFeature([User, Role, UserPermission, Permission]),
+        TypeOrmModule.forFeature([
+            User,
+            UserProfile,
+            Role,
+            UserPermission,
+            Permission,
+        ]),
     ],
     controllers: [AuthController, UserController],
     providers: [

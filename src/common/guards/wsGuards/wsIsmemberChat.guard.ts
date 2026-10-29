@@ -20,7 +20,9 @@ export class wsIsMemberChat implements CanActivate {
         const data: WebSocketData = Ws.getData();
         const user = client.data.user;
 
-        const chatId = (data.chatId ? data.chatId : data.dto.chatId) as ChatId;
+        const chatId = (
+            typeof data === 'number' ? data : (data.chatId ?? data.dto?.chatId)
+        ) as ChatId;
 
         if (!chatId || isNaN(chatId)) throw new WsException('Invalid chat ID');
 
