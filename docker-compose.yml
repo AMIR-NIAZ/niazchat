@@ -26,11 +26,17 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      # Attachment upload limits (bytes) and allowed file extensions (comma-separated).
+      UPLOAD_MAX_FILE_SIZE: ${UPLOAD_MAX_FILE_SIZE:-10485760}
+      UPLOAD_ALLOWED_EXTENSIONS: ${UPLOAD_ALLOWED_EXTENSIONS:-jpg,jpeg,png,gif,webp,pdf,mp4,mp3,txt}
+      STORAGE_DIR: ${STORAGE_DIR:-./storage}
     ports:
       - "${APP_PORT:-3000}:3000"
     volumes:
       # Persist user uploads (avatars, message files) across recreations.
       - uploads_data:/app/uploads
+      # Persist chat attachment files (served only through authorized endpoints).
+      - storage_data:/app/storage
     depends_on:
       postgres:
         condition: service_healthy
@@ -98,3 +104,4 @@ volumes:
   postgres_data:
   redis_data:
   uploads_data:
+  storage_data:
