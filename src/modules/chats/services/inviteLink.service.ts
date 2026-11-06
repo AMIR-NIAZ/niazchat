@@ -1,21 +1,28 @@
-// invite-link.service.ts
 import {
     Injectable,
     BadRequestException,
+    ForbiddenException,
     NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Link } from '../entities/link.entity';
 import { randomBytes } from 'crypto';
-import { Chat } from '../entities/chat.entity';
 import { User } from 'src/modules/auth/entities/user.entity';
 import { ChatMember } from '../entities/chat_members.entity';
 import { RoleChat } from '../entities/role_chat.entity';
 import { RoleChatEnum } from 'src/common/enums/roleChat.enum';
 import { createLinkDto } from '../dtos/createLink.dto';
 import { ChatId, UserId } from 'src/common/types/brands.type';
+import { num } from 'src/common/utils/ws-serializer.utils';
+import { TypeChatEnum } from 'src/common/enums/typeChat.enum';
+import { Chat } from '../entities/chat.entity';
 
+/**
+ * Invite links for group chats. Route-level: create/list/revoke demand chat
+ * admin (`@ChatAccess({ minRole: ADMIN })`) and the manage guard already pins
+ * `:chatId` to the caller's membership, so revoke is scoped with `chatId`.
+ */
 @Injectable()
 export class InviteLinkService {
     constructor(
@@ -34,7 +41,9 @@ export class InviteLinkService {
     async createInviteLink(dto: createLinkDto) {
         const { chatId, usageLimit, expiresAt } = dto;
 
-        const chat = await this.chatRepository.findOneBy({ id: chatId });
+        const chat = await this.chatRepository.findOne({
+            where: { id: chatId, type: TypeChatEnum.GRUPE },
+        });
         if (!chat) throw new NotFoundException('Chat not found');
 
         const code = this.generateUniqueCode();
@@ -52,10 +61,10 @@ export class InviteLinkService {
         return randomBytes(16).toString('hex');
     }
 
-    async notActiveInviteLink(linkId: number): Promise<void> {
+    /** Revoke, scoped to the (already caller-verified) chat. */
+    async notActiveInviteLink(linkId: number, chatId: ChatId): Promise<void> {
         const inviteLink = await this.LinkRepository.findOne({
-            where: { id: linkId },
-            relations: ['chat'],
+            where: { id: linkId, chat: { id: chatId } },
         });
 
         if (!inviteLink) throw new NotFoundException('Invite link not found');
@@ -73,6 +82,20 @@ export class InviteLinkService {
         });
     }
 
+    /** Numeric wire shape for links shown in the app. */
+    serializeLink(link: Link) {
+        return {
+            id: num(link.id),
+            code: link.code,
+            usageLimit: link.usageLimit,
+            usageCount: link.usageCount,
+            expiresAt: link.expiresAt,
+            isActive: link.isActive,
+            createdAt: link.createdAt,
+            chatId: num(link.chatId),
+        };
+    }
+
     async joinByInviteCode(code: string, userId: UserId): Promise<Chat> {
         const inviteLink = await this.LinkRepository.findOne({
             where: {
@@ -85,6 +108,13 @@ export class InviteLinkService {
         if (!inviteLink)
             throw new BadRequestException('Invalid or expired invite link');
 
+        if (
+            inviteLink.chat.type !== TypeChatEnum.GRUPE ||
+            inviteLink.chat.isBan
+        ) {
+            throw new BadRequestException('This chat cannot be joined by link');
+        }
+
         if (inviteLink.expiresAt && inviteLink.expiresAt < new Date())
             throw new BadRequestException('Invite link has expired');
 
@@ -94,14 +124,24 @@ export class InviteLinkService {
         )
             throw new BadRequestException('Invite link usage limit reached');
 
-        const isAlreadyMember = await this.isChatMember(
-            inviteLink.chat.id,
-            userId,
-        );
-        if (isAlreadyMember)
+        const existingMember = await this.memberRepository.findOne({
+            where: {
+                chat: { id: inviteLink.chat.id },
+                user: { id: userId },
+            },
+            relations: { role: true },
+        });
+
+        if (existingMember) {
+            if (existingMember.role?.name === RoleChatEnum.BAN) {
+                throw new ForbiddenException(
+                    'you have been banned from this group',
+                );
+            }
             throw new BadRequestException(
                 'You are already a member of this chat',
             );
+        }
 
         await this.addUserToChat(inviteLink.chat.id, userId);
 
@@ -111,20 +151,10 @@ export class InviteLinkService {
         return inviteLink.chat;
     }
 
-    private async isChatMember(
+    private async addUserToChat(
         chatId: ChatId,
         userId: UserId,
-    ): Promise<boolean> {
-        const member = await this.chatRepository
-            .createQueryBuilder('chat')
-            .innerJoin('chat.members', 'user')
-            .where('chat.id = :chatId', { chatId })
-            .andWhere('user.id = :userId', { userId })
-            .getOne();
-        return !!member;
-    }
-
-    private async addUserToChat(chatId: ChatId, userId: UserId): Promise<void> {
+    ): Promise<void> {
         const user = await this.userRepository.findOneBy({ id: userId });
         if (!user) throw new NotFoundException('user not found');
 
@@ -137,7 +167,7 @@ export class InviteLinkService {
         await this.memberRepository.save({
             chat: { id: chatId },
             user: { id: user.id },
-            role: { name: userRole.name },
+            role: { id: userRole.id },
         });
     }
 }

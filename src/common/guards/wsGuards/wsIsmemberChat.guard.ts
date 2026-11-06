@@ -6,6 +6,7 @@ import { SocketAuth } from 'src/common/types/SocketAuth.type';
 import WebSocketData from 'src/common/types/websocket.type';
 import { ChatMember } from 'src/modules/chats/entities/chat_members.entity';
 import { Repository } from 'typeorm';
+import { RoleChatEnum } from 'src/common/enums/roleChat.enum';
 
 @Injectable()
 export class wsIsMemberChat implements CanActivate {
@@ -20,21 +21,32 @@ export class wsIsMemberChat implements CanActivate {
         const data: WebSocketData = Ws.getData();
         const user = client.data.user;
 
-        const chatId = (
-            typeof data === 'number' ? data : (data.chatId ?? data.dto?.chatId)
-        ) as ChatId;
+        const eventId = Ws.getPattern?.() ?? 'unknown event';
+        const chatId = (data as { chatId?: unknown } | null)?.chatId as
+            | ChatId
+            | undefined;
 
-        if (!chatId || isNaN(chatId)) throw new WsException('Invalid chat ID');
+        if (typeof chatId !== 'number' || !Number.isFinite(chatId)) {
+            throw new WsException(
+                `Invalid chat ID: "${eventId}" takes a payload object { chatId: number }`,
+            );
+        }
 
         const member = await this.memberRepository.findOne({
             where: {
                 chat: { id: chatId },
                 user: { id: user.sub },
             },
+            relations: { role: true },
         });
 
         if (!member) {
             throw new WsException('You are not a member of this chat');
+        }
+
+        // A banned member (role marker) must not re-enter the room.
+        if (member.role?.name === RoleChatEnum.BAN) {
+            throw new WsException('You have been banned from this chat');
         }
 
         return true;

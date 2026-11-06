@@ -1,5 +1,6 @@
 import { BaseEntity } from 'src/common/entities/base.entity';
-import { Column, Entity, ManyToOne } from 'typeorm';
+import { ChatId } from 'src/common/types/brands.type';
+import { Column, Entity, ManyToOne, RelationId } from 'typeorm';
 import { Chat } from './chat.entity';
 
 @Entity('link')
@@ -9,6 +10,10 @@ export class Link extends BaseEntity {
 
     @ManyToOne(() => Chat, { onDelete: 'CASCADE' })
     chat: Chat;
+
+    /** Computed FK value (no extra column) — used by the wire serializer. */
+    @RelationId((link: Link) => link.chat)
+    chatId: ChatId;
 
     @Column({ type: 'int', default: 0 })
     usageLimit: number;

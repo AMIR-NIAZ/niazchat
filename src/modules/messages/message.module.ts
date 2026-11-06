@@ -11,16 +11,18 @@ import { JwtService } from '@nestjs/jwt';
 import { RoleChat } from '../chats/entities/role_chat.entity';
 import { TypeMessage } from './entities/typeMessage.entity';
 import { TextContentHandler } from './strategis/TextContentHandler.strategy';
-import { FileContentHandler } from './strategis/FileContentHandler.strategy';
 import {
     CONTENT_HANDLERS,
     ContentResolverService,
 } from './services/content-resolver.service';
 import { ChatsModule } from '../chats/chats.module';
+import { AttachmentsModule } from '../attachments/attachments.module';
+import { Attachment } from '../attachments/entities/attachment.entity';
 
 @Module({
     imports: [
         ChatsModule,
+        AttachmentsModule,
         TypeOrmModule.forFeature([
             Message,
             ChatMember,
@@ -28,6 +30,7 @@ import { ChatsModule } from '../chats/chats.module';
             User,
             RoleChat,
             TypeMessage,
+            Attachment,
         ]),
     ],
     providers: [
@@ -36,14 +39,10 @@ import { ChatsModule } from '../chats/chats.module';
         JwtAppService,
         JwtService,
         TextContentHandler,
-        FileContentHandler,
         {
             provide: CONTENT_HANDLERS,
-            useFactory: (
-                textHandler: TextContentHandler,
-                fileHandler: FileContentHandler,
-            ) => [textHandler, fileHandler],
-            inject: [TextContentHandler, FileContentHandler],
+            useFactory: (textHandler: TextContentHandler) => [textHandler],
+            inject: [TextContentHandler],
         },
         ContentResolverService,
     ],

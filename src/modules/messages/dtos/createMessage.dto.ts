@@ -1,4 +1,7 @@
 import {
+    ArrayMaxSize,
+    ArrayMinSize,
+    IsArray,
     IsEnum,
     IsNumber,
     IsOptional,
@@ -6,7 +9,12 @@ import {
     MaxLength,
 } from 'class-validator';
 import { TypeMessageEnum } from 'src/common/enums/typeMessage.enum';
-import { ChatId, MessageId, UserId } from 'src/common/types/brands.type';
+import {
+    AttachmentId,
+    ChatId,
+    MessageId,
+    UserId,
+} from 'src/common/types/brands.type';
 
 export class CreateMessageDto {
     @IsNumber()
@@ -21,9 +29,22 @@ export class CreateMessageDto {
     @IsNumber()
     userId?: UserId;
 
+    /**
+     * Text body. Optional when attachments are present (attachment-only or
+     * text+attachment messages); required for text-only messages.
+     */
     @IsString()
+    @IsOptional()
     @MaxLength(5000)
-    content: string;
+    content?: string;
+
+    /** Ids of files previously uploaded via POST /chats/:chatId/attachments. */
+    @IsOptional()
+    @IsArray()
+    @ArrayMinSize(1)
+    @ArrayMaxSize(10)
+    @IsNumber({}, { each: true })
+    attachments?: AttachmentId[];
 
     @IsOptional()
     @IsEnum(TypeMessageEnum)

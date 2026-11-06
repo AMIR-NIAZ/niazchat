@@ -24,8 +24,12 @@ export class wsIsBanMember implements CanActivate {
         const data: WebSocketData = Ws.getData();
         const userPayload = client.data.user;
 
-        const chatId = (data.chatId ? data.chatId : data.dto.chatId) as ChatId;
-        if (!chatId) throw new WsException('chat id not valid');
+        const chatId = data?.chatId as ChatId;
+        if (typeof chatId !== 'number' || !Number.isFinite(chatId)) {
+            throw new WsException(
+                'chat id not valid: payload must be { chatId: number }',
+            );
+        }
 
         const IsBan = await this.memberRepository.findOne({
             where: {

@@ -1,0 +1,41 @@
+{
+  "name": "mobile",
+  "version": "1.0.0",
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "lint": "expo lint"
+  },
+  "dependencies": {
+    "@expo/metro-runtime": "~58.0.16",
+    "@hookform/resolvers": "^5.2.2",
+    "@tanstack/react-query": "^5.105.1",
+    "axios": "^1.13.2",
+    "expo": "~58.0.22",
+    "expo-constants": "~58.0.7",
+    "expo-image-picker": "~58.0.10",
+    "expo-linking": "~58.0.15",
+    "expo-router": "~58.0.29",
+    "expo-secure-store": "~58.0.2",
+    "expo-status-bar": "~58.0.4",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-hook-form": "^7.66.1",
+    "react-native": "0.88.1",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-screens": "~4.19.0",
+    "react-native-web": "^0.21.4",
+    "socket.io-client": "^4.8.1",
+    "zod": "^4.1.13",
+    "zustand": "^5.0.9"
+  },
+  "devDependencies": {
+    "@types/react": "~19.3.0",
+    "typescript": "~6.0.3"
+  },
+  "private": true
+}

@@ -15,6 +15,7 @@ import { ServeStaticModule } from '@nestjs/serve-static';
 import { ChatsModule } from '../chats/chats.module';
 import { MessageModule } from '../messages/message.module';
 import { ReactionsModule } from '../reactions/reaction.module';
+import { AttachmentsModule } from '../attachments/attachments.module';
 import { PayloadGuard } from 'src/common/guards/restGuards/payload.guard';
 import { RoleGurd } from 'src/common/guards/restGuards/role.guard';
 import { SeedersModule } from 'src/modules/seeders/seeders.module';
@@ -42,6 +43,7 @@ import { HealthModule } from '../health/health.module';
         ChatsModule,
         MessageModule,
         ReactionsModule,
+        AttachmentsModule,
     ],
     controllers: [AppController],
     providers: [

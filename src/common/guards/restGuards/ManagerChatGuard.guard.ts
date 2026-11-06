@@ -4,122 +4,75 @@ import {
     ExecutionContext,
     ForbiddenException,
     Injectable,
-    NotFoundException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { InjectRepository } from '@nestjs/typeorm';
-import { PERMISSION_CHAT_KEY } from 'src/common/decorators/PermissionAdminChat.decorator';
-import { PermissionChatEnum } from 'src/common/enums/permissionChat.enum';
+import { ChatAccessOptions, CHAT_ACCESS_KEY } from 'src/common/decorators/chatAccess.decorator';
 import { RoleChatEnum } from 'src/common/enums/roleChat.enum';
 import { ChatId } from 'src/common/types/brands.type';
 import { RequestAuth } from 'src/common/types/RequestAuth.type';
-import { ChatMember } from 'src/modules/chats/entities/chat_members.entity';
-import { PermissionAdmin } from 'src/modules/chats/entities/permission_admin.entity';
-import { RoleChat } from 'src/modules/chats/entities/role_chat.entity';
-import { Repository } from 'typeorm';
+import { ChatAccessService } from 'src/modules/chats/services/chat-access.service';
 
+/** Fallback for routes without `@ChatAccess`: chat admin with no extra gate. */
+const DEFAULT_ACCESS: ChatAccessOptions = { minRole: RoleChatEnum.ADMIN };
+
+/**
+ * Class-level guard for `/chats/manage/*` (registered with `@UseGuards`).
+ *
+ * Resolves the chat from `:chatId`/`:groupId`, or from `:memberId` through the
+ * member→chat relation (member-scoped routes), then enforces via
+ * `ChatAccessService`:
+ *   1. the caller is a member of THAT chat (403 otherwise),
+ *   2. the chat is a usable group (type `groupe`, not platform-banned),
+ *   3. the caller's membership is not the `ban` role,
+ *   4. the caller's role outranks `@ChatAccess({ minRole })`,
+ *   5. admin callers hold every `@ChatAccess({ permissions })` requirement;
+ *      `PermissionChatEnum.ALL` on the caller satisfies any list, owners are never gated.
+ *
+ * Per-member/target rules (outranking, owner protection, same-chat scope) are
+ * enforced in the manage services through the same `ChatAccessService`.
+ */
 @Injectable()
 export class ManagerChatGuard implements CanActivate {
     constructor(
         private readonly reflector: Reflector,
-        @InjectRepository(ChatMember)
-        private readonly memberRepository: Repository<ChatMember>,
-        @InjectRepository(RoleChat)
-        private readonly roleChatRepository: Repository<RoleChat>,
-        @InjectRepository(PermissionAdmin)
-        private readonly permissionAdminRepository: Repository<PermissionAdmin>,
+        private readonly access: ChatAccessService,
     ) {}
 
     async canActivate(context: ExecutionContext): Promise<boolean> {
-        const Http = context.switchToHttp();
-        const request = Http.getRequest<RequestAuth>();
+        const accessOptions: ChatAccessOptions | undefined = this.reflector.get(
+            CHAT_ACCESS_KEY,
+            context.getHandler(),
+        );
 
-        const member = await this.getMember(request);
+        const request = context.switchToHttp().getRequest<RequestAuth>();
+        const chatId = await this.resolveChatId(request);
+        const caller = await this.access.getCallerContext(
+            chatId,
+            request.user.sub,
+        );
 
-        const hasManage = await this.isManageChat(member);
+        this.access.assertUsableGroup(caller);
+        const options = accessOptions ?? DEFAULT_ACCESS;
+        this.access.assertRole(caller, options.minRole);
+        this.access.assertPermissions(caller, options.permissions ?? []);
 
-        if (hasManage) {
-            return true;
-        } else {
-            const hasAdmin = await this.isAdminChat(member);
-            if (!hasAdmin) throw new ForbiddenException();
+        return true;
+    }
 
-            const accessPermissions: PermissionChatEnum[] = this.reflector.get(
-                PERMISSION_CHAT_KEY,
-                context.getHandler(),
-            );
-
-            if (!accessPermissions) throw new ForbiddenException();
-            if (accessPermissions.includes(PermissionChatEnum.ALL)) return true;
-
-            const adminPermissions = await this.permissionAdminRepository.find({
-                where: {
-                    member: { id: member.id },
-                },
-            });
-
-            const hasAdminAccess = accessPermissions.every((per: string) =>
-                adminPermissions.some(
-                    (adminper) => adminper.permission.name === per,
-                ),
-            );
-            if (hasAdminAccess) return hasAdminAccess;
+    /** chatId from `:chatId`/`:groupId`, else from a member-scoped route. */
+    private async resolveChatId(request: RequestAuth): Promise<ChatId> {
+        const params = request.params;
+        const chatParam = Number(params.groupId ?? params.chatId);
+        if (Number.isInteger(chatParam) && chatParam > 0) {
+            return chatParam as ChatId;
         }
 
-        throw new ForbiddenException();
-    }
-
-    private async isAdminChat(member: ChatMember) {
-        const AdminRole = await this.roleChatRepository.findOne({
-            where: { name: RoleChatEnum.ADMIN },
-        });
-        if (!AdminRole) throw new NotFoundException('manage role not found');
-
-        return member.role.id === AdminRole.id;
-    }
-
-    private async isManageChat(member: ChatMember) {
-        const manageRole = await this.roleChatRepository.findOne({
-            where: { name: RoleChatEnum.MANAGER },
-        });
-        if (!manageRole) throw new NotFoundException('manage role not found');
-
-        return member.role.id === manageRole.id;
-    }
-
-    private async getMember(request: RequestAuth) {
-        const chatId: ChatId = +request.params.chatId as ChatId;
-        const memberId: number = +request.params.memberId;
-        const userPayloade = request.user;
-
-        let member: ChatMember | null;
-        if (chatId) {
-            member = await this.memberRepository.findOne({
-                where: {
-                    user: { id: userPayloade.sub },
-                    chat: { id: chatId },
-                },
-            });
-            if (!member) throw new ForbiddenException();
-        } else if (memberId) {
-            const memberChat = await this.memberRepository.findOne({
-                where: {
-                    id: memberId,
-                },
-            });
-            if (!memberChat) throw new ForbiddenException();
-
-            member = await this.memberRepository.findOne({
-                where: {
-                    user: { id: userPayloade.sub },
-                    chat: { id: memberChat.chat.id },
-                },
-            });
-            if (!member) throw new ForbiddenException();
-        } else {
+        const memberParam = Number(params.memberId);
+        if (!Number.isInteger(memberParam) || memberParam <= 0) {
             throw new BadRequestException('chat id or member id not valid');
         }
 
-        return member;
+        const target = await this.access.getTargetMember(memberParam);
+        return target.chat.id;
     }
 }

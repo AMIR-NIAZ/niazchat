@@ -5,24 +5,37 @@ import {
     WebSocketGateway,
     WebSocketServer,
 } from '@nestjs/websockets';
-import { ParseIntPipe, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
+import {
+    ParseIntPipe,
+    UseGuards,
+    UseFilters,
+    UsePipes,
+    ValidationPipe,
+} from '@nestjs/common';
 import { Server } from 'socket.io';
 import { MessageService } from '../services/message.service';
 import { ChatService } from 'src/modules/chats/services/chat.service';
-import { Message } from '../entities/message.entity';
 import { CreateMessageDto } from '../dtos/createMessage.dto';
+import { Message } from '../entities/message.entity';
 import { EditMessageDto } from '../dtos/EditMessage.dto';
 import { deleteMessageDto } from '../dtos/deleteMessage.dto';
 import { SocketAuth } from 'src/common/types/SocketAuth.type';
 import { wsPayload } from 'src/common/guards/wsGuards/wsPayload.guard';
 import { wsIsMemberChat } from 'src/common/guards/wsGuards/wsIsmemberChat.guard';
 import { wsIsBanMember } from 'src/common/guards/wsGuards/wsIsBanMember.guard';
-import { ChatId, MessageId } from 'src/common/types/brands.type';
+import { WsExceptionFilter } from 'src/common/filters/ws-exception.filter';
+import { ChatId } from 'src/common/types/brands.type';
 import { chatRoom, userRoom } from 'src/common/utils/roomCreator.utils';
+import {
+    serializeLastMessage,
+    serializeMessage,
+} from 'src/common/utils/ws-serializer.utils';
+import { num } from 'src/common/utils/ws-serializer.utils';
 
 @WebSocketGateway({ maxHttpBufferSize: 1e6 })
 @UseGuards(wsPayload, wsIsBanMember)
 @UsePipes(new ValidationPipe({ whitelist: true }))
+@UseFilters(new WsExceptionFilter())
 export class MessageGateway {
     @WebSocketServer()
     private server: Server;
@@ -38,10 +51,21 @@ export class MessageGateway {
         @MessageBody() dto: CreateMessageDto,
     ) {
         const message = await this.messageService.create(client.data.user, dto);
-        const chatId = message.chat.id;
+        const chatId = message.chat?.id ?? dto.chatId;
+        const wireMessage = serializeMessage(message);
 
-        this.server.to(chatRoom(chatId)).emit('sendMessage:list', message);
-        await this.notifyChatList(chatId, message);
+        this.server.to(chatRoom(chatId)).emit('sendMessage:list', wireMessage);
+        // The socket may legitimately not be in the room (stale leave, reconnect
+        // before re-join); the ack alone cannot confirm the optimistic bubble, so
+        // deliver the echo straight to the sender in that case.
+        if (!client.rooms.has(chatRoom(chatId))) {
+            client.emit('sendMessage:list', wireMessage);
+        }
+        void this.notifyChatList(chatId, message).catch((error) =>
+            console.error('notifyChatList failed', error),
+        );
+
+        return { ok: true, data: wireMessage };
     }
 
     @SubscribeMessage('editMessage')
@@ -51,9 +75,19 @@ export class MessageGateway {
         @MessageBody() dto: EditMessageDto,
     ) {
         const message = await this.messageService.edit(dto, client.data.user);
+        const wireMessage = serializeMessage(message);
 
-        this.server.to(chatRoom(dto.chatId)).emit('editMessage:list', message);
-        await this.notifyChatList(dto.chatId, message!);
+        this.server
+            .to(chatRoom(dto.chatId))
+            .emit('editMessage:list', wireMessage);
+        if (!client.rooms.has(chatRoom(dto.chatId))) {
+            client.emit('editMessage:list', wireMessage);
+        }
+        void this.notifyChatList(dto.chatId, message).catch((error) =>
+            console.error('notifyChatList failed', error),
+        );
+
+        return { ok: true, data: wireMessage };
     }
 
     @SubscribeMessage('deleteMessage')
@@ -66,7 +100,18 @@ export class MessageGateway {
 
         this.server
             .to(chatRoom(dto.chatId))
-            .emit('deleteMessage:list', dto.messageId);
+            .emit('deleteMessage:list', num(dto.messageId));
+
+        // The deleted message may have been the chat's last one: push the new
+        // last message (or null) so previews never keep the deleted text.
+        const lastMessage = await this.messageService.lastNonDeletedMessage(
+            dto.chatId,
+        );
+        void this.notifyChatList(dto.chatId, lastMessage).catch((error) =>
+            console.error('notifyChatList failed', error),
+        );
+
+        return { ok: true, data: null };
     }
 
     @SubscribeMessage('getMessages')
@@ -76,22 +121,31 @@ export class MessageGateway {
         @MessageBody('chatId', new ParseIntPipe()) chatId: ChatId,
     ) {
         const messages = await this.messageService.getAllByChats(chatId);
-        client.emit('getMessages', messages);
+
+        const wireMessages = messages.map(serializeMessage);
+
+        // Legacy per-client event, kept for compatibility; the ack is the
+        // completion signal.
+        // client.emit('getMessages', wireMessages);
+
+        return { ok: true, data: wireMessages };
     }
 
-    private async notifyChatList(chatId: ChatId, message: Message) {
+    private async notifyChatList(chatId: ChatId, message: Message | null) {
         const memberIds = await this.chatService.getMemberIds(chatId);
+        // Attachment-only messages have no text; their metadata is included
+        // so chat-list previews can still show something meaningful. A null
+        // message (e.g. the last message was just deleted) clears the preview.
+        // Reuse the exact serializer `getAllChats` uses, so both sources
+        // produce an identical preview shape.
         const payload = {
-            chatId,
-            lastMessage: {
-                id: message.id,
-                content: message.content,
-                senderId: message.sender?.id,
-                createdAt: message.createdAt,
-            },
+            chatId: num(chatId),
+            lastMessage:
+                message === null ? null : serializeLastMessage(message),
         };
 
-        for (const id of memberIds) {
+        // A member can be registered twice in chat_members; one update each.
+        for (const id of new Set(memberIds)) {
             this.server.to(userRoom(id)).emit('chatlist:updated', payload);
         }
     }

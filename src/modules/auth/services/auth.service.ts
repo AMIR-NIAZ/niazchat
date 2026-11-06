@@ -113,7 +113,6 @@ export class AuthService {
     }
 
     private async generateTokens(user: User) {
-        console.log('user', user);
         const { accessToken, refreshToken } =
             await this.jwtService.generateToken({
                 sub: user.id,

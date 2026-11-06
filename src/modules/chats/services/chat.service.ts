@@ -1,5 +1,7 @@
 import {
     BadRequestException,
+    ConflictException,
+    ForbiddenException,
     Injectable,
     InternalServerErrorException,
     NotFoundException,
@@ -11,16 +13,27 @@ import { Chat } from '../entities/chat.entity';
 import { Not, Repository } from 'typeorm';
 import { ChatMember } from '../entities/chat_members.entity';
 import { TypeChatEnum } from 'src/common/enums/typeChat.enum';
+import { PermissionChatEnum } from 'src/common/enums/permissionChat.enum';
 import { RoleChatEnum } from 'src/common/enums/roleChat.enum';
 import { ChatSeen } from '../entities/chats_seen.entity';
 import { Message } from 'src/modules/messages/entities/message.entity';
-import { WsException } from '@nestjs/websockets';
 import * as fs from 'fs';
 import { RoleChat } from '../entities/role_chat.entity';
 import { PermissionChat } from '../entities/permission_chat.entity';
 import { PermissionAdmin } from '../entities/permission_admin.entity';
-import { ChatId } from 'src/common/types/brands.type';
-import { toUserResponse } from 'src/modules/auth/utils/user-response.util';
+import { ChatId, UserId } from 'src/common/types/brands.type';
+import { User } from 'src/modules/auth/entities/user.entity';
+import {
+    ChatAccessService,
+    ChatCallerContext,
+} from './chat-access.service';
+import { GroupRealtimeService } from './group-realtime.service';
+
+export interface ChatMemberPageOptions {
+    search?: string;
+    limit?: number;
+    cursor?: number;
+}
 
 @Injectable()
 export class ChatService {
@@ -37,14 +50,17 @@ export class ChatService {
         private readonly roleChatRepository: Repository<RoleChat>,
         @InjectRepository(PermissionChat)
         private readonly permissionChatRepository: Repository<PermissionChat>,
-        @InjectRepository(PermissionAdmin)
-        private readonly permissionAdminRepository: Repository<PermissionAdmin>,
+        @InjectRepository(User)
+        private readonly userRepository: Repository<User>,
+        private readonly access: ChatAccessService,
+        private readonly groupRealtime: GroupRealtimeService,
     ) {}
 
     async createGroup(dto: createChatDto, user: JwtPayload) {
-        const { title, members } = dto;
+        const { title, members = [] } = dto;
+
         const uniqueMembers = [...new Set(members)].filter(
-            (id) => id != user.sub,
+            (id) => id !== String(user.sub),
         );
 
         const chat = await this.chatRepository.save({
@@ -56,64 +72,385 @@ export class ChatService {
             where: { name: RoleChatEnum.USER },
         });
 
-        const adminRole = await this.roleChatRepository.findOne({
-            where: { name: RoleChatEnum.ADMIN },
+        const managerRole = await this.roleChatRepository.findOne({
+            where: { name: RoleChatEnum.MANAGER },
         });
 
-        if (!userRole || !adminRole) {
+        if (!userRole || !managerRole) {
             throw new NotFoundException('role not found');
         }
 
+        // The creator owns the group (`manager`); everyone else joins as `user`.
         const allMembers = [
             {
                 chat: { id: chat.id },
                 user: { id: user.sub },
-                role: { id: adminRole.id },
+                role: { id: managerRole.id },
             },
-            ...uniqueMembers.map((u) => ({
+            ...uniqueMembers.map((id) => ({
                 chat: { id: chat.id },
-                user: { id: u },
+                user: { id },
                 role: { id: userRole.id },
             })),
         ];
 
         await this.memberRepository.insert(allMembers);
+
         return { message: 'group created successfully' };
     }
 
     async addMemberByPhone(chatId: ChatId, userPhone: string) {
+        const user = await this.userRepository.findOne({
+            where: { phone: userPhone },
+        });
+
+        if (!user) {
+            throw new NotFoundException('user not found');
+        }
+
+        const chat = await this.chatRepository.findOne({
+            where: { id: chatId },
+        });
+
+        if (!chat) {
+            throw new NotFoundException('chat not found');
+        }
+
+        const existingMember = await this.memberRepository.findOne({
+            where: {
+                chat: { id: chatId },
+                user: { id: user.id },
+            },
+            relations: { role: true },
+        });
+
+        if (existingMember) {
+            if (existingMember.role?.name === RoleChatEnum.BAN) {
+                throw new ConflictException(
+                    'user is banned from this group and cannot be added',
+                );
+            }
+            throw new ConflictException('user is already a member');
+        }
+
         const userRole = await this.roleChatRepository.findOne({
             where: { name: RoleChatEnum.USER },
         });
-        if (!userRole) throw new NotFoundException('role not found');
 
-        await this.memberRepository.save({
-            chat: { id: chatId },
-            user: { phone: userPhone },
-            role: { id: userRole?.id },
+        if (!userRole) {
+            throw new NotFoundException('role not found');
+        }
+
+        const member = this.memberRepository.create({
+            chat,
+            user,
+            role: userRole,
         });
 
-        return { message: 'user added succeccfull' };
+        await this.memberRepository.save(member);
+
+        const wireMember = this.serializeMember(member, user, false);
+        this.groupRealtime.groupAdded(chatId, user.id as UserId);
+        this.groupRealtime.groupChanged(chatId, 'member_joined');
+
+        return {
+            message: 'user added successfully',
+            member: wireMember,
+        };
     }
 
     async getUserChats(user: JwtPayload): Promise<Chat[]> {
-        const chats = await this.memberRepository
+        // `member.role` is joined so the caller's own banned membership hides
+        // the group entirely (role, not a flag, marks a ban).
+        const memberships = await this.memberRepository
             .createQueryBuilder('member')
-            .leftJoinAndSelect('member.chat', 'chat')
+            .innerJoinAndSelect('member.role', 'memberRole')
+            .innerJoinAndSelect('member.chat', 'chat')
+            .leftJoinAndMapOne(
+                'chat.lastMessage',
+                Message,
+                'lm',
+                `lm.id = (
+                SELECT MAX(m2.id) FROM messages m2
+                WHERE m2."chatId" = chat.id AND m2."isDeleted" = false
+            )`,
+            )
+            // `serializeChat` puts `senderId` on the wire; the sender must be
+            // loaded (attachments stay unloaded — serialized as []).
+            .leftJoinAndSelect('lm.sender', 'lmSender')
             .where('member.user.id = :userId', { userId: user.sub })
             .andWhere('chat.isBan = :isban', { isban: false })
-            .orderBy('chat.updatedAt', 'DESC')
-            .getMany()
-            .then((memberships) => memberships.map((m) => m.chat));
+            .andWhere('memberRole.name != :banRole', {
+                banRole: RoleChatEnum.BAN,
+            })
+            .getMany();
 
-        return chats;
+        const byId = new Map<string, Chat>();
+        for (const m of memberships) byId.set(String(m.chat.id), m.chat);
+
+        const activity = (c: Chat): number =>
+            new Date(c.lastMessage?.createdAt ?? c.createdAt).getTime();
+
+        return [...byId.values()].sort((a, b) => activity(b) - activity(a));
     }
 
     async getInfoChat(id: ChatId) {
         return await this.chatRepository.findOne({ where: { id } });
     }
 
-    async uploadAvatar(avatar: string, chatId: ChatId) {
+    /** Per-caller info extras for the WS `joinChat` ack. */
+    async getChatSummary(chatId: ChatId, userId: UserId) {
+        const caller = await this.access.getCallerContext(chatId, userId);
+        return this.summarizeCaller(caller);
+    }
+
+    private async summarizeCaller(caller: ChatCallerContext) {
+        const membersCount = await this.memberRepository
+            .createQueryBuilder('member')
+            .innerJoin('member.role', 'role')
+            .where('member.chat.id = :chatId', { chatId: caller.chat.id })
+            .andWhere('role.name != :banRole', { banRole: RoleChatEnum.BAN })
+            .select('COUNT(DISTINCT member.userId)', 'count')
+            .getRawOne();
+
+        return {
+            myRole: caller.roleName === RoleChatEnum.BAN ? null : caller.roleName,
+            myPermissions:
+                caller.isManager || !caller.isAdmin ? null : caller.permissions,
+            membersCount: Number(membersCount?.count ?? 0),
+        };
+    }
+
+    async updateTitle(
+        chatId: ChatId,
+        callerUserId: UserId,
+        rawTitle: string,
+    ) {
+        const caller = await this.access.getCallerContext(chatId, callerUserId);
+        this.access.assertUsableGroup(caller);
+        this.access.assertPermissions(caller, [
+            PermissionChatEnum.CHANGE_INFO_CHAT,
+        ]);
+
+        const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+        if (title.length < 1 || title.length > 64) {
+            throw new BadRequestException(
+                'title must be between 1 and 64 characters',
+            );
+        }
+
+        const chat = await this.chatRepository.findOne({ where: { id: chatId } });
+        if (!chat) throw new NotFoundException('chat not found');
+
+        await this.chatRepository.update(chat.id, { title });
+
+        this.groupRealtime.groupChanged(chatId, 'title_changed');
+
+        return { message: 'title updated successfully' };
+    }
+
+    /** Paginated, searchable member list (banned rows excluded). */
+    async getChatMembers(
+        chatId: ChatId,
+        callerUserId: UserId,
+        options: ChatMemberPageOptions,
+    ) {
+        const chat = await this.chatRepository.findOne({
+            where: { id: chatId, type: TypeChatEnum.GRUPE, isBan: false },
+        });
+        if (!chat) throw new NotFoundException('chat not found');
+
+        // Caller must be a member (the WS/REST guard already checked; this
+        // keeps the service usable standalone). Phone numbers only for admins.
+        const caller = await this.access.getCallerContext(chatId, callerUserId);
+        const includePhone = caller.isManager || caller.isAdmin;
+
+        const limit = Math.min(Math.max(Number(options.limit) || 50, 1), 100);
+        const cursor = Number(options.cursor) > 0 ? Number(options.cursor) : null;
+
+        const qb = this.memberRepository
+            .createQueryBuilder('member')
+            .innerJoin('member.role', 'role')
+            .innerJoinAndSelect('member.user', 'user')
+            .leftJoinAndSelect('user.profile', 'profile')
+            .where('member.chat.id = :chatId', { chatId })
+            .andWhere('role.name != :banRole', { banRole: RoleChatEnum.BAN })
+            .orderBy('member.id', 'ASC')
+            .take(limit + 1);
+
+        if (cursor !== null) {
+            qb.andWhere('member.id > :cursor', { cursor });
+        }
+
+        if (options.search?.trim()) {
+            const term = `%${options.search.trim()}%`;
+            qb.andWhere('(profile.name ILIKE :term OR profile.username ILIKE :term)', {
+                term,
+            });
+        }
+
+        const rows = await qb.getMany();
+
+        const hasMore = rows.length > limit;
+        const page = hasMore ? rows.slice(0, limit) : rows;
+        const nextCursor =
+            hasMore && page.length > 0 ? Number(page[page.length - 1].id) : null;
+
+        return {
+            data: page.map((member) =>
+                this.recordMemberWithPhone(member, includePhone),
+            ),
+            nextCursor,
+            ...(await this.summarizeCaller(caller)),
+        };
+    }
+
+    /** Kick: removes the member row (ownership + outranking enforced inside). */
+    async kickMember(chatId: ChatId, memberId: number, callerUserId: UserId) {
+        const target = await this.access.getTargetMemberInChat(memberId, chatId);
+        const caller = await this.access.getCallerContext(chatId, callerUserId);
+        this.access.assertUsableGroup(caller);
+        this.access.assertRole(caller, RoleChatEnum.ADMIN);
+        this.access.assertPermissions(caller, [
+            PermissionChatEnum.BAN_USER,
+        ]);
+        this.access.assertCanTarget(caller, target, 'kick');
+
+        if (target.role?.name === RoleChatEnum.BAN) {
+            throw new ConflictException('user is already banned');
+        }
+
+        await this.removePermissionsForMember(target.id);
+        await this.memberRepository.remove(target);
+
+        this.groupRealtime.groupRemoved(chatId, target.user.id, 'kicked');
+        this.groupRealtime.groupChanged(chatId, 'member_kicked');
+
+        return { message: 'user kicked from the group' };
+    }
+
+    /** A member leaves; owners cannot leave (no ownership transfer). */
+    async leaveChat(chatId: ChatId, callerUserId: UserId) {
+        const caller = await this.access.getCallerContext(chatId, callerUserId);
+        this.access.assertUsableGroup(caller);
+
+        if (caller.isManager) {
+            throw new BadRequestException(
+                'the group owner cannot leave the group. Give ownership to another member first (ownership transfer is not supported yet)',
+            );
+        }
+        if (caller.roleName === RoleChatEnum.BAN) {
+            throw new ForbiddenException('you have been banned from this group');
+        }
+
+        await this.removePermissionsForMember(caller.member.id);
+        await this.memberRepository.remove(caller.member);
+
+        this.groupRealtime.groupRemoved(chatId, callerUserId, 'left');
+        this.groupRealtime.groupChanged(chatId, 'member_left');
+
+        return { message: 'you have left the group', chatId };
+    }
+
+    /**
+     * Ban a member: their `chat_members.roleId` becomes the `ban` role (no
+     * separate ban table). Same-chat scope, owner protection and outranking all
+     * enforced here — the REST guard only pre-checks the caller side.
+     */
+    async banMember(memberId: number, callerUserId: UserId) {
+        const target = await this.access.getTargetMember(memberId);
+        const caller = await this.access.getCallerContext(
+            target.chat.id,
+            callerUserId,
+        );
+        this.access.assertUsableGroup(caller);
+        this.access.assertRole(caller, RoleChatEnum.ADMIN);
+        this.access.assertPermissions(caller, [PermissionChatEnum.BAN_USER]);
+        this.access.assertCanTarget(caller, target, 'ban');
+
+        if (target.role?.name === RoleChatEnum.BAN) {
+            throw new ConflictException('user is already banned');
+        }
+
+        const banRole = await this.getRoleOrFail(RoleChatEnum.BAN);
+        target.role = banRole;
+        await this.memberRepository.save(target);
+        // A banned admin loses their permission grants.
+        await this.removePermissionsForMember(target.id);
+
+        this.groupRealtime.groupRemoved(
+            target.chat.id,
+            target.user.id,
+            'banned',
+        );
+        this.groupRealtime.groupChanged(target.chat.id, 'member_banned');
+
+        return { message: 'user baned successfully' };
+    }
+
+    /** Unban: restores the `user` role (former admins become members). */
+    async onBanMember(memberId: number, callerUserId: UserId) {
+        const target = await this.access.getTargetMember(memberId);
+        const caller = await this.access.getCallerContext(
+            target.chat.id,
+            callerUserId,
+        );
+        this.access.assertUsableGroup(caller);
+        this.access.assertRole(caller, RoleChatEnum.ADMIN);
+        this.access.assertPermissions(caller, [PermissionChatEnum.BAN_USER]);
+        this.access.assertCanTarget(caller, target, 'unban');
+
+        if (target.role?.name !== RoleChatEnum.BAN) {
+            throw new BadRequestException('user is not banned');
+        }
+
+        const userRole = await this.getRoleOrFail(RoleChatEnum.USER);
+        target.role = userRole;
+        await this.memberRepository.save(target);
+
+        this.groupRealtime.groupAdded(target.chat.id, target.user.id);
+        this.groupRealtime.groupChanged(target.chat.id, 'member_unbanned');
+
+        return { message: 'user on baned successfully' };
+    }
+
+    /** Convenience adapter for record-level serialization with caller-gated phone. */
+    private recordMemberWithPhone(
+        member: ChatMember,
+        includePhone: boolean,
+    ) {
+        return this.serializeMember(member, member.user, includePhone);
+    }
+
+    async getAllBanUser(chatId: ChatId) {
+        const chat = await this.chatRepository.findOne({
+            where: {
+                id: chatId,
+                type: Not(TypeChatEnum.PRIVATE),
+            },
+        });
+        if (!chat) throw new NotFoundException('chat not found');
+
+        const banUsers = await this.memberRepository
+            .createQueryBuilder('member')
+            .innerJoin('member.role', 'role')
+            .innerJoinAndSelect('member.user', 'user')
+            .leftJoinAndSelect('user.profile', 'profile')
+            .where('member.chat.id = :chatId', { chatId })
+            .andWhere('role.name = :banRole', { banRole: RoleChatEnum.BAN })
+            .orderBy('member.updatedAt', 'DESC')
+            .getMany();
+
+        return {
+            data: banUsers.map((member) => this.recordMemberWithPhone(member, true)),
+        };
+    }
+
+    async uploadAvatar(
+        avatar: string,
+        chatId: ChatId,
+        _callerUserId: UserId,
+    ) {
         const chat = await this.chatRepository.findOne({
             where: {
                 type: Not(TypeChatEnum.PRIVATE),
@@ -125,10 +462,12 @@ export class ChatService {
         chat.avatars = [...chat.avatars, avatar];
         await this.chatRepository.save(chat);
 
+        this.groupRealtime.groupChanged(chatId, 'avatars_changed');
+
         return { message: 'avatar updated successfully' };
     }
 
-    async deleteAvatar(chatId: ChatId, avatarPath: string) {
+    async deleteAvatar(chatId: ChatId, avatarPath: string, _callerUserId: UserId) {
         const chat = await this.chatRepository.findOne({
             where: {
                 type: Not(TypeChatEnum.PRIVATE),
@@ -145,6 +484,8 @@ export class ChatService {
             await fs.promises.unlink(avatarPath);
         }
 
+        this.groupRealtime.groupChanged(chatId, 'avatars_changed');
+
         return { message: 'avatar updated successfully' };
     }
 
@@ -155,8 +496,7 @@ export class ChatService {
             },
             order: { id: 'DESC' },
         });
-        if (!lastMessage)
-            throw new WsException('this chat not found last message');
+        if (!lastMessage) return null; // <-- changed: return null instead of throwing
 
         let read = await this.seenRepository.findOne({
             where: {
@@ -179,105 +519,6 @@ export class ChatService {
         return lastMessage.id;
     }
 
-    async banMember(id: number) {
-        const member = await this.memberRepository.findOne({
-            where: {
-                id,
-            },
-        });
-        if (!member) throw new NotFoundException();
-
-        const manageRole = await this.roleChatRepository.findOne({
-            where: { name: RoleChatEnum.MANAGER },
-        });
-        if (!manageRole) throw new NotFoundException('manage role not found');
-        if (member.id === manageRole.id)
-            throw new BadRequestException('manager chat cant ban');
-
-        const banRole = await this.roleChatRepository.findOne({
-            where: { name: RoleChatEnum.BAN },
-        });
-        if (!banRole) throw new NotFoundException('ban role not found');
-
-        member.role = banRole;
-        await this.memberRepository.save(member);
-
-        return { message: 'user baned successfully' };
-    }
-
-    async onBanMember(id: number) {
-        const member = await this.memberRepository.findOne({
-            where: {
-                id,
-            },
-        });
-        if (!member) throw new NotFoundException();
-
-        const userRole = await this.roleChatRepository.findOne({
-            where: { name: RoleChatEnum.USER },
-        });
-        if (!userRole) throw new NotFoundException('ban role not found');
-
-        member.role = userRole;
-        await this.memberRepository.save(member);
-
-        return { message: 'user on baned successfully' };
-    }
-
-    async getAllBanUser(chatId: ChatId) {
-        const chat = await this.chatRepository.findOne({
-            where: {
-                id: chatId,
-                type: Not(TypeChatEnum.PRIVATE),
-            },
-        });
-        if (!chat) throw new NotFoundException('chat not found');
-
-        const roleBanChat = await this.roleChatRepository.findOne({
-            where: {
-                name: RoleChatEnum.BAN,
-            },
-        });
-        if (!roleBanChat) throw new NotFoundException('ban role Not found');
-
-        const banUsers = await this.memberRepository.find({
-            where: {
-                chat: { id: chatId },
-                role: { id: roleBanChat.id },
-            },
-            relations: { user: { profile: true } },
-            select: {
-                id: true,
-                createdAt: true,
-                updatedAt: true,
-                user: {
-                    id: true,
-                    phone: true,
-                    isOnline: true,
-                    lastSeen: true,
-                    status: true,
-                    createdAt: true,
-                    updatedAt: true,
-                    profile: {
-                        id: true,
-                        name: true,
-                        username: true,
-                        biografy: true,
-                        avatars: true,
-                    },
-                },
-            },
-            order: { updatedAt: 'DESC' },
-        });
-
-        return {
-            data: banUsers.map((member) => ({
-                ...member,
-                user: toUserResponse(member.user),
-            })),
-        };
-    }
-
     async getAllUser(chatId: ChatId) {
         const chat = await this.chatRepository.findOne({
             where: {
@@ -288,47 +529,18 @@ export class ChatService {
         });
         if (!chat) throw new NotFoundException('chat not found');
 
-        const roleBanChat = await this.roleChatRepository.findOne({
-            where: {
-                name: RoleChatEnum.BAN,
-            },
-        });
-
-        const Users = await this.memberRepository.find({
-            where: {
-                chat: { id: chatId },
-                role: Not({ id: roleBanChat?.id }),
-            },
-            relations: { user: { profile: true } },
-            select: {
-                id: true,
-                createdAt: true,
-                updatedAt: true,
-                user: {
-                    id: true,
-                    phone: true,
-                    isOnline: true,
-                    lastSeen: true,
-                    status: true,
-                    createdAt: true,
-                    updatedAt: true,
-                    profile: {
-                        id: true,
-                        name: true,
-                        username: true,
-                        biografy: true,
-                        avatars: true,
-                    },
-                },
-            },
-            order: { updatedAt: 'DESC' },
-        });
+        const members = await this.memberRepository
+            .createQueryBuilder('member')
+            .innerJoin('member.role', 'role')
+            .innerJoinAndSelect('member.user', 'user')
+            .leftJoinAndSelect('user.profile', 'profile')
+            .where('member.chat.id = :chatId', { chatId })
+            .andWhere('role.name != :banRole', { banRole: RoleChatEnum.BAN })
+            .orderBy('member.updatedAt', 'DESC')
+            .getMany();
 
         return {
-            data: Users.map((member) => ({
-                ...member,
-                user: toUserResponse(member.user),
-            })),
+            data: members.map((member) => this.recordMemberWithPhone(member, true)),
         };
     }
 
@@ -362,6 +574,43 @@ export class ChatService {
         return members.map((m) => m.user.id);
     }
 
+    /**
+     * Wire shape for a chat member (numeric ids). The phone number is only
+     * exposed to group admins/owners — plain members never receive it.
+     */
+    serializeMember(
+        member: ChatMember,
+        user: User & { profile?: { name: string | null; username: string | null; avatars: string[] } | null },
+        includePhone: boolean,
+    ) {
+        const profile = user.profile;
+        return {
+            memberId: Number(member.id),
+            userId: Number(user.id),
+            name: profile?.name ?? 'بدون نام',
+            username: profile?.username ?? null,
+            avatars: profile?.avatars ?? [],
+            isOnline: user.isOnline,
+            lastSeen: user.lastSeen,
+            status: user.status,
+            role: member.role?.name ?? null,
+            isBanned: member.role?.name === RoleChatEnum.BAN,
+            ...(includePhone ? { phone: user.phone } : {}),
+        };
+    }
+
+    private async getRoleOrFail(name: RoleChatEnum): Promise<RoleChat> {
+        const role = await this.roleChatRepository.findOne({ where: { name } });
+        if (!role) throw new NotFoundException(`${name} role not found`);
+        return role;
+    }
+
+    private async removePermissionsForMember(memberId: number) {
+        await this.memberRepository.manager
+            .getRepository(PermissionAdmin)
+            .delete({ member: { id: memberId } });
+    }
+
     private async deleteAllAvatar(avatars: string[]) {
         try {
             for (const img of avatars) {
@@ -378,3 +627,4 @@ export class ChatService {
         }
     }
 }
+

@@ -1,11 +1,12 @@
-import { ArrayMinSize, IsArray, IsString, MaxLength } from 'class-validator';
+import { ArrayMinSize, IsArray, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class createChatDto {
     @IsString()
     @MaxLength(20)
     title: string;
 
+    @IsOptional()
     @IsArray()
-    @ArrayMinSize(1)
-    members: number[];
+    @IsString({ each: true })
+    members?: string[];
 }

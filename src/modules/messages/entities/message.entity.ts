@@ -2,18 +2,24 @@ import { BaseEntity } from 'src/common/entities/base.entity';
 import { User } from 'src/modules/auth/entities/user.entity';
 import { Chat } from 'src/modules/chats/entities/chat.entity';
 import { ChatSeen } from 'src/modules/chats/entities/chats_seen.entity';
+import { Attachment } from 'src/modules/attachments/entities/attachment.entity';
 import { Entity, Column, ManyToOne, OneToMany } from 'typeorm';
 import { TypeMessage } from './typeMessage.entity';
 
 @Entity('messages')
 export class Message extends BaseEntity {
+    /** Text body; null/empty for attachment-only messages. */
     @Column({ type: 'text', nullable: true })
     content: string;
 
     @ManyToOne(() => TypeMessage)
     type: TypeMessage;
 
-    @ManyToOne(() => User, { eager: true })
+    /**
+     * NOT eager: the nested `profile` relation (display name / avatars) is only
+     * joined when queries explicitly request `relations: { sender: { profile: true } }`.
+     */
+    @ManyToOne(() => User)
     sender: User;
 
     @ManyToOne(() => Chat, (chat) => chat.messages, { onDelete: 'CASCADE' })
@@ -24,6 +30,9 @@ export class Message extends BaseEntity {
 
     @OneToMany(() => ChatSeen, (chatSeen) => chatSeen.message)
     chatSeen: ChatSeen[];
+
+    @OneToMany(() => Attachment, (attachment) => attachment.message)
+    attachments: Attachment[];
 
     @Column({ default: false })
     isEdited: boolean;

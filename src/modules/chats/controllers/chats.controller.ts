@@ -13,12 +13,14 @@ import { createChatDto } from '../dtos/createChat.dto';
 import { RequestAuth } from 'src/common/types/RequestAuth.type';
 import { InviteLinkService } from '../services/inviteLink.service';
 import { ChatId } from 'src/common/types/brands.type';
+import { GroupRealtimeService } from '../services/group-realtime.service';
 
 @Controller('chats')
 export class ChatsController {
     constructor(
         private readonly chatService: ChatService,
         private readonly linkService: InviteLinkService,
+        private readonly groupRealtime: GroupRealtimeService,
     ) {}
 
     @Post('create')
@@ -36,6 +38,9 @@ export class ChatsController {
     @Post('/join/:code')
     @Role([RoleEnum.ALL])
     async joinToChat(@Param('code') code: string, @Req() req: RequestAuth) {
-        return await this.linkService.joinByInviteCode(code, req.user.sub);
+        const chat = await this.linkService.joinByInviteCode(code, req.user.sub);
+        this.groupRealtime.groupAdded(chat.id, req.user.sub);
+        this.groupRealtime.groupChanged(chat.id, 'member_joined');
+        return { chatId: chat.id, title: chat.title };
     }
 }
