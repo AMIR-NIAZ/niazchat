@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { UserAvatar } from '../../shared/components';
 import { palette, radii, spacing } from '../../shared/theme';
-import { formatMessageTime } from './messages-model';
+import { formatMessageTime, isOwnMessage } from './messages-model';
 import type { ChatMessage, ReplyPreview } from './messages-model';
 /**
  * A single message bubble. Mine → primary, right-aligned; others → white,
@@ -20,7 +21,19 @@ interface MessageBubbleProps {
     highlighted?: boolean;
     /** Highest seen id among the other members (drives my tick state). */
     othersLastSeenId?: number | null;
+    /** Sender name only on the FIRST message of a run (group chats). */
+    showSenderName?: boolean;
+    /** Sender avatar only on the LAST message of a run (group chats). */
+    showAvatar?: boolean;
+    /**
+     * Opens the sender's user-info screen. Only wired for OTHER users' group
+     * messages; the bubble body itself never navigates.
+     */
+    onOpenProfile?: ((message: ChatMessage) => void) | undefined;
 }
+
+/** Bubble avatar edge length (the spacer keeps the other rows aligned). */
+const AVATAR_SIZE = 45;
 
 function quoteSnippet(reply: ReplyPreview): string {
     if (reply.isDeleted) {
@@ -48,8 +61,11 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
         onReplyPress,
         highlighted = false,
         othersLastSeenId = null,
+        showSenderName = true,
+        showAvatar = false,
+        onOpenProfile,
     } = props;
-    const showSender = !mine && isGroup;
+    const showSender = !mine && isGroup && showSenderName;
     const showFailedHint = message.status === 'failed';
     const isSending = message.status === 'pending';
     const seenByOthers =
@@ -66,9 +82,7 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
     const replyName =
         reply === null
             ? ''
-            : currentUserId !== null &&
-                currentUserId > 0 &&
-                reply.senderId === currentUserId
+            : isOwnMessage(currentUserId, reply.senderId)
               ? 'You'
               : reply.senderName !== ''
                 ? reply.senderName
@@ -137,9 +151,24 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                     </View>
                 </Pressable>
             )}
-            {showSender && (
-                <Text style={styles.senderName}>{message.senderName}</Text>
-            )}
+            {showSender &&
+                (onOpenProfile === undefined ? (
+                    <Text style={styles.senderName}>{message.senderName}</Text>
+                ) : (
+                    // Separate tappable target from the bubble: long-press,
+                    // retry, selection and swipe-to-reply stay untouched.
+                    <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Open profile of ${message.senderName}`}
+                        hitSlop={{ top: 15, bottom: 15, left: 8, right: 8 }}
+                        onPress={(): void => onOpenProfile(message)}
+                        style={({ pressed }) => pressed && styles.pressed}
+                    >
+                        <Text style={styles.senderName}>
+                            {message.senderName}
+                        </Text>
+                    </Pressable>
+                ))}
             {message.content !== null && message.content !== '' && (
                 <Text style={[styles.content, mine && styles.contentMine]}>
                     {message.content}
@@ -174,32 +203,67 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
         </View>
     );
 
-    if (showFailedHint && onRetryFailed !== undefined) {
+    const bubbleBody =
+        showFailedHint && onRetryFailed !== undefined ? (
+            <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Retry sending message"
+                onPress={(): void => onRetryFailed(message)}
+            >
+                {body}
+            </Pressable>
+        ) : onLongPress === undefined ? (
+            body
+        ) : (
+            <Pressable
+                onLongPress={(): void => onLongPress(message)}
+                delayLongPress={400}
+            >
+                {body}
+            </Pressable>
+        );
+
+    // Private chats and my own messages keep the original full-width layout.
+    if (!isGroup || mine) {
         return (
             <View style={[styles.row, mine && styles.rowMine]}>
-                <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Retry sending message"
-                    onPress={(): void => onRetryFailed(message)}
-                >
-                    {body}
-                </Pressable>
+                {bubbleBody}
             </View>
         );
     }
 
     return (
-        <View style={[styles.row, mine && styles.rowMine]}>
-            {onLongPress === undefined ? (
-                body
-            ) : (
-                <Pressable
-                    onLongPress={(): void => onLongPress(message)}
-                    delayLongPress={400}
-                >
-                    {body}
-                </Pressable>
-            )}
+        <View style={[styles.row, styles.groupRow]}>
+            {/* Always reserved, so a run keeps one bubble edge; only the last
+                message of the run paints the avatar (bottom aligned). */}
+            <View style={styles.avatarSlot}>
+                {showAvatar &&
+                    (onOpenProfile === undefined ? (
+                        <UserAvatar
+                            userId={message.senderId}
+                            name={message.senderName}
+                            uri={message.senderAvatarPath}
+                            size={AVATAR_SIZE}
+                        />
+                    ) : (
+                        <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Open profile of ${message.senderName}`}
+                            // 32 px circle + 6 px on each side = 44 px target.
+                            hitSlop={6}
+                            onPress={(): void => onOpenProfile(message)}
+                            style={({ pressed }) => pressed && styles.pressed}
+                        >
+                            <UserAvatar
+                                userId={message.senderId}
+                                name={message.senderName}
+                                uri={message.senderAvatarPath}
+                                size={AVATAR_SIZE}
+                            />
+                        </Pressable>
+                    ))}
+            </View>
+            <View style={styles.bubbleSlot}>{bubbleBody}</View>
         </View>
     );
 }
@@ -237,6 +301,13 @@ const styles = StyleSheet.create({
         marginVertical: spacing.xxs,
     },
     rowMine: { alignSelf: 'flex-end' },
+    groupRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-end',
+        gap: spacing.xs,
+    },
+    avatarSlot: { width: AVATAR_SIZE },
+    bubbleSlot: { flexShrink: 1 },
     bubble: {
         borderRadius: radii.md,
         paddingHorizontal: spacing.sm,
@@ -252,6 +323,7 @@ const styles = StyleSheet.create({
     },
     theirs: { borderBottomLeftRadius: 4 },
     failed: { opacity: 0.65 },
+    pressed: { opacity: 0.6 },
     highlighted: {
         borderColor: palette.semantic.warning,
         borderWidth: 2,

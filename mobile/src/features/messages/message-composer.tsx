@@ -9,6 +9,7 @@ import {
     View,
 } from 'react-native';
 import { palette, radii, spacing } from '../../shared/theme';
+import { isOwnMessage } from './messages-model';
 import type { ReplyPreview } from './messages-model';
 
 /**
@@ -35,7 +36,7 @@ function replyName(
     replyTo: ReplyPreview,
     currentUserId: number | null,
 ): string {
-    if (currentUserId !== null && replyTo.senderId === currentUserId) {
+    if (isOwnMessage(currentUserId, replyTo.senderId)) {
         return 'You';
     }
     return replyTo.senderName !== '' ? replyTo.senderName : 'Unknown';

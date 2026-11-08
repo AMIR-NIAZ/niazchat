@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import {
     ActivityIndicator,
-    Image,
+    Alert,
+    Linking,
+    Platform,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -13,6 +15,7 @@ import * as ImagePicker from 'expo-image-picker';
 import {
     AppText,
     Screen,
+    UserAvatar,
     palette,
     radii,
     spacing,
@@ -20,10 +23,19 @@ import {
 } from '../../shared/components';
 import {
     describeAvatarError,
+    MAX_AVATARS,
+    MAX_AVATAR_BYTES,
+    normalizeAvatarMime,
     useDeleteMyAvatar,
     useProfile,
+    useSetMainAvatar,
     useUploadMyAvatar,
 } from '../../features/users';
+import {
+    AvatarActionSheet,
+    AvatarGallery,
+    AvatarViewer,
+} from '../../features/users/avatar-gallery';
 import type { AvatarUploadAsset } from '../../features/users';
 
 /**
@@ -34,31 +46,36 @@ import type { AvatarUploadAsset } from '../../features/users';
  * presence (`isOnline`/`lastSeen`) is broken server-side — none of those are
  * shown.
  *
- * Avatar flow: `PUT /user/uploade-avatar` APPENDS to `profile.avatars`, so a
- * replace is modeled as pick → preview → confirm upload → (backend keeps
- * history; the LAST avatar is displayed) + optional "Remove photo" which calls
- * `DELETE /user/delete-avatar` with the exact stored path.
+ * Avatar flow (multi-avatar): `avatars[0]` is the current photo everywhere.
+ * The gallery lists every photo; "+" uploads a new one (prepended as current),
+ * tapping a thumbnail opens the viewer, long-pressing opens the same actions as
+ * a sheet, and delete/set-current always reference the stored file NAME.
  */
+
+const MAX_AVATAR_LABEL = `${Math.round(MAX_AVATAR_BYTES / (1024 * 1024))} MB`;
 
 export default function ProfileScreen(): React.ReactElement {
     const profile = useProfile();
     const uploadAvatar = useUploadMyAvatar();
     const deleteAvatar = useDeleteMyAvatar();
-    const [pickedAsset, setPickedAsset] = useState<AvatarUploadAsset | null>(
-        null,
-    );
-    /** Absolute URL whose image failed to load — falls back to the initial. */
-    const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
+    const setMainAvatar = useSetMainAvatar();
+    const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+    const [sheetIndex, setSheetIndex] = useState<number | null>(null);
     const [feedback, setFeedback] = useState<{
         kind: 'ok' | 'error';
         text: string;
     } | null>(null);
 
-    const {
-        profile: user,
-        avatarUrls: avatarUrlList,
-        currentAvatarPath,
-    } = profile.view;
+    const { profile: user, avatars, currentAvatarUrl } = profile.view;
+    const busy =
+        uploadAvatar.isPending ||
+        deleteAvatar.isPending ||
+        setMainAvatar.isPending;
+    const pendingFileName = deleteAvatar.isPending
+        ? (deleteAvatar.variables ?? null)
+        : setMainAvatar.isPending
+          ? (setMainAvatar.variables ?? null)
+          : null;
 
     if (profile.isLoading) {
         return (
@@ -83,79 +100,174 @@ export default function ProfileScreen(): React.ReactElement {
         );
     }
 
-    const latestAvatarUrl =
-        avatarUrlList.length > 0
-            ? (avatarUrlList[avatarUrlList.length - 1] ?? null)
-            : null;
-    /** False when the stored path resolves to nothing the device can load. */
-    const avatarVisible =
-        latestAvatarUrl !== null && latestAvatarUrl !== failedAvatarUrl;
     const displayName = user.name;
-    const displayInitial =
-        displayName.length > 0 ? displayName.slice(0, 1) : '?';
+    const sheetAvatar =
+        sheetIndex === null ? null : (avatars[sheetIndex] ?? null);
 
-    const pickAvatarImage = async (): Promise<void> => {
+    const pickAndUpload = async (): Promise<void> => {
+        if (busy) {
+            return;
+        }
+        if (avatars.length >= MAX_AVATARS) {
+            setFeedback({
+                kind: 'error',
+                text: `You can keep up to ${MAX_AVATARS} photos. Delete one first.`,
+            });
+            return;
+        }
+
+        // Photo-library permission (native only; the web picker has none).
+        if (Platform.OS !== 'web') {
+            const permission =
+                await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (!permission.granted) {
+                Alert.alert(
+                    'Photo access needed',
+                    'Allow photo access to add a profile photo. You can change this later in Settings.',
+                    [
+                        { text: 'Not now', style: 'cancel' },
+                        {
+                            text: 'Open settings',
+                            onPress: (): void => {
+                                void Linking.openSettings();
+                            },
+                        },
+                    ],
+                );
+                return;
+            }
+        }
+
         setFeedback(null);
+        let result: ImagePicker.ImagePickerResult;
         try {
-            const result = await ImagePicker.launchImageLibraryAsync({
+            result = await ImagePicker.launchImageLibraryAsync({
                 mediaTypes: ['images'],
                 allowsEditing: true,
                 aspect: [1, 1],
                 quality: 0.8,
-            });
-            // Cancellation is a normal outcome, not an error.
-            if (result.canceled) {
-                return;
-            }
-            const asset = result.assets[0];
-            if (asset?.uri === undefined || asset.uri === '') {
-                setFeedback({
-                    kind: 'error',
-                    text: 'Could not read the selected image.',
-                });
-                return;
-            }
-            setPickedAsset({
-                uri: asset.uri,
-                mimeType: asset.mimeType ?? null,
-                fileName: asset.fileName ?? null,
             });
         } catch {
             setFeedback({
                 kind: 'error',
                 text: 'Could not open the photo library.',
             });
+            return;
+        }
+        // Cancellation is a normal outcome, not an error.
+        if (result.canceled) {
+            return;
+        }
+        const asset = result.assets[0];
+        if (asset?.uri === undefined || asset.uri === '') {
+            setFeedback({
+                kind: 'error',
+                text: 'Could not read the selected image.',
+            });
+            return;
+        }
+
+        const mimeType = normalizeAvatarMime(
+            asset.mimeType ?? null,
+            asset.fileName ?? null,
+        );
+        if (mimeType === null) {
+            setFeedback({
+                kind: 'error',
+                text: 'Pick a JPEG, PNG or WebP image.',
+            });
+            return;
+        }
+        if (asset.fileSize !== undefined && asset.fileSize > MAX_AVATAR_BYTES) {
+            setFeedback({
+                kind: 'error',
+                text: `That image is larger than ${MAX_AVATAR_LABEL}. Pick a smaller photo.`,
+            });
+            return;
+        }
+
+        const payload: AvatarUploadAsset = {
+            uri: asset.uri,
+            mimeType,
+            fileName: asset.fileName ?? null,
+        };
+        try {
+            // Resolves only once the backend stored the file and the profile
+            // cache was refreshed from the response.
+            await uploadAvatar.mutateAsync(payload);
+            setFeedback({ kind: 'ok', text: 'Photo added.' });
+        } catch (error) {
+            setFeedback({
+                kind: 'error',
+                text: describeAvatarError(error),
+            });
         }
     };
 
-    const confirmUpload = async (): Promise<void> => {
-        if (pickedAsset === null || uploadAvatar.isPending) {
+    const performSetMain = async (fileName: string): Promise<boolean> => {
+        if (setMainAvatar.isPending) {
+            return false;
+        }
+        setFeedback(null);
+        try {
+            await setMainAvatar.mutateAsync(fileName);
+            setFeedback({ kind: 'ok', text: 'Profile photo updated.' });
+            return true;
+        } catch (error) {
+            const text = describeAvatarError(error);
+            setFeedback({ kind: 'error', text });
+            Alert.alert('Could not update the photo', text, [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Retry',
+                    onPress: (): void => {
+                        void performSetMain(fileName);
+                    },
+                },
+            ]);
+            return false;
+        }
+    };
+
+    const performDelete = async (fileName: string): Promise<void> => {
+        if (deleteAvatar.isPending) {
             return;
         }
         setFeedback(null);
         try {
-            // Resolves only once the backend stored the file, appended the path
-            // and the profile cache was refreshed — never before.
-            await uploadAvatar.mutateAsync(pickedAsset);
-            setPickedAsset(null);
-            setFeedback({ kind: 'ok', text: 'Avatar updated.' });
+            await deleteAvatar.mutateAsync(fileName);
+            setFeedback({ kind: 'ok', text: 'Photo deleted.' });
         } catch (error) {
-            setFeedback({ kind: 'error', text: describeAvatarError(error) });
+            const text = describeAvatarError(error);
+            setFeedback({ kind: 'error', text });
+            Alert.alert('Could not delete the photo', text, [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Retry',
+                    onPress: (): void => {
+                        void performDelete(fileName);
+                    },
+                },
+            ]);
         }
     };
 
-    const removeAvatar = async (): Promise<void> => {
-        if (currentAvatarPath === null || deleteAvatar.isPending) {
-            return;
-        }
-        setFeedback(null);
-        try {
-            await deleteAvatar.mutateAsync(currentAvatarPath);
-            setFailedAvatarUrl(null);
-            setFeedback({ kind: 'ok', text: 'Avatar removed.' });
-        } catch (error) {
-            setFeedback({ kind: 'error', text: describeAvatarError(error) });
-        }
+    const confirmDeleteFromSheet = (fileName: string): void => {
+        Alert.alert(
+            'Delete this photo?',
+            'It will be removed from your profile for everyone.',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: (): void => {
+                        setSheetIndex(null);
+                        void performDelete(fileName);
+                    },
+                },
+            ],
+        );
     };
 
     return (
@@ -177,89 +289,35 @@ export default function ProfileScreen(): React.ReactElement {
                 </View>
 
                 <View style={styles.avatarSection}>
-                    {pickedAsset === null ? (
-                        avatarVisible ? (
-                            <Image
-                                accessibilityLabel="Profile photo"
-                                style={styles.avatar}
-                                source={{ uri: latestAvatarUrl }}
-                                // A stored path can still be unreachable (wrong
-                                // host, removed file); show the initial then.
-                                onError={(): void =>
-                                    setFailedAvatarUrl(latestAvatarUrl)
-                                }
-                            />
-                        ) : (
-                            <View style={styles.avatarFallback}>
-                                <Text style={styles.avatarFallbackText}>
-                                    {displayInitial}
-                                </Text>
-                            </View>
-                        )
-                    ) : (
-                        <>
-                            <Image
-                                accessibilityLabel="Selected photo preview"
-                                style={styles.avatar}
-                                source={{ uri: pickedAsset.uri }}
-                            />
-                            <AppText variant="caption">
-                                Preview — confirm to upload
-                            </AppText>
-                        </>
-                    )}
+                    {/* Small circle → server thumbnail; the full original is
+                        only loaded by the photo viewer below. */}
+                    <UserAvatar
+                        userId={user.id}
+                        name={displayName}
+                        uri={currentAvatarUrl}
+                        size={120}
+                    />
 
-                    <View style={styles.avatarActions}>
-                        {pickedAsset === null ? (
-                            <FormRow
-                                disabled={uploadAvatar.isPending}
-                                label={
-                                    uploadAvatar.isPending
-                                        ? 'Uploading…'
-                                        : avatarVisible
-                                          ? 'Change photo'
-                                          : 'Add photo'
-                                }
-                                onPress={(): void => {
-                                    void pickAvatarImage();
-                                }}
-                            />
-                        ) : (
-                            <>
-                                <FormRow
-                                    disabled={uploadAvatar.isPending}
-                                    label={
-                                        uploadAvatar.isPending
-                                            ? 'Uploading…'
-                                            : 'Confirm upload'
-                                    }
-                                    onPress={(): void => {
-                                        void confirmUpload();
-                                    }}
-                                />
-                                <FormRow
-                                    disabled={uploadAvatar.isPending}
-                                    intent="ghost"
-                                    label="Discard"
-                                    onPress={(): void => setPickedAsset(null)}
-                                />
-                            </>
-                        )}
-                        {pickedAsset === null && currentAvatarPath !== null && (
-                            <FormRow
-                                disabled={deleteAvatar.isPending}
-                                intent="danger"
-                                label={
-                                    deleteAvatar.isPending
-                                        ? 'Removing…'
-                                        : 'Remove photo'
-                                }
-                                onPress={(): void => {
-                                    void removeAvatar();
-                                }}
-                            />
-                        )}
-                    </View>
+                    <AvatarGallery
+                        avatars={avatars}
+                        maxAvatars={MAX_AVATARS}
+                        uploading={uploadAvatar.isPending}
+                        pendingFileName={pendingFileName}
+                        disabled={busy}
+                        onPressAvatar={(index): void => setViewerIndex(index)}
+                        onLongPressAvatar={(index): void =>
+                            setSheetIndex(index)
+                        }
+                        onPressAdd={(): void => {
+                            void pickAndUpload();
+                        }}
+                    />
+
+                    <AppText variant="caption" style={styles.avatarHint}>
+                        {avatars.length === 0
+                            ? 'Add up to 10 profile photos.'
+                            : `Tap a photo to view it. ${avatars.length}/${MAX_AVATARS} used.`}
+                    </AppText>
 
                     {feedback !== null && (
                         <Text
@@ -287,6 +345,36 @@ export default function ProfileScreen(): React.ReactElement {
                 />
                 <InfoRow label="Phone" value={user.phone} />
             </ScrollView>
+
+            <AvatarViewer
+                visible={viewerIndex !== null}
+                avatars={avatars}
+                initialIndex={viewerIndex ?? 0}
+                busy={busy}
+                pendingFileName={pendingFileName}
+                onClose={(): void => setViewerIndex(null)}
+                onSetMain={performSetMain}
+                onDelete={performDelete}
+            />
+
+            <AvatarActionSheet
+                avatar={sheetAvatar}
+                isCurrent={sheetIndex === 0}
+                busy={busy}
+                onSetMain={(): void => {
+                    const target = sheetAvatar;
+                    setSheetIndex(null);
+                    if (target !== null) {
+                        void performSetMain(target.fileName);
+                    }
+                }}
+                onDelete={(): void => {
+                    if (sheetAvatar !== null) {
+                        confirmDeleteFromSheet(sheetAvatar.fileName);
+                    }
+                }}
+                onDismiss={(): void => setSheetIndex(null)}
+            />
         </Screen>
     );
 }
@@ -318,31 +406,15 @@ function InfoRow(props: {
 function FormRow(props: {
     label: string;
     onPress: () => void;
-    intent?: 'primary' | 'ghost' | 'danger';
-    disabled?: boolean;
 }): React.ReactElement {
     return (
         <Pressable
             accessibilityRole="button"
-            accessibilityState={{ disabled: props.disabled === true }}
-            disabled={props.disabled === true}
+            accessibilityLabel={props.label}
             onPress={props.onPress}
-            style={[
-                styles.button,
-                props.intent === 'ghost' && styles.buttonGhost,
-                props.intent === 'danger' && styles.buttonDanger,
-                props.disabled === true && styles.buttonDisabled,
-            ]}
+            style={styles.button}
         >
-            <Text
-                style={[
-                    styles.buttonText,
-                    props.intent === 'danger' && styles.buttonDangerText,
-                    props.intent === 'ghost' && styles.buttonGhostText,
-                ]}
-            >
-                {props.label}
-            </Text>
+            <Text style={styles.buttonText}>{props.label}</Text>
         </Pressable>
     );
 }
@@ -387,12 +459,7 @@ const styles = StyleSheet.create({
         fontSize: 42,
         fontWeight: '700',
     },
-    avatarActions: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: spacing.xs,
-        justifyContent: 'center',
-    },
+    avatarHint: { color: palette.neutral[500] },
     button: {
         backgroundColor: palette.primary[500],
         borderRadius: radii.sm,
@@ -400,19 +467,6 @@ const styles = StyleSheet.create({
         paddingVertical: 6,
     },
     buttonText: { color: palette.neutral[0], fontSize: 13, fontWeight: '600' },
-    buttonGhost: {
-        borderWidth: 1,
-        borderColor: palette.primary[500],
-        backgroundColor: 'transparent',
-    },
-    buttonGhostText: { color: palette.primary[600] },
-    buttonDanger: {
-        borderWidth: 1,
-        borderColor: palette.semantic.danger,
-        backgroundColor: 'transparent',
-    },
-    buttonDangerText: { color: palette.semantic.danger },
-    buttonDisabled: { opacity: 0.5 },
     errorText: { color: palette.semantic.danger },
     okText: { color: palette.semantic.success },
     infoRow: {

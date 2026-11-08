@@ -3,28 +3,47 @@ import {
     ConflictException,
     Injectable,
     InternalServerErrorException,
+    Logger,
     NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from '../entities/user.entity';
 import { UserProfile } from '../entities/user_profile.entity';
-import { Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { JwtPayload } from 'src/common/types/jwt-payload.type';
 import { UpdateUserDto } from '../dtos/updateUser.dto';
+import { UserStatusEnum } from 'src/common/enums/UserStatus.enum';
 import * as fs from 'fs';
 import * as path from 'path';
 import { UserId } from 'src/common/types/brands.type';
 import { toUserResponse } from '../utils/user-response.util';
+import { toPublicUserProfile } from '../utils/public-profile.util';
 import { detectFileMimeType } from 'src/modules/attachments/utils/file-signature.util';
-import { isAvatarMimeType } from '../utils/avatar.util';
+import {
+    avatarFileNameOf,
+    isAvatarMimeType,
+    MAX_USER_AVATARS,
+    resolveAvatarFilePath,
+    storedAvatarPath,
+} from '../utils/avatar.util';
+import { removeAvatarThumbnails } from 'src/modules/media/avatar-thumbnail.util';
+
+/** Row shape of the locked profile inside an avatar transaction. */
+interface LockedProfileRow {
+    id: string;
+    avatars: string[] | null;
+}
 
 @Injectable()
 export class UserService {
+    private readonly logger = new Logger(UserService.name);
+
     constructor(
         @InjectRepository(User)
         private readonly userRepository: Repository<User>,
         @InjectRepository(UserProfile)
         private readonly profileRepository: Repository<UserProfile>,
+        private readonly dataSource: DataSource,
     ) {}
 
     async onlineUser(user: JwtPayload) {
@@ -36,6 +55,27 @@ export class UserService {
             { id: user.sub },
             { isOnline: false, lastSeen: new Date() },
         );
+    }
+
+    /**
+     * Public profile of ANY user for any authenticated caller (no shared-chat
+     * requirement). Unknown and non-active users are indistinguishable: both
+     * answer the same 404, so the route cannot be used to probe account state.
+     */
+    async getPublicProfile(userId: number) {
+        if (!Number.isInteger(userId) || userId <= 0) {
+            throw new BadRequestException('userId must be a positive integer');
+        }
+
+        const user = await this.userRepository.findOne({
+            where: { id: userId as UserId, status: UserStatusEnum.ACTIVE },
+            relations: { profile: true },
+        });
+        if (!user) {
+            throw new NotFoundException('User not found');
+        }
+
+        return toPublicUserProfile(user);
     }
 
     async getUserByUsername(username: string) {
@@ -85,44 +125,220 @@ export class UserService {
         return { message: 'user updated is 1' };
     }
 
+    /** Number of photos the caller currently has (early upload guard). */
+    async countAvatars(userId: UserId): Promise<number> {
+        const profile = await this.profileRepository.findOne({
+            where: { user: { id: userId } },
+        });
+        return profile?.avatars?.length ?? 0;
+    }
+
     /**
-     * Stores the uploaded file as the caller's current avatar and returns the
-     * updated user, so the client can confirm persistence without a refetch.
+     * Stores the uploaded file as the caller's current avatar (index 0) and
+     * returns the updated user, so the client can confirm persistence without a
+     * refetch.
      *
-     * The extension/Content-Type the client sent is not trusted: the bytes are
-     * sniffed first, and anything that is not a raster image is deleted again
-     * (avatars are served statically from the API origin).
+     * The client's file name and declared type are not trusted: the bytes are
+     * sniffed and must match the declared image type. Anything else is deleted
+     * again (avatars are served statically from the API origin).
+     *
+     * The array write is a single SQL statement under a row lock; the 10-photo
+     * limit is checked in that same transaction, so two concurrent uploads
+     * cannot exceed it or lose an avatar. If the DB write fails the just-stored
+     * file is removed again.
      */
     async uploadAvatar(file: Express.Multer.File, user: JwtPayload) {
         const detectedMime = await this.detectUploadedMime(file.path);
-        if (detectedMime === null || !isAvatarMimeType(detectedMime)) {
-            await fs.promises.unlink(file.path).catch(() => undefined);
+        const declaredMime = (file.mimetype ?? '').toLowerCase();
+        if (
+            detectedMime === null ||
+            !isAvatarMimeType(detectedMime) ||
+            detectedMime !== declaredMime
+        ) {
+            await this.removeStoredFile(file.path);
             throw new BadRequestException(
-                'avatar file content is not a supported image (jpeg, png, gif, webp)',
+                'avatar file content is not a supported image (jpeg, png, webp)',
             );
         }
 
-        const profile = await this.getOrCreateProfile(user.sub);
+        const storedPath = storedAvatarPath(file.path);
 
-        // Same shape the static handler serves: relative to the cwd, forward
-        // slashes, no absolute server paths in the database.
-        const storedPath = path
-            .relative(process.cwd(), file.path)
-            .split(path.sep)
-            .join('/');
-        profile.avatars = [...(profile.avatars ?? []), storedPath];
-        await this.profileRepository.save(profile);
-
-        const owner = await this.userRepository.findOne({
-            where: { id: user.sub },
-            relations: { role: true, profile: true },
-        });
-        if (!owner) throw new NotFoundException('user not found');
+        try {
+            await this.dataSource.transaction(async (manager) => {
+                const profile = await this.lockProfile(manager, user.sub);
+                const avatars = profile.avatars ?? [];
+                if (avatars.length >= MAX_USER_AVATARS) {
+                    throw new BadRequestException(
+                        `You can have at most ${MAX_USER_AVATARS} profile photos. Delete one before uploading a new photo.`,
+                    );
+                }
+                await manager.query(
+                    `UPDATE "user_profiles"
+                     SET "avatars" = array_prepend($1::text, "avatars"), "updatedAt" = now()
+                     WHERE "id" = $2`,
+                    [storedPath, profile.id],
+                );
+            });
+        } catch (error) {
+            await this.removeStoredFile(file.path);
+            throw error;
+        }
 
         return {
-            message: 'avatar updated successfully',
-            user: toUserResponse(owner),
+            message: 'avatar added successfully',
+            user: toUserResponse(await this.requireOwner(user.sub)),
         };
+    }
+
+    /**
+     * Removes ONE avatar identified by its stored file name. The name must match
+     * an entry in the caller's own `avatars` array (compared by basename); the
+     * file path is always rebuilt from that stored entry, never from the param.
+     *
+     * Removing the current photo promotes the next one automatically (array
+     * order), removing the last leaves the user with no avatar.
+     */
+    async removeAvatar(rawFileName: string, user: JwtPayload) {
+        const fileName = avatarFileNameOf(rawFileName);
+        if (fileName === null) {
+            throw new BadRequestException('invalid avatar file name');
+        }
+
+        const removed: { storedPath: string | null } = { storedPath: null };
+
+        await this.dataSource.transaction(async (manager) => {
+            const profile = await this.lockProfile(manager, user.sub);
+            const entry = (profile.avatars ?? []).find(
+                (value) => path.basename(value) === fileName,
+            );
+            if (entry === undefined) {
+                throw new NotFoundException('avatar not found');
+            }
+            await manager.query(
+                `UPDATE "user_profiles"
+                 SET "avatars" = array_remove("avatars", $1::text), "updatedAt" = now()
+                 WHERE "id" = $2`,
+                [entry, profile.id],
+            );
+            removed.storedPath = entry;
+        });
+
+        if (removed.storedPath !== null) {
+            await this.removeStoredAvatar(removed.storedPath);
+        }
+
+        return {
+            message: 'avatar deleted successfully',
+            user: toUserResponse(await this.requireOwner(user.sub)),
+        };
+    }
+
+    /**
+     * Makes one of the caller's avatars current by moving it to index 0 while
+     * keeping the relative order of the others. Reordering is one SQL statement
+     * (`array_remove` + `array_prepend`) under a row lock.
+     */
+    async setMainAvatar(rawFileName: string, user: JwtPayload) {
+        const fileName = avatarFileNameOf(rawFileName);
+        if (fileName === null) {
+            throw new BadRequestException('invalid avatar file name');
+        }
+
+        await this.dataSource.transaction(async (manager) => {
+            const profile = await this.lockProfile(manager, user.sub);
+            const entry = (profile.avatars ?? []).find(
+                (value) => path.basename(value) === fileName,
+            );
+            if (entry === undefined) {
+                throw new NotFoundException('avatar not found');
+            }
+            await manager.query(
+                `UPDATE "user_profiles"
+                 SET "avatars" = array_prepend($1::text, array_remove("avatars", $1::text)),
+                     "updatedAt" = now()
+                 WHERE "id" = $2`,
+                [entry, profile.id],
+            );
+        });
+
+        return {
+            message: 'current avatar updated successfully',
+            user: toUserResponse(await this.requireOwner(user.sub)),
+        };
+    }
+
+    /**
+     * Legacy endpoint kept for old clients: the body carries the exact stored
+     * path (not just the file name). It is matched against the caller's array
+     * verbatim, exactly as before; the response shape is unchanged.
+     */
+    async deleteAvatar(avatarPath: string, user: JwtPayload) {
+        if (typeof avatarPath !== 'string' || avatarPath.trim() === '') {
+            throw new BadRequestException('avatar is required');
+        }
+
+        const removed: { storedPath: string | null } = { storedPath: null };
+
+        await this.dataSource.transaction(async (manager) => {
+            const profile = await this.lockProfile(manager, user.sub);
+            const entry = (profile.avatars ?? []).find(
+                (value) => value === avatarPath,
+            );
+            if (entry === undefined) throw new NotFoundException();
+            await manager.query(
+                `UPDATE "user_profiles"
+                 SET "avatars" = array_remove("avatars", $1::text), "updatedAt" = now()
+                 WHERE "id" = $2`,
+                [entry, profile.id],
+            );
+            removed.storedPath = entry;
+        });
+
+        if (removed.storedPath !== null) {
+            await this.removeStoredAvatar(removed.storedPath);
+        }
+
+        return { message: 'avatar updated successfully' };
+    }
+
+    /** Ban housekeeping: drops every avatar row + file (best effort per file). */
+    async deleteAllAvatar(userId: UserId): Promise<void> {
+        const profile = await this.profileRepository.findOne({
+            where: { user: { id: userId } },
+        });
+        if (!profile) return;
+
+        const avatars = profile.avatars ?? [];
+        await this.profileRepository.update(profile.id, { avatars: [] });
+        for (const avatar of avatars) {
+            await this.removeStoredAvatar(avatar);
+        }
+    }
+
+    /**
+     * Locks the caller's profile row (`FOR UPDATE`) inside an avatar
+     * transaction, creating the row first when it is missing. Serializing on
+     * this row is what makes the limit check + array write race-free.
+     */
+    private async lockProfile(
+        manager: EntityManager,
+        userId: UserId,
+    ): Promise<LockedProfileRow> {
+        await manager.query(
+            `INSERT INTO "user_profiles" ("userId") VALUES ($1)
+             ON CONFLICT ("userId") DO NOTHING`,
+            [userId],
+        );
+        const rows = await manager.query<LockedProfileRow[]>(
+            `SELECT "id", "avatars" FROM "user_profiles"
+             WHERE "userId" = $1 FOR UPDATE`,
+            [userId],
+        );
+        const row = rows[0];
+        if (row === undefined) {
+            throw new NotFoundException('profile not found');
+        }
+        return row;
     }
 
     /** Reads the first bytes of an uploaded file to detect its real type. */
@@ -142,44 +358,46 @@ export class UserService {
         }
     }
 
-    async deleteAvatar(avatarPath: string, user: JwtPayload) {
-        const profile = await this.getOrCreateProfile(user.sub);
-
-        if (!(profile.avatars ?? []).includes(avatarPath))
-            throw new NotFoundException();
-
-        profile.avatars = profile.avatars.filter(
-            (avatar) => avatar !== avatarPath,
-        );
-        await this.profileRepository.save(profile);
-
-        if (fs.existsSync(avatarPath)) {
-            await fs.promises.unlink(avatarPath);
-        }
-
-        return { message: 'avatar updated successfully' };
+    /** Removes a multer-written file; never fails the request. */
+    private async removeStoredFile(filePath: string): Promise<void> {
+        await fs.promises.unlink(filePath).catch((error: unknown) => {
+            this.logger.warn(
+                `could not remove uploaded avatar ${filePath}: ${
+                    error instanceof Error ? error.message : String(error)
+                }`,
+            );
+        });
     }
 
-    async deleteAllAvatar(userId: UserId): Promise<void> {
-        const profile = await this.getOrCreateProfile(userId);
-        const avatars = profile.avatars ?? [];
-
-        try {
-            for (const img of avatars) {
-                const fileExists = await fs.promises
-                    .stat(img)
-                    .then(() => true)
-                    .catch(() => false);
-                if (fileExists) {
-                    await fs.promises.unlink(img);
-                }
-            }
-        } catch (err) {
-            throw new InternalServerErrorException((err as Error).message);
+    /** Removes a stored avatar file, resolved safely inside uploads/avatars. */
+    private async removeStoredAvatar(stored: string): Promise<void> {
+        const resolved = resolveAvatarFilePath(stored);
+        if (resolved === null) {
+            this.logger.warn(
+                `refusing to delete avatar outside uploads: ${stored}`,
+            );
+            return;
         }
+        await fs.promises.unlink(resolved).catch((error: unknown) => {
+            this.logger.warn(
+                `could not remove avatar file ${resolved}: ${
+                    error instanceof Error ? error.message : String(error)
+                }`,
+            );
+        });
+        // Derived artefacts: every cached size goes with the original (best
+        // effort). Covers avatar delete, legacy delete and ban housekeeping,
+        // which all funnel through here.
+        await removeAvatarThumbnails(stored);
+    }
 
-        profile.avatars = [];
-        await this.profileRepository.save(profile);
+    private async requireOwner(userId: UserId): Promise<User> {
+        const owner = await this.userRepository.findOne({
+            where: { id: userId },
+            relations: { role: true, profile: true },
+        });
+        if (!owner) throw new NotFoundException('user not found');
+        return owner;
     }
 
     private async getOrCreateProfile(userId: UserId): Promise<UserProfile> {

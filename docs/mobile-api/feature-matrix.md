@@ -9,7 +9,7 @@ Backend-verified capabilities (each row cites the source modules analyzed). "Par
 | Phone (Iran) OTP login | ✅ (caveats) | Works, but OTP delivery is a stub (`console.log`), 60 s rate limit, `00000` in non-production (`otp.service.ts`, `message.service.ts` [common]) |
 | JWT access + refresh | ✅ | 1 h / 30 d; refresh requires non-standard `token` header (`auth.service.ts`, `jwt.service.ts`) |
 | Logout / token revocation | ❌ | No endpoint; ban clears refresh token only for admins (`auth.service.ts#banUser`) |
-| User profiles & avatar | ✅ | Name/username/bio update, avatar upload/delete (`user.controller.ts`) |
+| User profiles & avatar | ✅ | Name/username/bio update; multi-avatar gallery (up to 10, set current, delete) via `user.controller.ts` |
 | Ban phone / platform admin | ✅ | owner/admin routes (`auth.controller.ts`) |
 
 ## Chats

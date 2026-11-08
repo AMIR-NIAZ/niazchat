@@ -20,6 +20,8 @@ import { PayloadGuard } from 'src/common/guards/restGuards/payload.guard';
 import { RoleGurd } from 'src/common/guards/restGuards/role.guard';
 import { SeedersModule } from 'src/modules/seeders/seeders.module';
 import { HealthModule } from '../health/health.module';
+import { MediaModule } from '../media/media.module';
+import { AVATAR_THUMBNAIL_CACHE_CONTROL } from '../media/avatar-thumbnail.util';
 
 @Module({
     imports: [
@@ -39,6 +41,18 @@ import { HealthModule } from '../health/health.module';
             // compiled app is started from a different working directory.
             rootPath: join(process.cwd(), 'uploads'),
             serveRoot: '/uploads',
+            // Avatar/group-photo file names are unique per upload and never
+            // reused, so the originals are immutable: cache them for a year
+            // instead of refetching on every screen. Old clients keep working
+            // (same URLs, only headers changed).
+            serveStaticOptions: {
+                setHeaders: (res): void => {
+                    res.setHeader(
+                        'Cache-Control',
+                        AVATAR_THUMBNAIL_CACHE_CONTROL,
+                    );
+                },
+            },
         }),
         JwtModule.register({}),
         SeedersModule,
@@ -48,6 +62,7 @@ import { HealthModule } from '../health/health.module';
         MessageModule,
         ReactionsModule,
         AttachmentsModule,
+        MediaModule,
     ],
     controllers: [AppController],
     providers: [

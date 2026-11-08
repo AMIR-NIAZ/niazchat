@@ -20,6 +20,7 @@ import { UserPermission } from './entities/user_permissions.entity';
 import { Permission } from './entities/permission.entity';
 import { PermissionService } from './services/permission.service';
 import { AvatarUploadInterceptor } from './interceptors/avatar-upload.interceptor';
+import { AvatarLimitGuard } from './guards/avatar-limit.guard';
 
 @Module({
     imports: [
@@ -47,8 +48,9 @@ import { AvatarUploadInterceptor } from './interceptors/avatar-upload.intercepto
         JwtAppService,
         JwtService,
         UserGateway,
-        // Resolved from this module when used in `@UseInterceptors`.
+        // Resolved from this module when used in `@UseInterceptors`/`@UseGuards`.
         AvatarUploadInterceptor,
+        AvatarLimitGuard,
     ],
 })
 export class AuthModule {}

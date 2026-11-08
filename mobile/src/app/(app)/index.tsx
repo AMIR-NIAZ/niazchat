@@ -2,7 +2,6 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     FlatList,
-    Image,
     Pressable,
     RefreshControl,
     StyleSheet,
@@ -11,7 +10,13 @@ import {
     View,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
-import { AppText, Screen, radii, spacing } from '../../shared/components';
+import {
+    AppText,
+    Screen,
+    UserAvatar,
+    radii,
+    spacing,
+} from '../../shared/components';
 import { useQueryClient } from '@tanstack/react-query';
 import { palette, typography } from '../../shared/theme';
 import {
@@ -22,8 +27,7 @@ import {
     useChats,
     usePinnedChatIds,
 } from '../../features/chats';
-import { useAuthStore } from '../../features/auth';
-import { useMe } from '../../features/users';
+import { useAuthStore, useCurrentUserId } from '../../features/auth';
 
 /**
  * Chats screen — renders the WS-provided chat list.
@@ -43,8 +47,8 @@ export default function ChatsScreen(): React.ReactElement {
     const clearSession = useAuthStore((state) => state.clearSession);
     const [search, setSearch] = useState('');
     const [menuChat, setMenuChat] = useState<ChatRow | null>(null);
-    const { me } = useMe();
-    const { pinned, togglePin } = usePinnedChatIds(me?.id ?? null);
+    const currentUserId = useCurrentUserId();
+    const { pinned, togglePin } = usePinnedChatIds(currentUserId);
 
     // Updates missed while this screen was unmounted: refetch on focus.
     useFocusEffect(
@@ -220,15 +224,12 @@ function ChatRowItem(props: ChatRowItemProps): React.ReactElement {
                 });
             }}
         >
-            {avatar === undefined ? (
-                <View style={styles.avatarFallback}>
-                    <Text style={styles.avatarFallbackText}>
-                        {name.slice(0, 1).toUpperCase()}
-                    </Text>
-                </View>
-            ) : (
-                <Image style={styles.avatar} source={{ uri: avatar }} />
-            )}
+            <UserAvatar
+                userId={Number(chat.id)}
+                name={name}
+                uri={avatar}
+                size={44}
+            />
             <View style={styles.rowBody}>
                 <View style={styles.titleRow}>
                     <Text

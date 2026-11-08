@@ -1,6 +1,7 @@
 import { Message } from 'src/modules/messages/entities/message.entity';
 import { Chat } from 'src/modules/chats/entities/chat.entity';
-import { toUserResponse } from 'src/modules/auth/utils/user-response.util';
+import { User } from 'src/modules/auth/entities/user.entity';
+import { UserProfile } from 'src/modules/auth/entities/user_profile.entity';
 
 export const num = (value: unknown): number =>
     typeof value === 'number' ? value : Number(value);
@@ -76,17 +77,55 @@ export function serializeChat(chat: Chat & { unreadCount?: number }) {
 }
 
 /**
- * Message wire shape: numeric ids, top-level `chatId`/`senderId`, the
- * serialized sender, the type row and the attachments. No `chat` object.
+ * Minimal sender projection embedded in message payloads.
+ *
+ * Messages reach every member of a room; the full user response (phone,
+ * lastSeen, status, biografy, role) is NOT needed to render a bubble and is
+ * personal data, so only the identity/display fields are sent. `avatars` holds
+ * at most the CURRENT photo (index 0 convention), keeping the array shape the
+ * app already maps.
+ */
+function serializeMessageSender(message: Message) {
+    const sender = message.sender as
+        | (User & {
+              name?: string;
+              username?: string | null;
+              avatars?: string[] | null;
+              profile?: UserProfile | null;
+          })
+        | null
+        | undefined;
+    if (sender === null || sender === undefined) {
+        return null;
+    }
+    const profile = sender.profile ?? null;
+    const name =
+        profile !== null
+            ? (profile.name ?? 'بدون نام')
+            : (sender.name ?? 'بدون نام');
+    const username =
+        profile !== null
+            ? (profile.username ?? null)
+            : (sender.username ?? null);
+    const photos =
+        profile !== null
+            ? (profile.avatars ?? [])
+            : (sender.avatars ?? []);
+    const current = photos[0];
+
+    return {
+        id: num(sender.id),
+        name,
+        username,
+        avatars: current === undefined ? [] : [current],
+    };
+}
+
+/**
+ * Message wire shape: numeric ids, top-level `chatId`/`senderId`, the compact
+ * sender, the type row and the attachments. No `chat` object.
  */
 export function serializeMessage(message: Message) {
-    const senderResponse = message.sender
-        ? (toUserResponse(message.sender) as Record<string, unknown>)
-        : null;
-    const sender = senderResponse
-        ? { ...senderResponse, id: num(message.sender.id) }
-        : null;
-
     return {
         id: num(message.id),
         content: message.content ?? null,
@@ -96,7 +135,7 @@ export function serializeMessage(message: Message) {
         isDeleted: message.isDeleted,
         chatId: num(message.chat?.id ?? 0),
         senderId: num(message.sender?.id ?? 0),
-        sender,
+        sender: serializeMessageSender(message),
         replyToId:
             message.replyTo !== undefined && message.replyTo !== null
                 ? num(message.replyTo.id)

@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
-    Image,
     Modal,
     Pressable,
     StyleSheet,
@@ -12,6 +11,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ApiError } from '../../core/api';
+import { UserAvatar } from '../../shared/components';
 import { palette, radii, spacing, typography } from '../../shared/theme';
 import { markChatSeen } from '../messages/messages-socket-api';
 import { purgeChatFromCaches } from './chats-cache';
@@ -171,18 +171,12 @@ export function ChatContextMenu(
                     {chat !== null && (
                         <>
                             <View style={styles.header}>
-                                {avatarUrl === undefined ? (
-                                    <View style={styles.avatarFallback}>
-                                        <Text style={styles.avatarFallbackText}>
-                                            {name.slice(0, 1).toUpperCase()}
-                                        </Text>
-                                    </View>
-                                ) : (
-                                    <Image
-                                        style={styles.avatar}
-                                        source={{ uri: avatarUrl }}
-                                    />
-                                )}
+                                <UserAvatar
+                                    userId={Number(chat.id)}
+                                    name={name}
+                                    uri={avatarUrl}
+                                    size={44}
+                                />
                                 <View style={styles.headerBody}>
                                     <Text
                                         style={styles.headerName}

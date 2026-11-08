@@ -1,5 +1,6 @@
 export * from './messages-model';
 export * from './messages-mapper';
+export * from './message-runs';
 export * from './messages-socket-api';
 export * from './use-chat-messages';
 export * from './use-mark-seen';

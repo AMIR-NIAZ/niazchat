@@ -11,6 +11,7 @@
  * Wire-up: `registerAuthTokenProvider()` must run exactly once at app bootstrap.
  */
 export * from './auth-store';
+export * from './access-token-subject';
 export * from './token-service';
 export * from './auth-service';
 export * from './use-auth-flow';

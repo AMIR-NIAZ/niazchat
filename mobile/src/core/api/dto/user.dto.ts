@@ -28,13 +28,28 @@ export interface UserDto {
 }
 
 /**
- * `PUT /user/uploade-avatar` (multipart field `avatar`) → the stored path is
- * already appended to `user.avatars`, so the client can confirm persistence
- * and refresh its cache from this payload alone.
+ * Avatar mutations (`POST /user/avatars`, `DELETE /user/avatars/:fileName`,
+ * `PUT /user/avatars/:fileName/main`) → the full updated user, with the current
+ * photo first in `avatars`, so the client can seed its cache from the response.
  */
-export interface UploadAvatarResponseDto {
+export interface AvatarMutationResponseDto {
   message: string;
   user: UserDto;
+}
+
+/**
+ * `GET /user/:userId/profile` — the dedicated public projection, bare (no
+ * `data` wrapper). Never contains `phone`, tokens, `status` or `role`.
+ * `avatars` are ALL photos, current first; non-active users 404.
+ */
+export interface PublicUserProfileDto {
+  id: number;
+  name: string;
+  username: string | null;
+  biografy: string | null;
+  avatars: string[];
+  isOnline: boolean;
+  lastSeen: string | null;
 }
 
 /** `GET /chats/manage/:chatId/bans` → `{ data: [...] }` item (docs/mobile-api/groups.md). */

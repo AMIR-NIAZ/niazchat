@@ -43,7 +43,7 @@ Sources: `src/modules/messages/gateways/message.gateway.ts`, `src/modules/messag
 
 | Event | Emitted to | Payload (raw `Message` entity + populated relations) |
 |---|---|---|
-| `sendMessage:list` | room `chat:<chatId>` | full serialized Message (sender → user response, type, attachments) |
+| `sendMessage:list` | room `chat:<chatId>` | full serialized Message (sender → `{ id, name, username, avatars }`, type, attachments) |
 | `editMessage:list` | room | updated message (`isEdited: true`) |
 | `deleteMessage:list` | room | **just the number** `dto.messageId` |
 | `getMessages` | ack only | `{ messages, hasMore, nextCursor }` (ack data; desc by id within the page) |
@@ -77,7 +77,12 @@ Sources: `src/modules/messages/gateways/message.gateway.ts`, `src/modules/messag
   type: { id, name: 'text', createdAt, updatedAt },
   chatId: number,
   senderId: number,
-  sender: { ...toUserResponse object },   // merged profile fields
+  sender: {              // REDUCED projection (no phone/lastSeen/status/biografy)
+    id: number,
+    name: string,
+    username: string | null,
+    avatars: string[]    // at most the CURRENT photo: [path] or []
+  },
   replyToId: number | null,
   replyTo: {              // compact quoted preview, null when not a reply
     id: number,

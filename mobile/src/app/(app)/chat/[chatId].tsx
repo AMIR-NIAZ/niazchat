@@ -5,7 +5,6 @@ import {
     Alert,
     AppState,
     FlatList,
-    Image,
     Keyboard,
     KeyboardAvoidingView,
     Modal,
@@ -22,13 +21,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
     AppText,
     Screen,
+    UserAvatar,
     palette,
     radii,
     spacing,
     typography,
 } from '../../../shared/components';
 import { ApiError } from '../../../core/api';
-import { absoluteUploadUrl } from '../../../core/config/env';
 import { useAndroidKeyboardInset } from '../../../shared/hooks/use-android-keyboard-inset';
 import {
     DateSeparator,
@@ -42,7 +41,9 @@ import {
     useScrollToBottomButton,
     useTypingEmitter,
     useTypingUsers,
+    assignMessageRuns,
     formatDaySeparator,
+    isOwnMessage,
     toReplyPreview,
 } from '../../../features/messages';
 import type { ChatMessage } from '../../../features/messages';
@@ -58,7 +59,8 @@ import {
     useLeaveGroup,
 } from '../../../features/chats';
 import type { ChatMemberRow, ChatRole } from '../../../features/chats';
-import { useMe } from '../../../features/users';
+import { useCurrentUserId } from '../../../features/auth';
+import { openUserProfile } from '../../../features/users';
 
 /**
  * Conversation screen (chat list → tap → this screen).
@@ -86,7 +88,12 @@ const HIGHLIGHT_MS = 1000;
 const JUMP_NOTICE_MS = 3000;
 
 type ListChunk =
-    | { kind: 'message'; message: ChatMessage }
+    | {
+          kind: 'message';
+          message: ChatMessage;
+          showSenderName: boolean;
+          showAvatar: boolean;
+      }
     | { kind: 'day'; key: string; label: string }
     | { kind: 'unread'; key: string };
 
@@ -109,8 +116,9 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     const queryClient = useQueryClient();
     const insets = useSafeAreaInsets();
     const keyboard = useAndroidKeyboardInset(insets.bottom);
-    const me = useMe();
-    const currentUserId = me.me?.id ?? null;
+    // Session-derived (access-token `sub`), numeric, and stable across profile
+    // updates: a `['me']` refetch can never change or lose it.
+    const currentUserId = useCurrentUserId();
     const conversation = useChatMessages(chatId, true, currentUserId);
     const [adminPanelOpen, setAdminPanelOpen] = useState(false);
     const [sheetTarget, setSheetTarget] = useState<ChatMessage | null>(null);
@@ -147,28 +155,43 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
      */
     const listData = useMemo<List[]>(() => {
         const list: List[] = [];
-        for (const message of messages) {
-            const tail = list.length > 0 ? list[list.length - 1] : undefined;
-            const previousIso =
-                tail?.kind === 'message' ? tail.message.createdAtIso : null;
-            const dayLabel = formatDaySeparator(
-                previousIso ?? message.createdAtIso,
-                message.createdAtIso,
-            );
-            if (dayLabel !== null) {
+        // Sender runs are derived from the merged list on every change, so
+        // pagination, live messages, edits and deletes regroup themselves.
+        const runs = assignMessageRuns(messages, {
+            isGroup,
+            currentUserId,
+            dividerMessageId: unreadDividerId,
+        });
+        for (let index = 0; index < runs.length; index += 1) {
+            const run = runs[index];
+            if (run === undefined) {
+                continue;
+            }
+            const message = run.message;
+            if (run.startsNewDay) {
+                const previous = runs[index - 1]?.message;
                 list.push({
                     kind: 'day',
                     key: `day-${message.createdAtIso}`,
-                    label: dayLabel,
+                    label:
+                        formatDaySeparator(
+                            previous?.createdAtIso ?? message.createdAtIso,
+                            message.createdAtIso,
+                        ) ?? '',
                 });
             }
             if (unreadDividerId !== null && message.id === unreadDividerId) {
                 list.push({ kind: 'unread', key: 'new-messages' });
             }
-            list.push({ kind: 'message', message });
+            list.push({
+                kind: 'message',
+                message,
+                showSenderName: run.showSenderName,
+                showAvatar: run.showAvatar,
+            });
         }
         return list;
-    }, [messages, unreadDividerId]);
+    }, [messages, unreadDividerId, isGroup, currentUserId]);
 
     const replyPreview = useMemo(
         () => (replyTarget === null ? null : toReplyPreview(replyTarget)),
@@ -244,11 +267,11 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
             return;
         }
         dividerInitRef.current = true;
-        const me = currentUserId ?? -1;
+        const myId = currentUserId ?? -1;
         const firstUnread = messages.find(
             (message) =>
                 message.id !== null &&
-                message.senderId !== me &&
+                message.senderId !== myId &&
                 (detail.myLastSeenId === null ||
                     message.id > detail.myLastSeenId),
         );
@@ -360,8 +383,7 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
             newest.status === 'sent' &&
             previousId !== null &&
             newest.id > previousId &&
-            (currentUserId === null ||
-                Number(newest.senderId) !== currentUserId);
+            !isOwnMessage(currentUserId, newest.senderId);
         if (liveFromOther && !atBottomRef.current) {
             newMessageCountRef.current = Math.min(
                 newMessageCountRef.current + 1,
@@ -511,22 +533,23 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
      */
     const peer = isGroup
         ? null
-        : (messages.find((message) => message.senderId !== currentUserId) ??
-          null);
+        : (messages.find(
+              (message) => !isOwnMessage(currentUserId, message.senderId),
+          ) ?? null);
     const name =
         info?.title !== undefined && info.title !== null
             ? info.title
             : (peer?.senderName ??
               (isGroup ? 'Unnamed group' : 'Private chat'));
-    const rawAvatarUrl =
+    // Server-relative path (group photo or the peer's current photo) so the
+    // header asks for a thumbnail rather than the original file.
+    const avatarPath =
         info?.avatars !== undefined && info.avatars.length > 0
-            ? absoluteUploadUrl(info.avatars[0] ?? '')
-            : undefined;
-    const peerAvatarUrl =
-        peer?.senderAvatarUrls.length !== undefined
-            ? peer.senderAvatarUrls[0]
-            : undefined;
-    const avatarUrl = rawAvatarUrl ?? peerAvatarUrl;
+            ? (info.avatars[0] ?? null)
+            : (peer?.senderAvatarPath ?? peer?.senderAvatarUrls[0] ?? null);
+    const headerAvatarUserId = isGroup ? chatId : (peer?.senderId ?? chatId);
+    /** Private-chat peer is the only person a header tap may open. */
+    const peerUserId = isGroup ? null : (peer?.senderId ?? null);
 
     /**
      * Runs only after the backend confirms the leave: drop the list row and every
@@ -539,19 +562,11 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         router.replace('/(app)');
     };
 
-    if (conversation.isLoading || me.isLoading) {
+    // Without a session user id nothing can be classified as mine: wait for it
+    // instead of rendering every bubble on the wrong side. This is session
+    // state (not the profile query), so a profile/me refetch never returns here.
+    if (conversation.isLoading || currentUserId === null) {
         return <LoadingBlock />;
-    }
-    if (me.error !== null) {
-        // Without a valid current-user id every bubble would render left;
-        // surface the failure instead of misaligned history.
-        return (
-            <ErrorBlock
-                title="Could not load your profile"
-                detail={me.error.message}
-                onRetry={me.refetch}
-            />
-        );
     }
     if (conversation.error !== null || info === null) {
         return (
@@ -566,6 +581,38 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
             />
         );
     }
+
+    const headerIdentity = (
+        <>
+            <UserAvatar
+                userId={headerAvatarUserId}
+                name={name}
+                uri={avatarPath}
+                size={40}
+            />
+            <View style={styles.headerMeta}>
+                <Text style={typography.title} numberOfLines={1}>
+                    {name}
+                </Text>
+                {isGroup ? (
+                    <GroupChatSubtitle
+                        names={typingUsers.map((user) => user.name)}
+                        membersCount={
+                            membersCount !== null &&
+                            Number.isFinite(membersCount)
+                                ? membersCount
+                                : null
+                        }
+                        suffix={info.isBan ? ' · banned' : ''}
+                    />
+                ) : (
+                    <AppText variant="caption">
+                        Private{info.isBan ? ' · banned' : ''}
+                    </AppText>
+                )}
+            </View>
+        </>
+    );
 
     return (
         <Screen
@@ -596,36 +643,27 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                 >
                     <Text style={styles.backText}>‹</Text>
                 </Pressable>
-                {avatarUrl === undefined ? (
-                    <View style={styles.avatarFallback}>
-                        <Text style={styles.avatarFallbackText}>
-                            {name.slice(0, 1).toUpperCase()}
-                        </Text>
-                    </View>
+                {peerUserId !== null ? (
+                    <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Open profile of ${name}`}
+                        onPress={(): void => {
+                            openUserProfile({
+                                userId: peerUserId,
+                                name,
+                                avatar: avatarPath,
+                            });
+                        }}
+                        style={({ pressed }) => [
+                            styles.headerIdentity,
+                            pressed && styles.pressed,
+                        ]}
+                    >
+                        {headerIdentity}
+                    </Pressable>
                 ) : (
-                    <Image style={styles.avatar} source={{ uri: avatarUrl }} />
+                    headerIdentity
                 )}
-                <View style={styles.headerMeta}>
-                    <Text style={typography.title} numberOfLines={1}>
-                        {name}
-                    </Text>
-                    {isGroup ? (
-                        <GroupChatSubtitle
-                            names={typingUsers.map((user) => user.name)}
-                            membersCount={
-                                membersCount !== null &&
-                                Number.isFinite(membersCount)
-                                    ? membersCount
-                                    : null
-                            }
-                            suffix={info.isBan ? ' · banned' : ''}
-                        />
-                    ) : (
-                        <AppText variant="caption">
-                            Private{info.isBan ? ' · banned' : ''}
-                        </AppText>
-                    )}
-                </View>
                 <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Open chat admin panel"
@@ -735,18 +773,27 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                                 );
                             }
                             const message = item.message;
-                            // senderId is always a numeric (normalized) id;
-                            // guard against placeholder (-1) / missing ids.
-                            const mine =
-                                currentUserId !== null &&
-                                currentUserId > 0 &&
-                                Number(message.senderId) === currentUserId;
+                            // Both ids normalized to numbers (a bigint-string
+                            // id can never flip the whole history to "theirs").
+                            const mine = isOwnMessage(
+                                currentUserId,
+                                message.senderId,
+                            );
                             return (
                                 <MessageBubble
                                     message={message}
                                     mine={mine}
                                     isGroup={isGroup}
                                     currentUserId={currentUserId}
+                                    showSenderName={item.showSenderName}
+                                    showAvatar={item.showAvatar}
+                                    onOpenProfile={(sender): void => {
+                                        openUserProfile({
+                                            userId: sender.senderId,
+                                            name: sender.senderName,
+                                            avatar: sender.senderAvatarPath,
+                                        });
+                                    }}
                                     highlighted={highlightedKey === message.key}
                                     othersLastSeenId={
                                         detail?.othersLastSeenId ?? null
@@ -810,14 +857,14 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                 canEdit={
                     sheetTarget !== null &&
                     sheetTarget.status === 'sent' &&
-                    sheetTarget.senderId === currentUserId &&
+                    isOwnMessage(currentUserId, sheetTarget.senderId) &&
                     sheetTarget.type === 'text' &&
                     sheetTarget.content !== null
                 }
                 canDelete={
                     sheetTarget !== null &&
                     sheetTarget.status === 'sent' &&
-                    sheetTarget.senderId === currentUserId &&
+                    isOwnMessage(currentUserId, sheetTarget.senderId) &&
                     sheetTarget.id !== null
                 }
                 canDeleteOthers={
@@ -825,7 +872,7 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                     sheetTarget !== null &&
                     sheetTarget.status === 'sent' &&
                     sheetTarget.id !== null &&
-                    sheetTarget.senderId !== currentUserId
+                    !isOwnMessage(currentUserId, sheetTarget.senderId)
                 }
                 onReply={(): void => {
                     const target = sheetTarget;
@@ -853,9 +900,10 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                     ) {
                         return;
                     }
-                    const deletingOtherMember =
-                        currentUserId !== null &&
-                        target.senderId !== currentUserId;
+                    const deletingOtherMember = !isOwnMessage(
+                        currentUserId,
+                        target.senderId,
+                    );
                     Alert.alert(
                         deletingOtherMember
                             ? 'Delete for everyone?'
@@ -1312,8 +1360,10 @@ function AdminPanel({
                             <FlatList
                                 data={(members.data ?? []).filter(
                                     (member) =>
-                                        member.userId !== currentUserId &&
-                                        member.role !== 'manager',
+                                        !isOwnMessage(
+                                            currentUserId,
+                                            member.userId,
+                                        ) && member.role !== 'manager',
                                 )}
                                 keyExtractor={(item): string =>
                                     String(item.memberId)
@@ -1525,6 +1575,13 @@ const styles = StyleSheet.create({
     screen: { gap: spacing.xs, paddingHorizontal: spacing.sm },
     center: { alignItems: 'center', justifyContent: 'center' },
     header: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+    headerIdentity: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.sm,
+    },
+    pressed: { opacity: 0.6 },
     headerMeta: { flex: 1 },
     avatar: { width: 44, height: 44, borderRadius: 22 },
     avatarFallback: {

@@ -28,6 +28,7 @@ import {
     ChatCallerContext,
 } from './chat-access.service';
 import { GroupRealtimeService } from './group-realtime.service';
+import { removeAvatarThumbnails } from 'src/modules/media/avatar-thumbnail.util';
 
 export interface ChatMemberPageOptions {
     search?: string;
@@ -608,6 +609,9 @@ export class ChatService {
         if (fs.existsSync(avatarPath)) {
             await fs.promises.unlink(avatarPath);
         }
+        // Group photos share uploads/avatars, so their thumbnails share the
+        // same cleanup (best effort; never fails the request).
+        await removeAvatarThumbnails(avatarPath);
 
         this.groupRealtime.groupChanged(chatId, 'avatars_changed');
 
@@ -854,6 +858,7 @@ export class ChatService {
                 if (fileExists) {
                     await fs.promises.unlink(img);
                 }
+                await removeAvatarThumbnails(img);
             }
         } catch (err) {
             throw new InternalServerErrorException(err);

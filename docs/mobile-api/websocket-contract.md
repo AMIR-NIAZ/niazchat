@@ -68,7 +68,7 @@ Never a raw `exception` event unless the caller omitted an ack callback. Guard/p
 ## Serialization rules
 
 - All entity ids (`id`, `chatId`, `senderId`, `messageId`, `lastSeenId`, `replyToId`, `replyTo.id`) are numbers (`Number(bigint-string)`).
-- Message payloads always carry top-level `chatId` and `senderId` plus the `sender` user-response (`toUserResponse`), `type: { id, name }`, `attachments[]` with numeric `size`.
+- Message payloads always carry top-level `chatId` and `senderId` plus a REDUCED `sender` (`{ id, name, username, avatars }`, avatars = current photo only), `type: { id, name }`, `attachments[]` with numeric `size`. Profile endpoints still return the full `toUserResponse`.
 - Replies carry `replyToId` **and** a compact `replyTo` preview (never the full entity):
 
 ```ts

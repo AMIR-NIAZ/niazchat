@@ -24,7 +24,6 @@ import {
     AttachmentId,
 } from 'src/common/types/brands.type';
 import { ContentResolverService } from './content-resolver.service';
-import { toUserResponse } from 'src/modules/auth/utils/user-response.util';
 import { AttachmentService } from 'src/modules/attachments/services/attachment.service';
 import { ChatAccessService } from 'src/modules/chats/services/chat-access.service';
 
@@ -284,6 +283,43 @@ export class MessageService {
                     attachments: true,
                 },
             },
+            // Only what the message payload serializes: the sender is snapped to
+            // { id, name, username, avatars[0] }, so no phone/lastSeen/status and
+            // no unrelated profile columns leave the database for a send.
+            select: {
+                id: true,
+                content: true,
+                createdAt: true,
+                updatedAt: true,
+                isEdited: true,
+                isDeleted: true,
+                chat: { id: true },
+                sender: {
+                    id: true,
+                    profile: {
+                        id: true,
+                        name: true,
+                        username: true,
+                        avatars: true,
+                    },
+                },
+                type: { id: true, name: true },
+                attachments: {
+                    id: true,
+                    originalName: true,
+                    mimeType: true,
+                    size: true,
+                    createdAt: true,
+                },
+                replyTo: {
+                    id: true,
+                    content: true,
+                    isDeleted: true,
+                    sender: { id: true, profile: { id: true, name: true } },
+                    type: { id: true, name: true },
+                    attachments: { id: true },
+                },
+            },
         });
 
         if (!message) throw new NotFoundException('message not found');
@@ -318,6 +354,34 @@ export class MessageService {
                     attachments: true,
                 },
             },
+            // Same minimal sender projection as history: no phone/lastSeen.
+            select: {
+                id: true,
+                content: true,
+                createdAt: true,
+                updatedAt: true,
+                isEdited: true,
+                isDeleted: true,
+                chat: { id: true },
+                sender: {
+                    id: true,
+                    profile: {
+                        id: true,
+                        name: true,
+                        username: true,
+                        avatars: true,
+                    },
+                },
+                type: { id: true, name: true },
+                replyTo: {
+                    id: true,
+                    content: true,
+                    isDeleted: true,
+                    sender: { id: true, profile: { id: true, name: true } },
+                    type: { id: true, name: true },
+                    attachments: { id: true },
+                },
+            },
         });
         if (!message) throw new WsException('message not found');
 
@@ -328,7 +392,7 @@ export class MessageService {
         message.content = newContent;
         message.isEdited = true;
 
-        return this.serializeSender(await this.messageRepository.save(message));
+        return await this.messageRepository.save(message);
     }
 
     /**
@@ -432,17 +496,10 @@ export class MessageService {
                 isDeleted: true,
                 sender: {
                     id: true,
-                    phone: true,
-                    isOnline: true,
-                    lastSeen: true,
-                    status: true,
-                    createdAt: true,
-                    updatedAt: true,
                     profile: {
                         id: true,
                         name: true,
                         username: true,
-                        biografy: true,
                         avatars: true,
                     },
                 },
@@ -477,37 +534,4 @@ export class MessageService {
         };
     }
 
-    private serializeSender(message: Message): Message {
-        if (message.sender) {
-            message.sender = toUserResponse(message.sender) as unknown as User;
-        }
-        return message;
-    }
-
-    private async loadSender(userId: UserId): Promise<User> {
-        const sender = await this.userRepository.findOne({
-            where: { id: userId },
-            relations: { profile: true },
-            select: {
-                id: true,
-                phone: true,
-                isOnline: true,
-                lastSeen: true,
-                status: true,
-                createdAt: true,
-                updatedAt: true,
-                profile: {
-                    id: true,
-                    name: true,
-                    username: true,
-                    biografy: true,
-                    avatars: true,
-                },
-            },
-        });
-
-        if (!sender) throw new NotFoundException('sender not found');
-
-        return toUserResponse(sender) as unknown as User;
-    }
 }

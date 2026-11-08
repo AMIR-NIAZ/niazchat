@@ -1,15 +1,26 @@
 import { useQuery } from '@tanstack/react-query';
 import { httpClient } from '../../core/api';
-import { toNumericId } from '../messages';
 import type { UserDto } from '../../core/api';
+import { normalizeUserPayload } from './me-cache';
 
 /**
- * Own profile (`GET /auth/getme` — bare `toUserResponse`). Only the id is
- * consumed by the messaging UI (mine/other bubble direction, echo matching);
- * name/avatar come from message senders and chat info.
+ * Own profile (`GET /auth/getme` — bare `toUserResponse`). This is the ONLY
+ * fetch for the shared `['me']` entry, so the cache can only ever hold a
+ * normalized (numeric `id`), complete user. Ownership checks do NOT read it:
+ * they use `useCurrentUserId()` (the session's access-token `sub`).
  */
 
 export const ME_QUERY_KEY = ['me'] as const;
+
+/** `['me']` queryFn shared by `useMe` and `useProfile` (same key, same shape). */
+export async function fetchMe(): Promise<UserDto> {
+    const response = await httpClient.get<UserDto>('/auth/getme');
+    const user = normalizeUserPayload(response.data);
+    if (user === null) {
+        throw new Error('Your profile response was missing the user id.');
+    }
+    return user;
+}
 
 export function useMe(): {
     me: UserDto | null;
@@ -19,14 +30,7 @@ export function useMe(): {
 } {
     const query = useQuery<UserDto>({
         queryKey: ME_QUERY_KEY,
-        queryFn: async (): Promise<UserDto> => {
-            const response = await httpClient.get<UserDto>('/auth/getme');
-            // SINGLE SOURCE OF TRUTH: user ids, like message sender ids, may
-            // arrive as bigint STRINGS ("2") — normalize to a number here,
-            // once, so bubble direction and echo matching compare numbers.
-            const id = toNumericId(response.data?.id);
-            return id === null ? response.data : { ...response.data, id };
-        },
+        queryFn: fetchMe,
         retry: false,
         staleTime: 10 * 60 * 1000,
     });

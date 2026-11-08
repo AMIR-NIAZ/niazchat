@@ -11,7 +11,8 @@ import type { ChatPreview } from './chats-model';
 import { getActiveChat } from './active-chat';
 import { onSocketReconnect, useSocket } from '../../core/socket';
 import type { ChatListUpdateDto } from '../../core/api/dto/message.dto';
-import { useMe } from '../users';
+import { useCurrentUserId } from '../auth';
+import { isOwnMessage } from '../messages/messages-model';
 
 /**
  * Chat-list server state over TanStack Query, backed by the acked WS request
@@ -56,8 +57,7 @@ export function setChatUnreadCount(
 export function useChats(): ReturnType<typeof useQuery<ChatPreview[]>> {
     const queryClient = useQueryClient();
     const socket = useSocket();
-    const me = useMe();
-    const myId = me.me?.id ?? null;
+    const myId = useCurrentUserId();
 
     const query = useQuery<ChatPreview[]>({
         queryKey: CHATS_QUERY_KEY,
@@ -90,8 +90,7 @@ export function useChats(): ReturnType<typeof useQuery<ChatPreview[]>> {
             const active = getActiveChat();
             const isMine =
                 update.lastMessage !== null &&
-                myId !== null &&
-                Number(update.lastMessage.senderId) === myId;
+                isOwnMessage(myId, update.lastMessage.senderId);
             const isReadingHere = active.chatId === chatId && active.reading;
 
             // New array + new objects (never mutate the cache) + re-sort, so

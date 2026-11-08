@@ -6,13 +6,14 @@ import {
     NestInterceptor,
     Type,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { randomUUID } from 'node:crypto';
 import { diskStorage } from 'multer';
 import { Observable } from 'rxjs';
 import { EXT_BY_MIME } from 'src/modules/attachments/utils/file-signature.util';
 import {
     AVATAR_EXTENSIONS,
+    AVATAR_MAX_FILE_SIZE,
     ensureAvatarDirectory,
     isAvatarMimeType,
 } from '../utils/avatar.util';
@@ -33,33 +34,23 @@ import {
 export class AvatarUploadInterceptor implements NestInterceptor {
     private readonly delegate: NestInterceptor;
 
-    constructor(configService: ConfigService) {
+    constructor() {
         const directory = ensureAvatarDirectory();
-        const configuredMax = Number(
-            configService.get<string>('UPLOAD_MAX_FILE_SIZE') ??
-                10 * 1024 * 1024,
-        );
-        const maxFileSize =
-            Number.isFinite(configuredMax) && configuredMax > 0
-                ? Math.trunc(configuredMax)
-                : 10 * 1024 * 1024;
 
         const Interceptor: Type<NestInterceptor> = FileInterceptor('avatar', {
             storage: diskStorage({
                 destination: directory,
-                // Extension from the declared MIME type (never the client
-                // filename) so a stored avatar always matches its content type.
+                // Random server-generated name, extension from the declared
+                // MIME type (never the client filename). The service sniffs the
+                // bytes and rejects a declared/detected mismatch.
                 filename: (_req, file, cb) => {
                     const extension =
                         EXT_BY_MIME[file.mimetype.toLowerCase()] ??
                         AVATAR_EXTENSIONS[0];
-                    const unique = `${Date.now()}-${Math.round(
-                        Math.random() * 1e9,
-                    )}`;
-                    cb(null, `${unique}.${extension}`);
+                    cb(null, `${randomUUID()}.${extension}`);
                 },
             }),
-            limits: { fileSize: maxFileSize, files: 1, fields: 5 },
+            limits: { fileSize: AVATAR_MAX_FILE_SIZE, files: 1, fields: 5 },
             fileFilter: (_req, file, cb) => {
                 if (!isAvatarMimeType(file.mimetype)) {
                     cb(

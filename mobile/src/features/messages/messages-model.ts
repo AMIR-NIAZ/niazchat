@@ -38,6 +38,8 @@ export interface ChatMessage {
     senderName: string;
     /** Resolved (absolute) avatar urls of the sender, when present. */
     senderAvatarUrls: string[];
+    /** Server-relative CURRENT avatar path — the input for a thumbnail URL. */
+    senderAvatarPath: string | null;
     attachmentsCount: number;
     /** Quoted preview when this message replies to another, else null. */
     replyTo: ReplyPreview | null;
@@ -58,6 +60,21 @@ export function toNumericId(value: unknown): number | null {
     }
     const parsed = typeof value === 'number' ? value : Number(value);
     return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * The ONLY ownership comparison the UI may use (`mine` bubbles, Edit/Delete,
+ * reply "You" labels, unread bumps). Both sides are normalized to numbers, so
+ * a bigint-string id can never silently turn every message into someone
+ * else's; an unknown current user owns nothing.
+ */
+export function isOwnMessage(
+    currentUserId: number | null | undefined,
+    senderId: unknown,
+): boolean {
+    const me = toNumericId(currentUserId);
+    const sender = toNumericId(senderId);
+    return me !== null && me > 0 && sender !== null && sender === me;
 }
 
 /** True when a message is in the list but not yet confirmed by the server. */

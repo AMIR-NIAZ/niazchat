@@ -1,7 +1,8 @@
 import type {
   UserDto,
+  PublicUserProfileDto,
   BannedChatMemberDto,
-  UploadAvatarResponseDto,
+  AvatarMutationResponseDto,
 } from './dto/user.dto';
 import type {
   SendOtpPayloadDto,
@@ -36,8 +37,9 @@ import { httpClient, toApiError } from './http-client';
 export type {
   ApiTokenProvider,
   UserDto,
+  PublicUserProfileDto,
   BannedChatMemberDto,
-  UploadAvatarResponseDto,
+  AvatarMutationResponseDto,
   SendOtpPayloadDto,
   VerifyOtpPayloadDto,
   AuthTokensDto,

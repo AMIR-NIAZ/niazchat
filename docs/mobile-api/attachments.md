@@ -67,6 +67,6 @@ Mobile note: on RN you cannot rely on the browser download behavior — fetch wi
 
 ## Avatars (user & chat) — different, simpler mechanism
 
-- Upload = multipart (`PUT /user/uploade-avatar` field `avatar`; `POST /chats/manage/upload/avatar/:chatId` field `avatar`) → stores under `uploads/avatars`.
+- Upload = multipart (`POST /user/avatars` field `avatar`, legacy `PUT /user/uploade-avatar`; `POST /chats/manage/upload/avatar/:chatId` field `avatar`) → stores under `uploads/avatars`.
 - Served **statically** by `ServeStaticModule` under **`/uploads`** (`src/modules/app/app.module.ts`) — no auth on these URLs. Deletion goes through REST per `users.md`/`chats.md`.
 - Paths in the JSON (e.g. `uploads/avatars/…`) need prefixing with the host URL by the mobile client (they aren't absolute URLs).

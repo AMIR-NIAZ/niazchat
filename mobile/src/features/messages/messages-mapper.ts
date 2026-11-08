@@ -98,6 +98,9 @@ export function toChatMessage(dto: MessageDto): ChatMessage {
         senderId: senderIdOf(dto),
         senderName: senderNameOf(dto),
         senderAvatarUrls: (dto.sender?.avatars ?? []).map(absoluteUploadUrl),
+        // Kept server-relative so the bubble can ask for a small thumbnail;
+        // the absolute list above stays for the full-URL consumers.
+        senderAvatarPath: dto.sender?.avatars?.[0] ?? null,
         attachmentsCount: dto.attachments?.length ?? 0,
         replyTo: replyPreviewFromDto(dto.replyTo),
         replyToId: toNumericId(dto.replyToId),
@@ -123,6 +126,7 @@ export function toPendingChatMessage(
         senderId,
         senderName: '',
         senderAvatarUrls: [],
+        senderAvatarPath: null,
         attachmentsCount: 0,
         replyTo,
         replyToId: replyTo === null ? null : replyTo.id,

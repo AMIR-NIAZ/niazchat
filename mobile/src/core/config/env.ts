@@ -47,3 +47,54 @@ export function absoluteUploadUrl(path: string): string {
   const normalized = path.replace(/^\/+/, '').replace(/^uploads\//, '');
   return `${env.uploadsBaseUrl}/${normalized}`;
 }
+
+/** Thumbnail edge sizes the backend generates (`GET /media/avatars/:size/:fileName`). */
+export const AVATAR_THUMB_SIZES = [64, 128, 256] as const;
+
+export type AvatarThumbSize = (typeof AVATAR_THUMB_SIZES)[number];
+
+/** File name of an avatar path/URL, or null when it is not a raster image. */
+export function avatarFileNameOf(path: string | null | undefined): string | null {
+  const value = (path ?? '').trim();
+  if (value === '') {
+    return null;
+  }
+  const withoutQuery = value.split('?')[0] ?? '';
+  const fileName = withoutQuery.split('/').pop() ?? '';
+  return /\.(?:jpe?g|png|webp)$/i.test(fileName) ? fileName : null;
+}
+
+/**
+ * Smallest server-generated size that covers `requestedPx` device pixels
+ * (capped at the largest allowed size), so a 32 px circle never downloads the
+ * original and a 96 px one is never upscaled from 64.
+ */
+export function pickAvatarThumbSize(
+  requestedPx: number,
+  pixelRatio: number = 1,
+): AvatarThumbSize {
+  const needed = Math.ceil(Math.max(1, requestedPx) * Math.max(1, pixelRatio));
+  return AVATAR_THUMB_SIZES.find((size) => size >= needed) ?? 256;
+}
+
+/**
+ * Resized, long-cacheable avatar URL for a small circle.
+ *
+ * Takes the server-relative path stored on the wire (`uploads/avatars/x.png`) or
+ * an absolute uploads URL, keeps only the file name (file names are unique per
+ * upload) and points it at the thumbnail route. Returns null when there is no
+ * usable path, so callers render the initials fallback instead of requesting
+ * the original.
+ */
+export function avatarThumbUrl(
+  path: string | null | undefined,
+  requestedPx: number,
+  pixelRatio: number = 1,
+): string | null {
+  const fileName = avatarFileNameOf(path);
+  if (fileName === null) {
+    return null;
+  }
+  const size = pickAvatarThumbSize(requestedPx, pixelRatio);
+  return `${env.apiUrl}/media/avatars/${size}/${encodeURIComponent(fileName)}`;
+}
