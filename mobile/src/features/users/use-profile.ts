@@ -2,11 +2,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { httpClient } from '../../core/api';
 import type { UpdateProfilePayloadDto, UserDto } from '../../core/api';
 import { absoluteUploadUrl } from '../../core/config/env';
+import { toNumericId } from '../messages';
 import {
     updateProfile,
     uploadMyAvatar,
     deleteMyAvatar,
 } from './profile-service';
+import type { AvatarUploadAsset } from './profile-service';
 
 /**
  * Current-user server state over TanStack Query:
@@ -90,8 +92,21 @@ export function useUpdateProfile() {
 export function useUploadMyAvatar() {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: (fileUri: string): Promise<void> => uploadMyAvatar(fileUri),
-        onSuccess: invalidateMe(queryClient),
+        mutationFn: (asset: AvatarUploadAsset): Promise<UserDto | null> =>
+            uploadMyAvatar(asset),
+        onSuccess: async (user): Promise<void> => {
+            // The upload response carries the persisted profile: seed the shared
+            // `['me']` entry (id normalized like `useMe`) so the new avatar shows
+            // immediately, then refetch for every other consumer.
+            if (user !== null) {
+                const id = toNumericId(user.id);
+                queryClient.setQueryData<UserDto>(
+                    ME_QUERY_KEY,
+                    id === null ? user : { ...user, id },
+                );
+            }
+            await queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY });
+        },
     });
 }
 

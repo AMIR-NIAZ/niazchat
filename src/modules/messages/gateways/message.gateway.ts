@@ -6,7 +6,6 @@ import {
     WebSocketServer,
 } from '@nestjs/websockets';
 import {
-    ParseIntPipe,
     UseGuards,
     UseFilters,
     UsePipes,
@@ -18,6 +17,10 @@ import { ChatService } from 'src/modules/chats/services/chat.service';
 import { CreateMessageDto } from '../dtos/createMessage.dto';
 import { Message } from '../entities/message.entity';
 import { EditMessageDto } from '../dtos/EditMessage.dto';
+import {
+    DEFAULT_MESSAGES_PAGE_SIZE,
+    GetMessagesDto,
+} from '../dtos/getMessages.dto';
 import { deleteMessageDto } from '../dtos/deleteMessage.dto';
 import { SocketAuth } from 'src/common/types/SocketAuth.type';
 import { wsPayload } from 'src/common/guards/wsGuards/wsPayload.guard';
@@ -116,19 +119,23 @@ export class MessageGateway {
 
     @SubscribeMessage('getMessages')
     @UseGuards(wsIsMemberChat)
-    async getMessages(
-        @ConnectedSocket() client: SocketAuth,
-        @MessageBody('chatId', new ParseIntPipe()) chatId: ChatId,
-    ) {
-        const messages = await this.messageService.getAllByChats(chatId);
+    async getMessages(@MessageBody() dto: GetMessagesDto) {
+        const page = await this.messageService.getPage(
+            dto.chatId,
+            dto.beforeId,
+            dto.limit ?? DEFAULT_MESSAGES_PAGE_SIZE,
+        );
 
-        const wireMessages = messages.map(serializeMessage);
-
-        // Legacy per-client event, kept for compatibility; the ack is the
-        // completion signal.
-        // client.emit('getMessages', wireMessages);
-
-        return { ok: true, data: wireMessages };
+        return {
+            ok: true,
+            data: {
+                // Newest first WITHIN the page, exactly like the old ack.
+                messages: page.messages.map(serializeMessage),
+                hasMore: page.hasMore,
+                // Id of the OLDEST message in this page; null when empty.
+                nextCursor: page.nextCursor,
+            },
+        };
     }
 
     private async notifyChatList(chatId: ChatId, message: Message | null) {

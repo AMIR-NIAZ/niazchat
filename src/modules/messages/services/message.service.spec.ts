@@ -13,6 +13,8 @@ import { User } from 'src/modules/auth/entities/user.entity';
 import { TypeMessage } from '../entities/typeMessage.entity';
 import { ContentResolverService } from './content-resolver.service';
 import { AttachmentService } from 'src/modules/attachments/services/attachment.service';
+import { ChatAccessService } from 'src/modules/chats/services/chat-access.service';
+import { TypeChatEnum } from 'src/common/enums/typeChat.enum';
 import { DataSource } from 'typeorm';
 import { JwtPayload } from 'src/common/types/jwt-payload.type';
 
@@ -107,6 +109,10 @@ describe('MessageService (attachment integration)', () => {
                     },
                 },
                 { provide: AttachmentService, useValue: attachmentService },
+                {
+                    provide: ChatAccessService,
+                    useValue: { getCallerContext: jest.fn() },
+                },
             ],
         }).compile();
 
@@ -265,6 +271,66 @@ describe('MessageService (attachment integration)', () => {
             ),
         ).rejects.toThrow(/not exit in chat/);
     });
+
+    it('persists a reply only when the original is in the same chat and not deleted', async () => {
+        messageRepository.findOne
+            .mockResolvedValueOnce({ id: 77 })
+            .mockResolvedValueOnce(fullMessage);
+
+        await service.create(
+            user as never,
+            {
+                chatId: 10,
+                content: 'replying',
+                type: 'text',
+                reply: 77,
+            } as never,
+        );
+
+        expect(messageRepository.findOne).toHaveBeenNthCalledWith(
+            1,
+            expect.objectContaining({
+                where: { id: 77, chat: { id: 10 }, isDeleted: false },
+                select: { id: true },
+            }),
+        );
+        expect(messageRepository.save).toHaveBeenCalledWith(
+            expect.objectContaining({ replyTo: { id: 77 } }),
+        );
+    });
+
+    it('rejects a reply when the original is missing, from another chat or deleted', async () => {
+        messageRepository.findOne.mockResolvedValueOnce(null);
+
+        await expect(
+            service.create(
+                user as never,
+                {
+                    chatId: 10,
+                    content: 'replying',
+                    type: 'text',
+                    reply: 999,
+                } as never,
+            ),
+        ).rejects.toThrow(/reply message not found/);
+        expect(transaction).not.toHaveBeenCalled();
+    });
+
+    it('treats a non-numeric reply id as no reply', async () => {
+        await service.create(
+            user as never,
+            {
+                chatId: 10,
+                content: 'plain',
+                type: 'text',
+                reply: 'abc',
+            } as never,
+        );
+
+        expect(messageRepository.save).toHaveBeenCalledWith(
+            expect.objectContaining({ replyTo: { id: undefined } }),
+        );
+    });
 });
 
 describe('MessageService edit/delete rules (ownership, chat match, state)', () => {
@@ -274,6 +340,7 @@ describe('MessageService edit/delete rules (ownership, chat match, state)', () =
         findOne: jest.Mock;
         update: jest.Mock;
     };
+    let access: { getCallerContext: jest.Mock };
 
     const user: JwtPayload = { sub: 1 as never, role: 'user' };
     const otherUser: JwtPayload = { sub: 2 as never, role: 'user' };
@@ -296,6 +363,7 @@ describe('MessageService edit/delete rules (ownership, chat match, state)', () =
             findOne: jest.fn(),
             update: jest.fn().mockResolvedValue(undefined),
         };
+        access = { getCallerContext: jest.fn() };
 
         const module: TestingModule = await Test.createTestingModule({
             providers: [
@@ -314,6 +382,7 @@ describe('MessageService edit/delete rules (ownership, chat match, state)', () =
                     useValue: { resolve: jest.fn() },
                 },
                 { provide: AttachmentService, useValue: {} },
+                { provide: ChatAccessService, useValue: access },
             ],
         }).compile();
 
@@ -404,16 +473,47 @@ describe('MessageService edit/delete rules (ownership, chat match, state)', () =
         });
     });
 
-    it("rejects deleting someone else's message", async () => {
-        messageRepository.findOne.mockResolvedValue(null);
+    it("rejects deleting someone else's message for members and non-owner admins", async () => {
+        messageRepository.findOne.mockResolvedValue({
+            ...ownTextMessage,
+            sender: { id: 2, profile: null },
+        });
+        // `isManager` is the chat `manager` role only; a chat admin also gets
+        // `false` here, so both cases are covered by the same assertion.
+        access.getCallerContext.mockResolvedValue({
+            isManager: false,
+            chat: { type: TypeChatEnum.GRUPE },
+        });
 
         await expect(
             service.delete(
                 { chatId: 10, messageId: 200 } as never,
-                otherUser as never,
+                user as never,
             ),
-        ).rejects.toThrow(/message not found/);
+        ).rejects.toThrow(/only the group owner/);
+        expect(access.getCallerContext).toHaveBeenCalledWith(10, 1);
         expect(messageRepository.update).not.toHaveBeenCalled();
+    });
+
+    it("lets the group owner delete another member's message", async () => {
+        messageRepository.findOne.mockResolvedValue({
+            ...ownTextMessage,
+            sender: { id: 2, profile: null },
+        });
+        access.getCallerContext.mockResolvedValue({
+            isManager: true,
+            chat: { type: TypeChatEnum.GRUPE },
+        });
+
+        await service.delete(
+            { chatId: 10, messageId: 200 } as never,
+            user as never,
+        );
+
+        expect(access.getCallerContext).toHaveBeenCalledWith(10, 1);
+        expect(messageRepository.update).toHaveBeenCalledWith(200, {
+            isDeleted: true,
+        });
     });
 
     it('rejects deleting an already-deleted message (not idempotent)', async () => {
@@ -451,5 +551,129 @@ describe('MessageService edit/delete rules (ownership, chat match, state)', () =
         await expect(service.lastNonDeletedMessage(10 as never)).resolves.toBe(
             null,
         );
+    });
+});
+
+describe('MessageService.getPage (cursor pagination)', () => {
+    let service: MessageService;
+    let messageRepository: { find: jest.Mock };
+
+    interface PageFindArgs {
+        where: {
+            chat?: { id?: number };
+            isDeleted?: boolean;
+            id?: { type?: string; value?: number };
+        };
+        take?: number;
+        order?: Record<string, string>;
+    }
+
+    const rows = (ids: number[]): Array<{ id: number }> =>
+        ids.map((id) => ({ id }));
+
+    const lastFindArgs = (): PageFindArgs => {
+        const calls = messageRepository.find.mock.calls as unknown as Array<
+            [PageFindArgs]
+        >;
+        const first = calls[0];
+        if (first === undefined) {
+            throw new Error('messageRepository.find was not called');
+        }
+        return first[0];
+    };
+
+    beforeEach(async () => {
+        jest.clearAllMocks();
+        messageRepository = { find: jest.fn() };
+
+        const module: TestingModule = await Test.createTestingModule({
+            providers: [
+                MessageService,
+                {
+                    provide: getRepositoryToken(Message),
+                    useValue: messageRepository,
+                },
+                { provide: getRepositoryToken(ChatMember), useValue: {} },
+                { provide: getRepositoryToken(Chat), useValue: {} },
+                { provide: getRepositoryToken(User), useValue: {} },
+                { provide: getRepositoryToken(TypeMessage), useValue: {} },
+                { provide: DataSource, useValue: { transaction: jest.fn() } },
+                {
+                    provide: ContentResolverService,
+                    useValue: { resolve: jest.fn() },
+                },
+                { provide: AttachmentService, useValue: {} },
+                {
+                    provide: ChatAccessService,
+                    useValue: { getCallerContext: jest.fn() },
+                },
+            ],
+        }).compile();
+
+        service = module.get<MessageService>(MessageService);
+    });
+
+    it('returns the newest `limit` rows with hasMore and the oldest id as nextCursor', async () => {
+        // limit + 1 rows: the extra (oldest) row only signals another page.
+        messageRepository.find.mockResolvedValue(
+            rows(Array.from({ length: 31 }, (_, index) => 130 - index)),
+        );
+
+        const page = await service.getPage(10 as never, undefined, 30);
+
+        expect(page.messages).toHaveLength(30);
+        expect(page.messages[0]?.id).toBe(130);
+        expect(page.messages[29]?.id).toBe(101);
+        expect(page.hasMore).toBe(true);
+        expect(page.nextCursor).toBe(101);
+
+        const args = lastFindArgs();
+        // Deleted messages are excluded in SQL, not after the fact.
+        expect(args.where).toEqual({ chat: { id: 10 }, isDeleted: false });
+        expect(args.order).toEqual({ id: 'DESC' });
+        expect(args.take).toBe(31);
+    });
+
+    it('applies beforeId as a strict id < cursor filter', async () => {
+        messageRepository.find.mockResolvedValue(rows([50, 49]));
+
+        const page = await service.getPage(10 as never, 50, 5);
+
+        expect(page.hasMore).toBe(false);
+        expect(page.nextCursor).toBe(49);
+
+        const args = lastFindArgs();
+        expect(args.where.id?.type).toBe('lessThan');
+        expect(args.where.id?.value).toBe(50);
+        expect(args.take).toBe(6);
+    });
+
+    it('returns the last page with hasMore false when fewer than limit rows remain', async () => {
+        messageRepository.find.mockResolvedValue(rows([5, 4, 3]));
+
+        const page = await service.getPage(10 as never, 6, 5);
+
+        expect(page.messages.map((message) => message.id)).toEqual([5, 4, 3]);
+        expect(page.hasMore).toBe(false);
+        expect(page.nextCursor).toBe(3);
+    });
+
+    it('returns an empty page with a null cursor', async () => {
+        messageRepository.find.mockResolvedValue([]);
+
+        const page = await service.getPage(10 as never, 1, 30);
+
+        expect(page.messages).toEqual([]);
+        expect(page.hasMore).toBe(false);
+        expect(page.nextCursor).toBeNull();
+    });
+
+    it('defaults to the 30-row page size', async () => {
+        messageRepository.find.mockResolvedValue(rows([]));
+
+        await service.getPage(10 as never);
+
+        expect(lastFindArgs().take).toBe(31);
+        expect(lastFindArgs().where.id).toBeUndefined();
     });
 });

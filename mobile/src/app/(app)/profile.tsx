@@ -19,11 +19,12 @@ import {
     typography,
 } from '../../shared/components';
 import {
-    describeProfileError,
+    describeAvatarError,
     useDeleteMyAvatar,
     useProfile,
     useUploadMyAvatar,
 } from '../../features/users';
+import type { AvatarUploadAsset } from '../../features/users';
 
 /**
  * Profile screen (GET /auth/getme).
@@ -43,7 +44,11 @@ export default function ProfileScreen(): React.ReactElement {
     const profile = useProfile();
     const uploadAvatar = useUploadMyAvatar();
     const deleteAvatar = useDeleteMyAvatar();
-    const [pickedUri, setPickedUri] = useState<string | null>(null);
+    const [pickedAsset, setPickedAsset] = useState<AvatarUploadAsset | null>(
+        null,
+    );
+    /** Absolute URL whose image failed to load — falls back to the initial. */
+    const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
     const [feedback, setFeedback] = useState<{
         kind: 'ok' | 'error';
         text: string;
@@ -82,47 +87,74 @@ export default function ProfileScreen(): React.ReactElement {
         avatarUrlList.length > 0
             ? (avatarUrlList[avatarUrlList.length - 1] ?? null)
             : null;
+    /** False when the stored path resolves to nothing the device can load. */
+    const avatarVisible =
+        latestAvatarUrl !== null && latestAvatarUrl !== failedAvatarUrl;
     const displayName = user.name;
     const displayInitial =
         displayName.length > 0 ? displayName.slice(0, 1) : '?';
 
     const pickAvatarImage = async (): Promise<void> => {
-        const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ['images'],
-            allowsEditing: true,
-            aspect: [1, 1],
-            quality: 0.8,
-        });
-        if (result.canceled || result.assets[0]?.uri === undefined) {
-            return;
+        setFeedback(null);
+        try {
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ['images'],
+                allowsEditing: true,
+                aspect: [1, 1],
+                quality: 0.8,
+            });
+            // Cancellation is a normal outcome, not an error.
+            if (result.canceled) {
+                return;
+            }
+            const asset = result.assets[0];
+            if (asset?.uri === undefined || asset.uri === '') {
+                setFeedback({
+                    kind: 'error',
+                    text: 'Could not read the selected image.',
+                });
+                return;
+            }
+            setPickedAsset({
+                uri: asset.uri,
+                mimeType: asset.mimeType ?? null,
+                fileName: asset.fileName ?? null,
+            });
+        } catch {
+            setFeedback({
+                kind: 'error',
+                text: 'Could not open the photo library.',
+            });
         }
-        setPickedUri(result.assets[0].uri);
     };
 
     const confirmUpload = async (): Promise<void> => {
-        if (pickedUri === null) {
+        if (pickedAsset === null || uploadAvatar.isPending) {
             return;
         }
         setFeedback(null);
         try {
-            await uploadAvatar.mutateAsync(pickedUri);
-            setPickedUri(null);
+            // Resolves only once the backend stored the file, appended the path
+            // and the profile cache was refreshed — never before.
+            await uploadAvatar.mutateAsync(pickedAsset);
+            setPickedAsset(null);
             setFeedback({ kind: 'ok', text: 'Avatar updated.' });
         } catch (error) {
-            setFeedback({ kind: 'error', text: describeProfileError(error) });
+            setFeedback({ kind: 'error', text: describeAvatarError(error) });
         }
     };
 
     const removeAvatar = async (): Promise<void> => {
-        if (currentAvatarPath === null) {
+        if (currentAvatarPath === null || deleteAvatar.isPending) {
             return;
         }
         setFeedback(null);
         try {
             await deleteAvatar.mutateAsync(currentAvatarPath);
+            setFailedAvatarUrl(null);
             setFeedback({ kind: 'ok', text: 'Avatar removed.' });
         } catch (error) {
-            setFeedback({ kind: 'error', text: describeProfileError(error) });
+            setFeedback({ kind: 'error', text: describeAvatarError(error) });
         }
     };
 
@@ -145,26 +177,31 @@ export default function ProfileScreen(): React.ReactElement {
                 </View>
 
                 <View style={styles.avatarSection}>
-                    {pickedUri === null ? (
-                        latestAvatarUrl === null ? (
+                    {pickedAsset === null ? (
+                        avatarVisible ? (
+                            <Image
+                                accessibilityLabel="Profile photo"
+                                style={styles.avatar}
+                                source={{ uri: latestAvatarUrl }}
+                                // A stored path can still be unreachable (wrong
+                                // host, removed file); show the initial then.
+                                onError={(): void =>
+                                    setFailedAvatarUrl(latestAvatarUrl)
+                                }
+                            />
+                        ) : (
                             <View style={styles.avatarFallback}>
                                 <Text style={styles.avatarFallbackText}>
                                     {displayInitial}
                                 </Text>
                             </View>
-                        ) : (
-                            <Image
-                                accessibilityLabel="Profile photo"
-                                style={styles.avatar}
-                                source={{ uri: latestAvatarUrl }}
-                            />
                         )
                     ) : (
                         <>
                             <Image
                                 accessibilityLabel="Selected photo preview"
                                 style={styles.avatar}
-                                source={{ uri: pickedUri }}
+                                source={{ uri: pickedAsset.uri }}
                             />
                             <AppText variant="caption">
                                 Preview — confirm to upload
@@ -173,14 +210,15 @@ export default function ProfileScreen(): React.ReactElement {
                     )}
 
                     <View style={styles.avatarActions}>
-                        {pickedUri === null ? (
+                        {pickedAsset === null ? (
                             <FormRow
+                                disabled={uploadAvatar.isPending}
                                 label={
                                     uploadAvatar.isPending
                                         ? 'Uploading…'
-                                        : latestAvatarUrl === null
-                                          ? 'Add photo'
-                                          : 'Change photo'
+                                        : avatarVisible
+                                          ? 'Change photo'
+                                          : 'Add photo'
                                 }
                                 onPress={(): void => {
                                     void pickAvatarImage();
@@ -189,6 +227,7 @@ export default function ProfileScreen(): React.ReactElement {
                         ) : (
                             <>
                                 <FormRow
+                                    disabled={uploadAvatar.isPending}
                                     label={
                                         uploadAvatar.isPending
                                             ? 'Uploading…'
@@ -199,14 +238,16 @@ export default function ProfileScreen(): React.ReactElement {
                                     }}
                                 />
                                 <FormRow
+                                    disabled={uploadAvatar.isPending}
                                     intent="ghost"
                                     label="Discard"
-                                    onPress={(): void => setPickedUri(null)}
+                                    onPress={(): void => setPickedAsset(null)}
                                 />
                             </>
                         )}
-                        {pickedUri === null && currentAvatarPath !== null && (
+                        {pickedAsset === null && currentAvatarPath !== null && (
                             <FormRow
+                                disabled={deleteAvatar.isPending}
                                 intent="danger"
                                 label={
                                     deleteAvatar.isPending
@@ -278,15 +319,19 @@ function FormRow(props: {
     label: string;
     onPress: () => void;
     intent?: 'primary' | 'ghost' | 'danger';
+    disabled?: boolean;
 }): React.ReactElement {
     return (
         <Pressable
             accessibilityRole="button"
+            accessibilityState={{ disabled: props.disabled === true }}
+            disabled={props.disabled === true}
             onPress={props.onPress}
             style={[
                 styles.button,
                 props.intent === 'ghost' && styles.buttonGhost,
                 props.intent === 'danger' && styles.buttonDanger,
+                props.disabled === true && styles.buttonDisabled,
             ]}
         >
             <Text
@@ -367,6 +412,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'transparent',
     },
     buttonDangerText: { color: palette.semantic.danger },
+    buttonDisabled: { opacity: 0.5 },
     errorText: { color: palette.semantic.danger },
     okText: { color: palette.semantic.success },
     infoRow: {

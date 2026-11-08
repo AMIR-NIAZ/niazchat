@@ -8,6 +8,18 @@ import type { MessageTypeName } from '../../core/api/dto/message.dto';
 /** Server-confirmed messages plus one optimistic entry per in-flight send. */
 export type MessageStatus = 'pending' | 'sent' | 'failed';
 
+/** Compact quoted-message preview rendered at the top of a reply bubble. */
+export interface ReplyPreview {
+    id: number;
+    /** Null when the original was deleted. */
+    content: string | null;
+    senderId: number;
+    senderName: string;
+    type: MessageTypeName;
+    attachmentsCount: number;
+    isDeleted: boolean;
+}
+
 export interface ChatMessage {
     /**
      * Stable FlatList key: the server message id when known, a virtual
@@ -27,6 +39,10 @@ export interface ChatMessage {
     /** Resolved (absolute) avatar urls of the sender, when present. */
     senderAvatarUrls: string[];
     attachmentsCount: number;
+    /** Quoted preview when this message replies to another, else null. */
+    replyTo: ReplyPreview | null;
+    /** Wire id of the replied-to message, kept even if the preview is null. */
+    replyToId: number | null;
     status: MessageStatus;
     /** Populated for failed `sendMessage` attempts so a tap can retry verbatim. */
     pendingContent: string | null;

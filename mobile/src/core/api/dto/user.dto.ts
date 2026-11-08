@@ -27,6 +27,16 @@ export interface UserDto {
   role?: { id: number; name: string };
 }
 
+/**
+ * `PUT /user/uploade-avatar` (multipart field `avatar`) → the stored path is
+ * already appended to `user.avatars`, so the client can confirm persistence
+ * and refresh its cache from this payload alone.
+ */
+export interface UploadAvatarResponseDto {
+  message: string;
+  user: UserDto;
+}
+
 /** `GET /chats/manage/:chatId/bans` → `{ data: [...] }` item (docs/mobile-api/groups.md). */
 export interface BannedChatMemberDto {
   id: number;

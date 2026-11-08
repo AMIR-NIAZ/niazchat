@@ -21,6 +21,7 @@ export function toChatPreview(chat: ChatDto): ChatPreview {
         avatarUrls: chat.avatars.map(absoluteUploadUrl),
         createdAt: chat.createdAt,
         updatedAt: chat.updatedAt,
+        unreadCount: Number(chat.unreadCount ?? 0),
         lastMessage:
             chat.lastMessage == null
                 ? null
@@ -68,6 +69,30 @@ function activityAsc(chatA: ChatPreview, chatB: ChatPreview): number {
 /** Newest-first chat list (stable sort; ISO dates parsed once per comparison). */
 export function sortChatsByActivity(chats: ChatPreview[]): ChatPreview[] {
     return [...chats].sort(activityAsc);
+}
+
+/**
+ * Pinned chats first, preserving the incoming (activity) order inside each
+ * group. Partitioning keeps the order explicit instead of relying on sort
+ * stability. Pin state is device-local: there is no backend pin field.
+ */
+export function sortPinnedFirst(
+    chats: ChatPreview[],
+    pinnedIds: ReadonlySet<number>,
+): ChatPreview[] {
+    if (pinnedIds.size === 0) {
+        return chats;
+    }
+    const pinnedChats: ChatPreview[] = [];
+    const rest: ChatPreview[] = [];
+    for (const chat of chats) {
+        if (pinnedIds.has(Number(chat.id))) {
+            pinnedChats.push(chat);
+        } else {
+            rest.push(chat);
+        }
+    }
+    return [...pinnedChats, ...rest];
 }
 
 /** Client-side search (the backend exposes no chat-search endpoint). */

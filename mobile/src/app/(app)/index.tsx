@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     FlatList,
@@ -14,17 +14,24 @@ import { router, useFocusEffect } from 'expo-router';
 import { AppText, Screen, radii, spacing } from '../../shared/components';
 import { useQueryClient } from '@tanstack/react-query';
 import { palette, typography } from '../../shared/theme';
-import { useChats, filterChats, invalidateChats } from '../../features/chats';
+import {
+    ChatContextMenu,
+    filterChats,
+    invalidateChats,
+    sortPinnedFirst,
+    useChats,
+    usePinnedChatIds,
+} from '../../features/chats';
 import { useAuthStore } from '../../features/auth';
+import { useMe } from '../../features/users';
 
 /**
  * Chats screen — renders the WS-provided chat list.
  *
- * Documented limitations surfaced here (do NOT fake them):
- * - No unread counts: the backend provides none.
- * - Private chats have no title server-side; rows show a neutral label until a
- *   `chatlist:updated` event can provide context.
- * - lastMessage preview only appears after live update events.
+ * Unread counts come from `getAllChats` (authoritative) and are incremented
+ * locally by live `chatlist:updated` events; reading a chat resets them.
+ * Remaining limitations surfaced here (do NOT fake them):
+ * - Private chats have no title server-side; rows show a neutral label.
  * - Search is client-side only (no server endpoint).
  */
 
@@ -35,6 +42,9 @@ export default function ChatsScreen(): React.ReactElement {
     const queryClient = useQueryClient();
     const clearSession = useAuthStore((state) => state.clearSession);
     const [search, setSearch] = useState('');
+    const [menuChat, setMenuChat] = useState<ChatRow | null>(null);
+    const { me } = useMe();
+    const { pinned, togglePin } = usePinnedChatIds(me?.id ?? null);
 
     // Updates missed while this screen was unmounted: refetch on focus.
     useFocusEffect(
@@ -44,7 +54,10 @@ export default function ChatsScreen(): React.ReactElement {
     );
 
     const chats = chatsQuery.data ?? [];
-    const visible = filterChats(chats, search);
+    const visible = useMemo(
+        () => sortPinnedFirst(filterChats(chats, search), pinned),
+        [chats, search, pinned],
+    );
 
     return (
         <Screen style={styles.screen} withTopInset={true}>
@@ -124,7 +137,15 @@ export default function ChatsScreen(): React.ReactElement {
                         />
                     }
                     renderItem={({ item }): React.ReactElement => (
-                        <ChatRowItem chat={item} />
+                        <ChatRowItem
+                            chat={item}
+                            pinned={pinned.has(Number(item.id))}
+                            selected={
+                                menuChat !== null &&
+                                Number(menuChat.id) === Number(item.id)
+                            }
+                            onLongPress={setMenuChat}
+                        />
                     )}
                     ItemSeparatorComponent={RowSeparator}
                 />
@@ -139,11 +160,30 @@ export default function ChatsScreen(): React.ReactElement {
             >
                 <Text style={styles.fabText}>+ Group</Text>
             </Pressable>
+
+            <ChatContextMenu
+                chat={menuChat}
+                pinned={menuChat !== null && pinned.has(Number(menuChat.id))}
+                onClose={(): void => setMenuChat(null)}
+                onTogglePin={togglePin}
+            />
         </Screen>
     );
 }
 
-function ChatRowItem({ chat }: { chat: ChatRow }): React.ReactElement {
+interface ChatRowItemProps {
+    chat: ChatRow;
+    pinned: boolean;
+    selected: boolean;
+    onLongPress: (chat: ChatRow) => void;
+}
+
+const LONG_PRESS_MS = 350;
+
+function ChatRowItem(props: ChatRowItemProps): React.ReactElement {
+    const { chat, pinned, selected } = props;
+    // Releasing a hold that opened the menu must not also navigate.
+    const pressStartedAtRef = useRef(0);
     const name =
         chat.title ??
         (chat.type === 'private' ? 'Private chat' : 'Unnamed group');
@@ -155,12 +195,25 @@ function ChatRowItem({ chat }: { chat: ChatRow }): React.ReactElement {
               ? chat.lastMessage.content
               : `${chat.lastMessage.attachmentCount} attachment(s)`;
     const time = chat.lastMessage?.createdAt ?? chat.updatedAt;
+    const unread = chat.unreadCount;
+    const unreadLabel = unread > 99 ? '99+' : String(unread);
 
     return (
         <Pressable
             accessibilityRole="button"
-            style={styles.row}
+            accessibilityHint="Tap to open, long press for chat actions"
+            delayLongPress={LONG_PRESS_MS}
+            style={[styles.row, selected && styles.rowSelected]}
+            onPressIn={(): void => {
+                pressStartedAtRef.current = Date.now();
+            }}
+            onLongPress={(): void => {
+                props.onLongPress(chat);
+            }}
             onPress={(): void => {
+                if (Date.now() - pressStartedAtRef.current >= LONG_PRESS_MS) {
+                    return;
+                }
                 router.push({
                     pathname: '/(app)/chat/[chatId]',
                     params: { chatId: String(chat.id) },
@@ -177,13 +230,27 @@ function ChatRowItem({ chat }: { chat: ChatRow }): React.ReactElement {
                 <Image style={styles.avatar} source={{ uri: avatar }} />
             )}
             <View style={styles.rowBody}>
-                <Text style={typography.title} numberOfLines={1}>
-                    {name}
-                </Text>
+                <View style={styles.titleRow}>
+                    <Text
+                        style={[typography.title, styles.titleText]}
+                        numberOfLines={1}
+                    >
+                        {name}
+                    </Text>
+                    {pinned && (
+                        <Text
+                            style={styles.pinGlyph}
+                            accessibilityLabel="Pinned chat"
+                        >
+                            📌
+                        </Text>
+                    )}
+                </View>
                 <Text
                     style={[
                         typography.caption,
                         { color: palette.neutral[700] },
+                        unread > 0 && styles.unreadPreview,
                     ]}
                     numberOfLines={1}
                 >
@@ -191,6 +258,16 @@ function ChatRowItem({ chat }: { chat: ChatRow }): React.ReactElement {
                 </Text>
             </View>
             <View style={styles.rowMeta}>
+                {unread > 0 && (
+                    <View
+                        style={styles.unreadBadge}
+                        accessibilityLabel={`${unread} unread messages`}
+                    >
+                        <Text style={styles.unreadBadgeText}>
+                            {unreadLabel}
+                        </Text>
+                    </View>
+                )}
                 <Text style={typography.caption}>{time.slice(11, 16)}</Text>
                 {chat.isBan && <Text style={styles.banBadge}>banned</Text>}
             </View>
@@ -256,7 +333,17 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         gap: spacing.sm,
         paddingVertical: spacing.xs,
+        paddingHorizontal: spacing.xxs,
+        borderRadius: radii.sm,
     },
+    rowSelected: { backgroundColor: palette.primary[100] },
+    titleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.xxs,
+    },
+    titleText: { flexShrink: 1 },
+    pinGlyph: { fontSize: 11 },
     avatar: { width: 44, height: 44, borderRadius: radii.full / 2 },
     avatarFallback: {
         width: 44,
@@ -273,6 +360,21 @@ const styles = StyleSheet.create({
     },
     rowBody: { flex: 1, gap: 2 },
     rowMeta: { alignItems: 'flex-end', gap: 2 },
+    unreadPreview: { color: palette.neutral[900], fontWeight: '700' },
+    unreadBadge: {
+        minWidth: 18,
+        paddingHorizontal: 5,
+        paddingVertical: 1,
+        borderRadius: radii.full / 2,
+        backgroundColor: palette.primary[500],
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    unreadBadgeText: {
+        color: palette.neutral[0],
+        fontSize: 10,
+        fontWeight: '700',
+    },
     banBadge: { color: palette.semantic.danger, fontSize: 10 },
     separator: { height: 1, backgroundColor: palette.neutral[100] },
     fab: {

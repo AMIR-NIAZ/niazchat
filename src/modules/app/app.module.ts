@@ -33,7 +33,11 @@ import { HealthModule } from '../health/health.module';
             useClass: RedisConfig,
         }),
         ServeStaticModule.forRoot({
-            rootPath: join(__dirname, '..', '..', '..', 'uploads'),
+            // Resolved from the cwd on purpose: it must match the directory
+            // multer writes to (`uploads/avatars`, also cwd-relative), so the
+            // served URL and the stored path can never diverge when the
+            // compiled app is started from a different working directory.
+            rootPath: join(process.cwd(), 'uploads'),
             serveRoot: '/uploads',
         }),
         JwtModule.register({}),

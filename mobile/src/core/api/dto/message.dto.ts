@@ -16,6 +16,18 @@ export type MessageTypeName =
  * Serialized `Message` entity from WS `getMessages` / `sendMessage:list` / `editMessage:list`.
  * `type` is a `type_messages` catalog row — use `.name`, never the raw `typeId`.
  */
+/** Compact quoted preview carried on a reply (server truncates content). */
+export interface MessageReplyDto {
+    id: number;
+    /** Null when the original was soft-deleted (no content leaked). */
+    content: string | null;
+    senderId: number;
+    senderName: string;
+    type: MessageTypeName;
+    attachmentsCount: number;
+    isDeleted: boolean;
+}
+
 export interface MessageDto {
     id: number;
     /** Empty/null for attachment-only messages. */
@@ -36,7 +48,19 @@ export interface MessageDto {
     senderId: number;
     sender: UserDto;
     replyToId: number | null;
+    /** Compact preview of the replied-to message; null when this is not a reply. */
+    replyTo: MessageReplyDto | null;
     attachments: MessageAttachmentDto[];
+}
+
+/**
+ * WS `getMessages` ack data: one page of history, newest first.
+ * `nextCursor` is the id of the OLDEST message in the page (null when empty).
+ */
+export interface MessagePageDto {
+    messages: MessageDto[];
+    hasMore: boolean;
+    nextCursor: number | null;
 }
 
 /** Narrowed attachment projection inside message payloads. */

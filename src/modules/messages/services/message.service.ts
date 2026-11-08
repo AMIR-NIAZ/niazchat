@@ -4,7 +4,7 @@ import {
     NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, LessThan, Repository } from 'typeorm';
 import { Message } from '../entities/message.entity';
 import { CreateMessageDto } from '../dtos/createMessage.dto';
 import { ChatMember } from 'src/modules/chats/entities/chat_members.entity';
@@ -26,6 +26,7 @@ import {
 import { ContentResolverService } from './content-resolver.service';
 import { toUserResponse } from 'src/modules/auth/utils/user-response.util';
 import { AttachmentService } from 'src/modules/attachments/services/attachment.service';
+import { ChatAccessService } from 'src/modules/chats/services/chat-access.service';
 
 @Injectable()
 export class MessageService {
@@ -44,6 +45,7 @@ export class MessageService {
         private readonly dataSource: DataSource,
         private readonly contentResolver: ContentResolverService,
         private readonly attachmentService: AttachmentService,
+        private readonly access: ChatAccessService,
     ) {}
 
     async create(user: JwtPayload, dto: CreateMessageDto): Promise<Message> {
@@ -97,13 +99,6 @@ export class MessageService {
             },
         });
         if (!isMember) throw new BadRequestException('user not exit in chat');
-
-        if (reply) {
-            const exists = await this.messageRepository.exists({
-                where: { id: reply },
-            });
-            if (!exists) throw new NotFoundException('reply message not found');
-        }
 
         const typeData = await this.typeMessageRepository.findOneOrFail({
             where: { name: type },
@@ -194,6 +189,9 @@ export class MessageService {
         typeMessageId: number,
         attachmentIds?: AttachmentId[],
     ): Promise<Message> {
+        // The replied-to message must exist in THIS chat and not be deleted.
+        const replyId = await this.validateReply(reply, chatId);
+
         // Authorization for attachments happens before the transaction; the
         // status transition inside it is still guarded against races.
         if (attachmentIds?.length) {
@@ -209,7 +207,7 @@ export class MessageService {
                 content,
                 sender: { id: user.sub },
                 chat: { id: chatId },
-                replyTo: { id: reply },
+                replyTo: { id: replyId },
                 type: { id: typeMessageId },
             });
 
@@ -227,6 +225,50 @@ export class MessageService {
         return this.loadMessage(message.id as MessageId);
     }
 
+    /**
+     * Normalizes the wire `reply` field: a positive integer (or numeric string)
+     * is a reply id; anything else means "no reply".
+     */
+    private toReplyId(reply: unknown): MessageId | undefined {
+        const parsed =
+            typeof reply === 'number'
+                ? reply
+                : typeof reply === 'string' && reply.trim() !== ''
+                  ? Number(reply)
+                  : Number.NaN;
+        return Number.isInteger(parsed) && parsed > 0
+            ? (parsed as MessageId)
+            : undefined;
+    }
+
+    /**
+     * Server-side reply validation (not just UI): the original must exist in the
+     * same chat and must not be soft-deleted. Missing/non-numeric ids mean no reply.
+     */
+    private async validateReply(
+        reply: unknown,
+        chatId: ChatId,
+    ): Promise<MessageId | undefined> {
+        const replyId = this.toReplyId(reply);
+        if (replyId === undefined) {
+            return undefined;
+        }
+        const original = await this.messageRepository.findOne({
+            where: {
+                id: replyId,
+                chat: { id: chatId },
+                isDeleted: false,
+            },
+            select: { id: true },
+        });
+        if (!original) {
+            throw new BadRequestException(
+                'reply message not found in this chat (or deleted)',
+            );
+        }
+        return replyId;
+    }
+
     private async loadMessage(id: MessageId): Promise<Message> {
         const message = await this.messageRepository.findOne({
             where: { id },
@@ -235,6 +277,12 @@ export class MessageService {
                 type: true,
                 attachments: true,
                 chat: true,
+                // The ack/echo must carry the quoted preview immediately.
+                replyTo: {
+                    sender: { profile: true },
+                    type: true,
+                    attachments: true,
+                },
             },
         });
 
@@ -260,7 +308,16 @@ export class MessageService {
                 sender: { id: user.sub },
                 isDeleted: false,
             },
-            relations: { type: true, sender: { profile: true }, chat: true },
+            relations: {
+                type: true,
+                sender: { profile: true },
+                chat: true,
+                replyTo: {
+                    sender: { profile: true },
+                    type: true,
+                    attachments: true,
+                },
+            },
         });
         if (!message) throw new WsException('message not found');
 
@@ -274,21 +331,42 @@ export class MessageService {
         return this.serializeSender(await this.messageRepository.save(message));
     }
 
+    /**
+     * Soft-delete a message.
+     *
+     * Senders may always delete their own message. In a GROUP, the owner may
+     * additionally delete any member's message. Ownership here is the chat role
+     * `manager` only: chat `admin` is NOT the owner and cannot moderate messages.
+     * The message is always looked up inside the supplied chat id, so a message
+     * from an unrelated conversation can never be deleted.
+     */
     async delete(dto: deleteMessageDto, user: JwtPayload) {
         const { chatId, messageId } = dto;
 
-        // Same neutral miss as `edit`: the message must exist inside the given
-        // chat AND belong to the caller — no cross-chat or cross-user deletes.
-        // A soft-deleted message is also a miss (a clean, non-idempotent error).
+        // One neutral miss for "does not exist", "another chat" and "already
+        // soft-deleted" — no cross-chat or cross-user information leak.
         const message = await this.messageRepository.findOne({
             where: {
                 id: messageId,
                 chat: { id: chatId },
-                sender: { id: user.sub },
                 isDeleted: false,
             },
+            relations: { sender: true },
         });
         if (!message) throw new WsException('message not found');
+
+        const isOwnMessage = Number(message.sender?.id) === Number(user.sub);
+        if (!isOwnMessage) {
+            const caller = await this.access.getCallerContext(chatId, user.sub);
+            if (
+                !caller.isManager ||
+                caller.chat.type !== TypeChatEnum.GRUPE
+            ) {
+                throw new WsException(
+                    "only the group owner can delete other members' messages",
+                );
+            }
+        }
 
         await this.messageRepository.update(messageId, { isDeleted: true });
     }
@@ -310,16 +388,40 @@ export class MessageService {
         });
     }
 
-    async getAllByChats(chatId: ChatId) {
+    /**
+     * One page of non-deleted chat history, newest first.
+     *
+     * `beforeId` is exclusive (`id < beforeId`) and is the previous page's
+     * `nextCursor`. `limit + 1` rows are fetched only to compute `hasMore`;
+     * the extra row is never returned. Relations are joined (no N+1), the same
+     * set `getMessages` has always serialized, plus `replyTo` for its id.
+     */
+    async getPage(
+        chatId: ChatId,
+        beforeId?: number,
+        limit: number = 30,
+    ): Promise<{
+        messages: Message[];
+        hasMore: boolean;
+        nextCursor: number | null;
+    }> {
         const messages = await this.messageRepository.find({
             where: {
                 chat: { id: chatId },
                 isDeleted: false,
+                ...(beforeId !== undefined ? { id: LessThan(beforeId) } : {}),
             },
             relations: {
                 sender: { profile: true },
                 attachments: true,
                 type: true,
+                // Joined regardless of the original's isDeleted flag: replies to
+                // soft-deleted messages must still carry a (content-less) preview.
+                replyTo: {
+                    sender: { profile: true },
+                    type: true,
+                    attachments: true,
+                },
             },
             select: {
                 id: true,
@@ -351,12 +453,28 @@ export class MessageService {
                     size: true,
                     createdAt: true,
                 },
+                replyTo: {
+                    id: true,
+                    content: true,
+                    isDeleted: true,
+                    sender: { id: true, profile: { id: true, name: true } },
+                    type: { id: true, name: true },
+                    attachments: { id: true },
+                },
             },
             order: { id: 'DESC' },
-            take: 50,
+            take: limit + 1,
         });
 
-        return messages;
+        const hasMore = messages.length > limit;
+        const page = hasMore ? messages.slice(0, limit) : messages;
+        const oldest = page[page.length - 1];
+
+        return {
+            messages: page,
+            hasMore,
+            nextCursor: oldest === undefined ? null : Number(oldest.id),
+        };
     }
 
     private serializeSender(message: Message): Message {

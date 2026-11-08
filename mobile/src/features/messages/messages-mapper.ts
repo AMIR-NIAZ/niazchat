@@ -1,7 +1,10 @@
 import { absoluteUploadUrl } from '../../core/config/env';
-import type { MessageDto } from '../../core/api/dto/message.dto';
+import type {
+    MessageDto,
+    MessageReplyDto,
+} from '../../core/api/dto/message.dto';
 import { dayKeyOf, isPendingMessage, toNumericId } from './messages-model';
-import type { ChatMessage } from './messages-model';
+import type { ChatMessage, ReplyPreview } from './messages-model';
 
 /**
  * Wire → domain mapping (docs/mobile-api/messages.md):
@@ -9,14 +12,30 @@ import type { ChatMessage } from './messages-model';
  * - sender avatars are server-relative → absolutize like chat avatars.
  * - Deleted messages reach the client ONLY via `deleteMessage:list` (history
  *   excludes them); we drop them from the cache rather than render tombstones.
- * - Ids (message, sender) arrive as bigint STRINGS ("7"); they are normalized
- *   to numbers here, once, so every comparison in the app is number === number.
+ * - Ids (message, sender, reply) arrive as bigint STRINGS ("7"); they are
+ *   normalized to numbers here, once, so every comparison in the app is
+ *   number === number.
+ * - Replies carry a compact `replyTo` preview (content already truncated by the
+ *   server); the same preview is built locally for optimistic pending bubbles.
  *
  * Cache contract: the message list is ALWAYS ascending (oldest → newest);
  * local (not yet confirmed) messages — pending or failed — come last.
  */
 
 const virtalPendingKeyPrefix = 'pending-';
+/** Must match the backend preview truncation (ws-serializer.utils.ts). */
+const REPLY_PREVIEW_MAX_LENGTH = 200;
+
+function truncateReplyContent(
+    content: string | null | undefined,
+): string | null {
+    if (content === null || content === undefined) {
+        return null;
+    }
+    return content.length <= REPLY_PREVIEW_MAX_LENGTH
+        ? content
+        : `${content.slice(0, REPLY_PREVIEW_MAX_LENGTH)}…`;
+}
 
 function senderNameOf(dto: MessageDto): string {
     return dto.sender?.name ?? '';
@@ -26,6 +45,45 @@ function senderNameOf(dto: MessageDto): string {
 function senderIdOf(dto: MessageDto): number {
     const nested = (dto as unknown as { sender?: { id?: unknown } }).sender?.id;
     return toNumericId(dto.senderId) ?? toNumericId(nested) ?? -1;
+}
+
+export function replyPreviewFromDto(
+    dto: MessageReplyDto | null | undefined,
+): ReplyPreview | null {
+    if (dto === null || dto === undefined) {
+        return null;
+    }
+    const id = toNumericId(dto.id);
+    if (id === null) {
+        return null;
+    }
+    return {
+        id,
+        content: dto.isDeleted ? null : truncateReplyContent(dto.content),
+        senderId: toNumericId(dto.senderId) ?? -1,
+        senderName: dto.senderName ?? '',
+        type: dto.type ?? 'text',
+        attachmentsCount: dto.attachmentsCount ?? 0,
+        isDeleted: dto.isDeleted === true,
+    };
+}
+
+/** Build the quoted preview of an already-loaded message (optimistic sends). */
+export function toReplyPreview(message: ChatMessage): ReplyPreview | null {
+    if (message.id === null) {
+        return null;
+    }
+    return {
+        id: message.id,
+        content: message.isDeleted
+            ? null
+            : truncateReplyContent(message.content),
+        senderId: message.senderId,
+        senderName: message.senderName,
+        type: message.type,
+        attachmentsCount: message.attachmentsCount,
+        isDeleted: message.isDeleted,
+    };
 }
 
 export function toChatMessage(dto: MessageDto): ChatMessage {
@@ -41,6 +99,8 @@ export function toChatMessage(dto: MessageDto): ChatMessage {
         senderName: senderNameOf(dto),
         senderAvatarUrls: (dto.sender?.avatars ?? []).map(absoluteUploadUrl),
         attachmentsCount: dto.attachments?.length ?? 0,
+        replyTo: replyPreviewFromDto(dto.replyTo),
+        replyToId: toNumericId(dto.replyToId),
         status: 'sent',
         pendingContent: null,
     };
@@ -50,6 +110,7 @@ export function toPendingChatMessage(
     key: string,
     content: string,
     senderId: number,
+    replyTo: ReplyPreview | null = null,
 ): ChatMessage {
     return {
         key: `${virtalPendingKeyPrefix}${key}`,
@@ -63,6 +124,8 @@ export function toPendingChatMessage(
         senderName: '',
         senderAvatarUrls: [],
         attachmentsCount: 0,
+        replyTo,
+        replyToId: replyTo === null ? null : replyTo.id,
         status: 'pending',
         pendingContent: content,
     };
@@ -75,6 +138,63 @@ export function toFailedChatMessage(message: ChatMessage): ChatMessage {
 function sameContent(local: ChatMessage, confirmed: ChatMessage): boolean {
     return (
         (confirmed.content ?? '').trim() === (local.pendingContent ?? '').trim()
+    );
+}
+
+/**
+ * The original of a reply was edited: update every cached quoted preview that
+ * points at it (immutable). The reply itself is never changed by an edit.
+ */
+export function applyOriginalEdited(
+    current: ChatMessage[],
+    edited: ChatMessage,
+): ChatMessage[] {
+    if (edited.id === null) {
+        return current;
+    }
+    const targetId = edited.id;
+    return current.map((message) => {
+        if (message.replyTo === null || message.replyTo.id !== targetId) {
+            return message;
+        }
+        return {
+            ...message,
+            replyTo: {
+                ...message.replyTo,
+                content: edited.isDeleted
+                    ? null
+                    : truncateReplyContent(edited.content),
+                type: edited.type,
+                attachmentsCount: edited.attachmentsCount,
+                isDeleted: edited.isDeleted,
+            },
+        };
+    });
+}
+
+/**
+ * The original of a reply was deleted: cached replies switch to the
+ * content-less "deleted" preview without a refetch.
+ */
+export function applyOriginalDeleted(
+    current: ChatMessage[],
+    messageId: number | string,
+): ChatMessage[] {
+    const targetId = toNumericId(messageId);
+    if (targetId === null) {
+        return current;
+    }
+    return current.map((message) =>
+        message.replyTo !== null && message.replyTo.id === targetId
+            ? {
+                  ...message,
+                  replyTo: {
+                      ...message.replyTo,
+                      content: null,
+                      isDeleted: true,
+                  },
+              }
+            : message,
     );
 }
 
@@ -115,6 +235,7 @@ export function mergeMessages(
         const existing = confirmed.get(message.id);
         if (existing !== undefined) {
             // Already known (duplicate echo / re-delivery): update, never consume a bubble.
+            // The echo is authoritative and carries `replyTo`, so the preview survives.
             confirmed.set(message.id, { ...existing, ...message });
             continue;
         }
@@ -174,7 +295,7 @@ export function removeMessageById(
 
 /** Replaces a message in place after an `editMessage:list` broadcast.
  * Merges into the existing entry so fields a light echo does not carry
- * (sender display name, avatars) are never wiped with empty values. */
+ * (sender display name, avatars, quoted preview) are never wiped. */
 export function replaceMessage(
     current: ChatMessage[],
     updated: ChatMessage,
@@ -195,6 +316,9 @@ export function replaceMessage(
                       updated.senderAvatarUrls.length !== 0
                           ? updated.senderAvatarUrls
                           : message.senderAvatarUrls,
+                  // A reply keeps its quoted preview even if a light echo omits it.
+                  replyTo: updated.replyTo ?? message.replyTo,
+                  replyToId: updated.replyToId ?? message.replyToId,
               }
             : message,
     );

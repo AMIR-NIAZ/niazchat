@@ -5,6 +5,36 @@ import { toUserResponse } from 'src/modules/auth/utils/user-response.util';
 export const num = (value: unknown): number =>
     typeof value === 'number' ? value : Number(value);
 
+/** Reply previews are compact: long originals are cut server-side. */
+export const REPLY_PREVIEW_MAX_LENGTH = 200;
+
+function truncateReplyContent(content: string | null | undefined): string {
+    const text = content ?? '';
+    return text.length <= REPLY_PREVIEW_MAX_LENGTH
+        ? text
+        : `${text.slice(0, REPLY_PREVIEW_MAX_LENGTH)}…`;
+}
+
+/**
+ * Compact quoted-message preview (never the full entity). A soft-deleted
+ * original keeps its id/flag but leaks no content.
+ */
+export function serializeReplyPreview(reply: Message | null | undefined) {
+    if (reply === undefined || reply === null) {
+        return null;
+    }
+    const isDeleted = reply.isDeleted === true;
+    return {
+        id: num(reply.id),
+        content: isDeleted ? null : truncateReplyContent(reply.content),
+        senderId: num(reply.sender?.id ?? 0),
+        senderName: reply.sender?.profile?.name ?? '',
+        type: reply.type?.name ?? 'text',
+        attachmentsCount: reply.attachments?.length ?? 0,
+        isDeleted,
+    };
+}
+
 /**
  * Shared chat-list preview wire shape, used by BOTH `getAllChats` and the
  * `chatlist:updated` event so the app sees identical data from either source.
@@ -25,7 +55,7 @@ export function serializeLastMessage(message: Message) {
 }
 
 /** Chat wire shape: numeric ids, no relations (lastMessage/members unloaded). */
-export function serializeChat(chat: Chat) {
+export function serializeChat(chat: Chat & { unreadCount?: number }) {
     return {
         id: num(chat.id),
         createdAt: chat.createdAt,
@@ -34,6 +64,9 @@ export function serializeChat(chat: Chat) {
         avatars: chat.avatars ?? [],
         type: chat.type,
         isBan: chat.isBan,
+        // Authoritative only on `getAllChats`; live list updates increment
+        // locally in the app and resync on focus/reconnect. `chatInfo` sends 0.
+        unreadCount: chat.unreadCount ?? 0,
         // Same shape `notifyChatList` emits; null when no message yet / not loaded.
         lastMessage:
             chat.lastMessage === undefined || chat.lastMessage === null
@@ -68,6 +101,7 @@ export function serializeMessage(message: Message) {
             message.replyTo !== undefined && message.replyTo !== null
                 ? num(message.replyTo.id)
                 : null,
+        replyTo: serializeReplyPreview(message.replyTo),
         typeId: message.type?.id ? num(message.type.id) : null,
         type: message.type
             ? { id: num(message.type.id), name: message.type.name }

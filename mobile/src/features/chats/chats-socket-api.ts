@@ -1,6 +1,6 @@
 import { getSocket, request, type AppSocket } from '../../core/socket';
 import { ApiError } from '../../core/api';
-import type { ChatDto, MessageDto } from '../../core/api';
+import type { ChatDto, MessageDto, MessagePageDto } from '../../core/api';
 
 /**
  * WebSocket-based API for chats (docs/mobile-api/websocket-contract.md).
@@ -10,6 +10,9 @@ import type { ChatDto, MessageDto } from '../../core/api';
  */
 
 const NOT_CONNECTED_MESSAGE = 'Not connected — sign in again.';
+
+/** Page size the app asks for when loading older history. */
+export const MESSAGES_PAGE_SIZE = 30;
 
 export function socketOrThrow(): AppSocket {
     const socket = getSocket();
@@ -29,16 +32,52 @@ export function fetchChats(): Promise<ChatDto[] | null> {
 }
 
 /**
- * WS `joinChat` ({ chatId }) → joins the chat room; the ack data is the chat
- * info. Re-joining the same chat is idempotent server-side (ack again, no hang).
+ * WS `getMessages` → one page of history, newest first.
+ *
+ * No `beforeId` = the latest page (also what old clients send). `nextCursor` is
+ * the id of the oldest message in the page, or null for an empty page.
  */
-export function joinChat(chatId: number): Promise<ChatDto | null> {
-    return request<ChatDto>(socketOrThrow(), 'joinChat', { chatId });
-}
-
-/** WS `getMessages` ({ chatId }) → history (last 50, DESC or []; works for empty chats). */
 export function fetchChatMessages(
     chatId: number,
-): Promise<MessageDto[] | null> {
-    return request<MessageDto[]>(socketOrThrow(), 'getMessages', { chatId });
+    beforeId?: number,
+    limit?: number,
+): Promise<MessagePageDto | null> {
+    const payload: { chatId: number; beforeId?: number; limit?: number } = {
+        chatId,
+    };
+    if (beforeId !== undefined) {
+        payload.beforeId = beforeId;
+    }
+    if (limit !== undefined) {
+        payload.limit = limit;
+    }
+    return request<MessagePageDto>(socketOrThrow(), 'getMessages', payload);
+}
+
+/** One `joinChat` ack (chat info) plus the first history page. */
+export interface CurrentChatInfo {
+    info: ChatDto | null;
+    messages: MessageDto[];
+    hasMore: boolean;
+    nextCursor: number | null;
+}
+
+/**
+ * WS `joinChat` ({ chatId }) → joins the chat room and fetches the first page
+ * of history. The chat info is the join ack. Re-joining the same chat is
+ * idempotent server-side (ack again, no hang).
+ */
+export async function joinChat(
+    chatId: number,
+): Promise<CurrentChatInfo | null> {
+    const info = await request<ChatDto>(socketOrThrow(), 'joinChat', {
+        chatId,
+    });
+    const page = await fetchChatMessages(chatId);
+    return {
+        info,
+        messages: page?.messages ?? [],
+        hasMore: page?.hasMore ?? false,
+        nextCursor: page?.nextCursor ?? null,
+    };
 }

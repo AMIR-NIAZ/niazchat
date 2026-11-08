@@ -1,26 +1,80 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { palette, radii, spacing } from '../../shared/theme';
 import { formatMessageTime } from './messages-model';
-import type { ChatMessage } from './messages-model';
+import type { ChatMessage, ReplyPreview } from './messages-model';
 /**
  * A single message bubble. Mine → primary, right-aligned; others → white,
  * left-aligned with the sender name shown in group chats. Pending/failed
- * sends render with a status hint; failed sends tap-to-retry.
+ * sends render with a status hint; failed sends tap-to-retry. Replies render a
+ * compact quoted block at the top that jumps to the original when tapped.
  */
 
 interface MessageBubbleProps {
     message: ChatMessage;
     mine: boolean;
     isGroup: boolean;
+    currentUserId: number | null;
     onLongPress?: ((message: ChatMessage) => void) | undefined;
     onRetryFailed?: ((message: ChatMessage) => void) | undefined;
+    onReplyPress?: ((replyId: number) => void) | undefined;
+    highlighted?: boolean;
+    /** Highest seen id among the other members (drives my tick state). */
+    othersLastSeenId?: number | null;
+}
+
+function quoteSnippet(reply: ReplyPreview): string {
+    if (reply.isDeleted) {
+        return 'Message deleted';
+    }
+    if (reply.content !== null && reply.content.trim() !== '') {
+        return reply.content;
+    }
+    if (reply.attachmentsCount > 0) {
+        return `📎 ${reply.attachmentsCount} attachment${
+            reply.attachmentsCount === 1 ? '' : 's'
+        }`;
+    }
+    return '';
 }
 
 export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
-    const { message, mine, isGroup, onLongPress, onRetryFailed } = props;
+    const {
+        message,
+        mine,
+        isGroup,
+        currentUserId,
+        onLongPress,
+        onRetryFailed,
+        onReplyPress,
+        highlighted = false,
+        othersLastSeenId = null,
+    } = props;
     const showSender = !mine && isGroup;
     const showFailedHint = message.status === 'failed';
     const isSending = message.status === 'pending';
+    const seenByOthers =
+        mine &&
+        message.status === 'sent' &&
+        message.id !== null &&
+        othersLastSeenId !== null &&
+        message.id <= othersLastSeenId;
+
+    const reply = message.replyTo;
+    const replyId = reply?.id ?? message.replyToId;
+    const hasReply = reply !== null || replyId !== null;
+    const replyDeleted = reply === null || reply.isDeleted;
+    const replyName =
+        reply === null
+            ? ''
+            : currentUserId !== null &&
+                currentUserId > 0 &&
+                reply.senderId === currentUserId
+              ? 'You'
+              : reply.senderName !== ''
+                ? reply.senderName
+                : 'Unknown';
+    const canJump =
+        replyId !== null && !replyDeleted && onReplyPress !== undefined;
 
     const body = (
         <View
@@ -28,8 +82,61 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                 styles.bubble,
                 mine ? styles.mine : styles.theirs,
                 showFailedHint && styles.failed,
+                highlighted && styles.highlighted,
             ]}
         >
+            {hasReply && (
+                <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Jump to replied message"
+                    disabled={!canJump}
+                    onPress={
+                        canJump &&
+                        replyId !== null &&
+                        onReplyPress !== undefined
+                            ? (): void => onReplyPress(replyId)
+                            : undefined
+                    }
+                    style={[
+                        styles.quote,
+                        mine ? styles.quoteMine : styles.quoteTheirs,
+                    ]}
+                >
+                    <View
+                        style={[
+                            styles.quoteBar,
+                            mine ? styles.quoteBarMine : styles.quoteBarTheirs,
+                        ]}
+                    />
+                    <View style={styles.quoteBody}>
+                        {!replyDeleted && (
+                            <Text
+                                style={[
+                                    styles.quoteName,
+                                    mine && styles.quoteNameMine,
+                                ]}
+                                numberOfLines={1}
+                            >
+                                {replyName}
+                            </Text>
+                        )}
+                        <Text
+                            style={[
+                                styles.quoteText,
+                                mine && styles.quoteTextMine,
+                                replyDeleted && styles.quoteDeleted,
+                            ]}
+                            numberOfLines={2}
+                        >
+                            {replyDeleted
+                                ? 'Message deleted'
+                                : reply !== null
+                                  ? quoteSnippet(reply)
+                                  : ''}
+                        </Text>
+                    </View>
+                </Pressable>
+            )}
             {showSender && (
                 <Text style={styles.senderName}>{message.senderName}</Text>
             )}
@@ -49,6 +156,20 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                 {message.isEdited ? ' · edited' : ''}
                 {isSending ? ' · sending…' : ''}
                 {showFailedHint ? ' · not sent' : ''}
+                {mine && !showFailedHint && (
+                    <Text
+                        accessibilityLabel={
+                            seenByOthers
+                                ? 'Seen'
+                                : isSending
+                                  ? 'Sending'
+                                  : 'Sent'
+                        }
+                        style={[styles.ticks, seenByOthers && styles.ticksSeen]}
+                    >
+                        {isSending ? ' 🕓' : seenByOthers ? ' ✓✓' : ' ✓'}
+                    </Text>
+                )}
             </Text>
         </View>
     );
@@ -79,6 +200,17 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                     {body}
                 </Pressable>
             )}
+        </View>
+    );
+}
+
+/** Divider shown where the user's unread messages start (when the chat opens). */
+export function UnreadDivider(): React.ReactElement {
+    return (
+        <View style={styles.unreadRow}>
+            <View style={styles.unreadLine} />
+            <Text style={styles.unreadLabel}>New messages</Text>
+            <View style={styles.unreadLine} />
         </View>
     );
 }
@@ -120,12 +252,43 @@ const styles = StyleSheet.create({
     },
     theirs: { borderBottomLeftRadius: 4 },
     failed: { opacity: 0.65 },
+    highlighted: {
+        borderColor: palette.semantic.warning,
+        borderWidth: 2,
+    },
     senderName: {
         fontSize: 12,
         fontWeight: '600',
         color: palette.primary[700],
         marginBottom: 2,
     },
+    // quoted reply block
+    quote: {
+        flexDirection: 'row',
+        borderRadius: radii.sm,
+        overflow: 'hidden',
+        marginBottom: spacing.xxs,
+        maxWidth: '100%',
+    },
+    quoteTheirs: { backgroundColor: palette.neutral[50] },
+    quoteMine: { backgroundColor: 'rgba(255,255,255,0.16)' },
+    quoteBar: { width: 3 },
+    quoteBarTheirs: { backgroundColor: palette.primary[500] },
+    quoteBarMine: { backgroundColor: palette.primary[100] },
+    quoteBody: {
+        flexShrink: 1,
+        paddingHorizontal: spacing.xs,
+        paddingVertical: spacing.xxs,
+    },
+    quoteName: {
+        color: palette.primary[700],
+        fontSize: 11,
+        fontWeight: '700',
+    },
+    quoteNameMine: { color: palette.primary[100] },
+    quoteText: { color: palette.neutral[700], fontSize: 12 },
+    quoteTextMine: { color: palette.primary[100] },
+    quoteDeleted: { fontStyle: 'italic' },
     content: { color: palette.neutral[900], fontSize: 15 },
     contentMine: { color: palette.neutral[0] },
     attachments: { color: palette.neutral[700], fontSize: 13, marginTop: 2 },
@@ -136,6 +299,20 @@ const styles = StyleSheet.create({
         marginTop: 2,
     },
     metaMine: { color: palette.primary[100] },
+    ticks: { fontSize: 10 },
+    ticksSeen: { color: palette.neutral[0], fontWeight: '700' },
+    unreadRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.xs,
+        marginVertical: spacing.sm,
+    },
+    unreadLine: { flex: 1, height: 1, backgroundColor: palette.primary[100] },
+    unreadLabel: {
+        color: palette.primary[600],
+        fontSize: 12,
+        fontWeight: '600',
+    },
     separatorRow: {
         flexDirection: 'row',
         alignItems: 'center',

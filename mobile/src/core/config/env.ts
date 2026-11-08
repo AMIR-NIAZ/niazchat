@@ -31,11 +31,19 @@ export const env = {
   uploadsBaseUrl: readUrl('EXPO_PUBLIC_UPLOADS_BASE_URL', `${apiUrl}/uploads`),
 } as const;
 
-/** Converts a server-relative avatar path ("uploads/avatars/…") into an absolute URL. */
+/**
+ * Converts a server-relative avatar path into an absolute URL.
+ *
+ * The backend stores paths already rooted at the static mount
+ * (`uploads/avatars/<name>.png`, see `docs/mobile-api/users.md`) and serves
+ * them under `/uploads` — which is exactly what `uploadsBaseUrl` points at. The
+ * mount segment is therefore stripped before joining: without this the URL
+ * becomes `/uploads/uploads/avatars/...` and every avatar 404s.
+ */
 export function absoluteUploadUrl(path: string): string {
   if (path.startsWith('http://') || path.startsWith('https://')) {
     return path;
   }
-  const normalized = path.replace(/^\/+/, '');
+  const normalized = path.replace(/^\/+/, '').replace(/^uploads\//, '');
   return `${env.uploadsBaseUrl}/${normalized}`;
 }

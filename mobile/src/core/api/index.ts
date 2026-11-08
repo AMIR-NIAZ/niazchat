@@ -1,4 +1,8 @@
-import type { UserDto, BannedChatMemberDto } from './dto/user.dto';
+import type {
+  UserDto,
+  BannedChatMemberDto,
+  UploadAvatarResponseDto,
+} from './dto/user.dto';
 import type {
   SendOtpPayloadDto,
   VerifyOtpPayloadDto,
@@ -13,6 +17,8 @@ import type {
   EditMessagePayloadDto,
   DeleteMessagePayloadDto,
   MessageDto,
+  MessagePageDto,
+  MessageReplyDto,
   MessageTypeName,
   ChatListUpdateDto,
 } from './dto/message.dto';
@@ -31,6 +37,7 @@ export type {
   ApiTokenProvider,
   UserDto,
   BannedChatMemberDto,
+  UploadAvatarResponseDto,
   SendOtpPayloadDto,
   VerifyOtpPayloadDto,
   AuthTokensDto,
@@ -44,6 +51,8 @@ export type {
   EditMessagePayloadDto,
   DeleteMessagePayloadDto,
   MessageDto,
+  MessagePageDto,
+  MessageReplyDto,
   MessageTypeName,
   ChatListUpdateDto,
   AttachmentUploadResponseDto,

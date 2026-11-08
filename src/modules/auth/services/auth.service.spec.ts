@@ -3,6 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AuthService } from './auth.service';
 import { User } from '../entities/user.entity';
+import { UserProfile } from '../entities/user_profile.entity';
 import { Role } from '../entities/role.entity';
 import { Permission } from '../entities/permission.entity';
 import { UserPermission } from '../entities/user_permissions.entity';
@@ -19,6 +20,7 @@ describe('AuthService', () => {
             providers: [
                 AuthService,
                 { provide: getRepositoryToken(User), useValue: {} },
+                { provide: getRepositoryToken(UserProfile), useValue: {} },
                 { provide: getRepositoryToken(Role), useValue: {} },
                 { provide: getRepositoryToken(Permission), useValue: {} },
                 { provide: getRepositoryToken(UserPermission), useValue: {} },

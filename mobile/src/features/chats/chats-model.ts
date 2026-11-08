@@ -1,4 +1,4 @@
-import type { ChatDto, ChatType } from '../..//core/api/dto/chat.dto';
+import type { ChatDto, ChatRole, ChatType } from '../../core/api/dto/chat.dto';
 
 /**
  * Domain models for the chats feature (UI-facing), distinct from wire DTOs.
@@ -27,6 +27,8 @@ export interface ChatPreview {
     updatedAt: string;
     /** From `getAllChats` and live `chatlist:updated` events (same shape). */
     lastMessage: ChatLastMessage | null;
+    /** Authoritative from `getAllChats`; live updates increment locally. */
+    unreadCount: number;
 }
 
 /** Full chat info from the WS `chatInfo` event (after `joinChat`). */
@@ -38,6 +40,20 @@ export interface ChatInfo {
     avatarUrls: string[];
     createdAt: string;
     updatedAt: string;
+    /** Read position before this join (null = no seen row yet). */
+    myLastSeenId: number | null;
+    /** Max read position among the other (non-banned) members. */
+    othersLastSeenId: number | null;
+    /** Non-banned member count, refreshed live by `chat:members`. */
+    membersCount: number | null;
 }
 
-export type { ChatType, ChatDto as ChatWire };
+/**
+ * The group owner is the `manager` chat role. `admin` is an ordinary chat
+ * admin (kick/ban rights depending on permissions), never the owner.
+ */
+export function isGroupOwner(role: ChatRole | null | undefined): boolean {
+    return role === 'manager';
+}
+
+export type { ChatRole, ChatType, ChatDto as ChatWire };

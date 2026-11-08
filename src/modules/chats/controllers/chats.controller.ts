@@ -38,9 +38,13 @@ export class ChatsController {
     @Post('/join/:code')
     @Role([RoleEnum.ALL])
     async joinToChat(@Param('code') code: string, @Req() req: RequestAuth) {
-        const chat = await this.linkService.joinByInviteCode(code, req.user.sub);
+        const chat = await this.linkService.joinByInviteCode(
+            code,
+            req.user.sub,
+        );
         this.groupRealtime.groupAdded(chat.id, req.user.sub);
         this.groupRealtime.groupChanged(chat.id, 'member_joined');
+        await this.chatService.notifyMembersCount(chat.id);
         return { chatId: chat.id, title: chat.title };
     }
 }

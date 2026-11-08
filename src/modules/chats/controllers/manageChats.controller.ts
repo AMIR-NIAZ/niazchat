@@ -164,12 +164,10 @@ export class ManageChatsController {
 
     // ── bans ───────────────────────────────────────────────────────────────
 
+    /** Owner-only: `manager` is the group owner; chat `admin` cannot ban. */
     @Post('/ban/:memberId')
     @Role([RoleEnum.ALL])
-    @ChatAccess({
-        minRole: RoleChatEnum.ADMIN,
-        permissions: [PermissionChatEnum.BAN_USER],
-    })
+    @ChatAccess({ minRole: RoleChatEnum.MANAGER })
     async banMember(
         @Req() request: RequestAuth,
         @Param('memberId', ParseIntPipe) memberId: number,
@@ -179,10 +177,7 @@ export class ManageChatsController {
 
     @Post('/onban/:memberId')
     @Role([RoleEnum.ALL])
-    @ChatAccess({
-        minRole: RoleChatEnum.ADMIN,
-        permissions: [PermissionChatEnum.BAN_USER],
-    })
+    @ChatAccess({ minRole: RoleChatEnum.MANAGER })
     async onBanMember(
         @Req() request: RequestAuth,
         @Param('memberId', ParseIntPipe) memberId: number,

@@ -24,7 +24,11 @@ import type { ChatDto } from '../api/dto/chat.dto';
 export interface ServerToClientEvents {
     chatInfo: (chat: ChatDto) => void;
     getMessages: (messages: MessageDto[]) => void;
-    exception: (payload: { ok: false; message: string; status: number }) => void;
+    exception: (payload: {
+        ok: false;
+        message: string;
+        status: number;
+    }) => void;
     'sendMessage:list': (message: MessageDto) => void;
     'editMessage:list': (message: MessageDto) => void;
     'deleteMessage:list': (messageId: number) => void;
@@ -34,9 +38,21 @@ export interface ServerToClientEvents {
         userId: number;
         lastSeenId: number | null;
     }) => void;
+    /** Caller's read position advanced (any device) — clear the badge. */
+    'chat:read': (payload: { chatId: number; unreadCount: number }) => void;
+    /** Live non-banned member count after a membership change. */
+    'chat:members': (payload: { chatId: number; membersCount: number }) => void;
     countUsersOnline: (count: number) => void;
-    'typing:start': (payload: { chatId: number; userId: number }) => void;
-    'typing:stop': (payload: { chatId: number; userId: number }) => void;
+    'typing:start': (payload: {
+        chatId: number;
+        userId: number;
+        userName: string;
+    }) => void;
+    'typing:stop': (payload: {
+        chatId: number;
+        userId: number;
+        userName: string;
+    }) => void;
 }
 
 /** Standard ack shapes (backend WsExceptionFilter). */
@@ -49,6 +65,10 @@ export interface WsAck<T = unknown> {
 
 export interface GetMessagesSocketPayload {
     chatId: number;
+    /** Exclusive cursor: return messages with id < beforeId. */
+    beforeId?: number;
+    /** 1..100, server default 30. */
+    limit?: number;
 }
 
 export interface ChatIdPayload {
@@ -80,6 +100,12 @@ export interface ClientToServerEvents {
         payload: GetMessagesSocketPayload,
         ack: SocketAckHandler,
     ) => void;
+    markSeen: (payload: MarkSeenSocketPayload, ack: SocketAckHandler) => void;
+}
+
+export interface MarkSeenSocketPayload {
+    chatId: number;
+    lastSeenId: number;
 }
 
 export interface CreateMessageSocketPayload {
@@ -119,25 +145,11 @@ export function createAppSocket(accessToken: string): AppSocket {
     });
 
     socket.on('connect', () => {
-        if (__DEV__) {
-            console.log('[socket] connected', socket.id);
-        }
         if (firstConnectDone) {
             connectListeners.forEach((listener) => listener(socket));
         }
         firstConnectDone = true;
     });
-    if (__DEV__) {
-        socket.on('connect_error', (err) =>
-            console.log('[socket] connect_error:', err.message),
-        );
-        socket.on('disconnect', (reason) =>
-            console.log('[socket] disconnected:', reason),
-        );
-        socket.on('exception', (payload) =>
-            console.log('[socket] exception:', payload),
-        );
-    }
 
     return socket;
 }

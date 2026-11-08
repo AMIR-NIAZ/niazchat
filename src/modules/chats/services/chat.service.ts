@@ -35,6 +35,25 @@ export interface ChatMemberPageOptions {
     cursor?: number;
 }
 
+/** A chat-list row plus the caller's unread count (capped at `UNREAD_CAP`). */
+export type ChatWithUnread = Chat & { unreadCount: number };
+
+/** Server-side cap for `unreadCount`; the app renders "99+" above 99. */
+export const UNREAD_CAP = 100;
+
+export interface ChatSeenState {
+    /** Stored before the current join; null when the caller never read. */
+    myLastSeenId: number | null;
+    /** Highest `lastSeenId` among the OTHER non-banned members. */
+    othersLastSeenId: number | null;
+}
+
+export interface MarkSeenResult {
+    /** Effective stored value (never lower than what was there before). */
+    lastSeenId: number;
+    changed: boolean;
+}
+
 @Injectable()
 export class ChatService {
     constructor(
@@ -152,6 +171,7 @@ export class ChatService {
         const wireMember = this.serializeMember(member, user, false);
         this.groupRealtime.groupAdded(chatId, user.id as UserId);
         this.groupRealtime.groupChanged(chatId, 'member_joined');
+        await this.notifyMembersCount(chatId);
 
         return {
             message: 'user added successfully',
@@ -159,7 +179,7 @@ export class ChatService {
         };
     }
 
-    async getUserChats(user: JwtPayload): Promise<Chat[]> {
+    async getUserChats(user: JwtPayload): Promise<ChatWithUnread[]> {
         // `member.role` is joined so the caller's own banned membership hides
         // the group entirely (role, not a flag, marks a ban).
         const memberships = await this.memberRepository
@@ -191,11 +211,114 @@ export class ChatService {
         const activity = (c: Chat): number =>
             new Date(c.lastMessage?.createdAt ?? c.createdAt).getTime();
 
-        return [...byId.values()].sort((a, b) => activity(b) - activity(a));
+        // ONE grouped query for the whole list (no N+1): count non-own,
+        // non-deleted messages newer than the caller's stored read position.
+        const unread = await this.getUnreadCounts(user.sub);
+
+        return [...byId.values()]
+            .sort((a, b) => activity(b) - activity(a))
+            .map((chat) =>
+                Object.assign(chat, {
+                    unreadCount: Math.min(
+                        unread.get(String(chat.id)) ?? 0,
+                        UNREAD_CAP,
+                    ),
+                }),
+            );
+    }
+
+    /**
+     * Unread counts for every chat the user belongs to, in one grouped query.
+     * A missing `chat_seen` row counts the whole (non-own, live) history; a
+     * soft-deleted message never counts. Duplicate seen rows are tolerated by
+     * joining only the newest row per (chat, user).
+     */
+    async getUnreadCounts(userId: UserId): Promise<Map<string, number>> {
+        const rows = await this.memberRepository.query<
+            Array<{ chatId: string; count: string }>
+        >(
+            `SELECT member."chatId" AS "chatId", COUNT(message.id)::int AS "count"
+                   FROM chat_members member
+                   LEFT JOIN chat_seen seen ON seen.id = (
+                       SELECT MAX(s.id)
+                         FROM chat_seen s
+                        WHERE s."chatId" = member."chatId"
+                          AND s."userId" = member."userId"
+                   )
+                   JOIN messages message
+                     ON message."chatId" = member."chatId"
+                    AND message."isDeleted" = false
+                    AND message."senderId" <> member."userId"
+                    AND (
+                        seen."messageId" IS NULL
+                        OR message.id > seen."messageId"
+                    )
+                  WHERE member."userId" = $1
+                  GROUP BY member."chatId"`,
+            [userId],
+        );
+
+        const counts = new Map<string, number>();
+        for (const row of rows) {
+            counts.set(String(row.chatId), Number(row.count) || 0);
+        }
+        return counts;
     }
 
     async getInfoChat(id: ChatId) {
         return await this.chatRepository.findOne({ where: { id } });
+    }
+
+    /** Display name for typing payloads: profile name, then username, then ''. */
+    async getUserDisplayName(userId: UserId): Promise<string> {
+        const user = await this.userRepository.findOne({
+            where: { id: userId },
+            relations: { profile: true },
+        });
+        const name = user?.profile?.name?.trim();
+        return name !== undefined && name !== ''
+            ? name
+            : (user?.profile?.username?.trim() ?? '');
+    }
+
+    /** Membership with a role other than `ban` (used to silence banned typers). */
+    async isActiveMember(chatId: ChatId, userId: UserId): Promise<boolean> {
+        const member = await this.memberRepository.findOne({
+            where: {
+                chat: { id: chatId },
+                user: { id: userId },
+            },
+            relations: { role: true },
+        });
+        return (
+            member !== null &&
+            member.role?.name !== RoleChatEnum.BAN
+        );
+    }
+
+    /** Non-banned member count, in one query (role names, never role ids). */
+    async countActiveMembers(chatId: ChatId): Promise<number> {
+        const raw = await this.memberRepository
+            .createQueryBuilder('member')
+            .innerJoin('member.role', 'role')
+            .where('member.chat.id = :chatId', { chatId })
+            .andWhere('role.name != :banRole', { banRole: RoleChatEnum.BAN })
+            .select('COUNT(DISTINCT member.userId)', 'count')
+            .getRawOne<{ count: string }>();
+        return Number(raw?.count ?? 0);
+    }
+
+    /**
+     * One shared emit for every membership change; best-effort so realtime
+     * failures never break the mutation that caused them.
+     */
+    async notifyMembersCount(chatId: ChatId): Promise<void> {
+        try {
+            const membersCount = await this.countActiveMembers(chatId);
+            this.groupRealtime.membersCountChanged(chatId, membersCount);
+        } catch {
+            // The next joinChat re-reads the authoritative count.
+        }
     }
 
     /** Per-caller info extras for the WS `joinChat` ack. */
@@ -205,19 +328,13 @@ export class ChatService {
     }
 
     private async summarizeCaller(caller: ChatCallerContext) {
-        const membersCount = await this.memberRepository
-            .createQueryBuilder('member')
-            .innerJoin('member.role', 'role')
-            .where('member.chat.id = :chatId', { chatId: caller.chat.id })
-            .andWhere('role.name != :banRole', { banRole: RoleChatEnum.BAN })
-            .select('COUNT(DISTINCT member.userId)', 'count')
-            .getRawOne();
+        const membersCount = await this.countActiveMembers(caller.chat.id);
 
         return {
             myRole: caller.roleName === RoleChatEnum.BAN ? null : caller.roleName,
             myPermissions:
                 caller.isManager || !caller.isAdmin ? null : caller.permissions,
-            membersCount: Number(membersCount?.count ?? 0),
+            membersCount,
         };
     }
 
@@ -325,6 +442,7 @@ export class ChatService {
 
         this.groupRealtime.groupRemoved(chatId, target.user.id, 'kicked');
         this.groupRealtime.groupChanged(chatId, 'member_kicked');
+        await this.notifyMembersCount(chatId);
 
         return { message: 'user kicked from the group' };
     }
@@ -348,6 +466,7 @@ export class ChatService {
 
         this.groupRealtime.groupRemoved(chatId, callerUserId, 'left');
         this.groupRealtime.groupChanged(chatId, 'member_left');
+        await this.notifyMembersCount(chatId);
 
         return { message: 'you have left the group', chatId };
     }
@@ -364,9 +483,13 @@ export class ChatService {
             callerUserId,
         );
         this.access.assertUsableGroup(caller);
-        this.access.assertRole(caller, RoleChatEnum.ADMIN);
-        this.access.assertPermissions(caller, [PermissionChatEnum.BAN_USER]);
+        // Owner-only: `manager` is the group owner; chat `admin` cannot ban.
+        this.access.assertOwner(caller, 'ban members');
         this.access.assertCanTarget(caller, target, 'ban');
+
+        if (Number(target.user.id) === Number(callerUserId)) {
+            throw new BadRequestException('you cannot ban yourself');
+        }
 
         if (target.role?.name === RoleChatEnum.BAN) {
             throw new ConflictException('user is already banned');
@@ -384,6 +507,7 @@ export class ChatService {
             'banned',
         );
         this.groupRealtime.groupChanged(target.chat.id, 'member_banned');
+        await this.notifyMembersCount(target.chat.id);
 
         return { message: 'user baned successfully' };
     }
@@ -396,8 +520,8 @@ export class ChatService {
             callerUserId,
         );
         this.access.assertUsableGroup(caller);
-        this.access.assertRole(caller, RoleChatEnum.ADMIN);
-        this.access.assertPermissions(caller, [PermissionChatEnum.BAN_USER]);
+        // Owner-only, matching ban (`manager` only; chat `admin` excluded).
+        this.access.assertOwner(caller, 'unban members');
         this.access.assertCanTarget(caller, target, 'unban');
 
         if (target.role?.name !== RoleChatEnum.BAN) {
@@ -410,6 +534,7 @@ export class ChatService {
 
         this.groupRealtime.groupAdded(target.chat.id, target.user.id);
         this.groupRealtime.groupChanged(target.chat.id, 'member_unbanned');
+        await this.notifyMembersCount(target.chat.id);
 
         return { message: 'user on baned successfully' };
     }
@@ -489,34 +614,142 @@ export class ChatService {
         return { message: 'avatar updated successfully' };
     }
 
-    async seening(chatId: ChatId, user: JwtPayload) {
-        const lastMessage = await this.messageRepository.findOne({
-            where: {
-                chat: { id: chatId },
-            },
+    /**
+     * Advances the caller's read position for one chat (monotonic).
+     *
+     * Ids above the chat's newest message are clamped to it; any id at or
+     * below the newest must exist in THIS chat (a cross-chat id is rejected).
+     * Writes are serialized per (chat, user) with a transaction-scoped
+     * advisory lock, so concurrent callers (multiple devices) cannot regress
+     * or double-insert the read position. Empty chats are a no-op.
+     */
+    async markSeen(
+        chatId: ChatId,
+        userId: UserId,
+        givenLastSeenId: number,
+    ): Promise<MarkSeenResult> {
+        const latest = await this.messageRepository.findOne({
+            where: { chat: { id: chatId } },
             order: { id: 'DESC' },
+            select: { id: true },
         });
-        if (!lastMessage) return null; // <-- changed: return null instead of throwing
+        const latestId = latest ? Number(latest.id) : null;
 
-        let read = await this.seenRepository.findOne({
-            where: {
-                chat: { id: chatId },
-                user: { id: user.sub },
-            },
-        });
-
-        if (read) {
-            read.message = lastMessage;
-        } else {
-            read = this.seenRepository.create({
-                user: { id: user.sub },
-                chat: { id: chatId },
-                message: { id: lastMessage.id },
-            });
+        if (latestId === null) {
+            const existing = await this.getMyLastSeenId(chatId, userId);
+            return { lastSeenId: existing ?? 0, changed: false };
         }
-        await this.seenRepository.save(read);
 
-        return lastMessage.id;
+        const target = Math.min(givenLastSeenId, latestId);
+        const exists = await this.messageRepository.exists({
+            where: { id: target, chat: { id: chatId } },
+        });
+        if (!exists) {
+            throw new BadRequestException(
+                'seen message not found in this chat',
+            );
+        }
+
+        return this.seenRepository.manager.transaction(
+            async (manager): Promise<MarkSeenResult> => {
+                // Serialize writers for this (chat, user) pair. The table has no
+                // unique (chatId,userId) constraint, so this replaces an upsert.
+                await manager.query('SELECT pg_advisory_xact_lock($1, $2)', [
+                    chatId,
+                    userId,
+                ]);
+                const repo = manager.getRepository(ChatSeen);
+                const rows = await repo.find({
+                    where: {
+                        chat: { id: chatId },
+                        user: { id: userId },
+                    },
+                    relations: { message: true },
+                });
+
+                const current = rows.reduce<number | null>((max, row) => {
+                    const id = row.message ? Number(row.message.id) : null;
+                    if (id === null) return max;
+                    return max === null ? id : Math.max(max, id);
+                }, null);
+
+                if (current !== null && current >= target) {
+                    return { lastSeenId: current, changed: false };
+                }
+
+                const row = rows.reduce<ChatSeen | null>((best, candidate) => {
+                    if (best === null) return candidate;
+                    const bestId = best.message ? Number(best.message.id) : -1;
+                    const candidateId = candidate.message
+                        ? Number(candidate.message.id)
+                        : -1;
+                    return candidateId > bestId ? candidate : best;
+                }, null);
+
+                if (row === null) {
+                    await repo.save(
+                        repo.create({
+                            chat: { id: chatId },
+                            user: { id: userId },
+                            message: { id: target },
+                        }),
+                    );
+                } else {
+                    row.message = { id: target } as Message;
+                    await repo.save(row);
+                }
+
+                return { lastSeenId: target, changed: true };
+            },
+        );
+    }
+
+    /** Read positions shown to the joining caller (`chatInfo`). */
+    async getChatSeenState(
+        chatId: ChatId,
+        userId: UserId,
+    ): Promise<ChatSeenState> {
+        const myLastSeenId = await this.getMyLastSeenId(chatId, userId);
+
+        const raw = await this.seenRepository
+            .createQueryBuilder('seen')
+            .innerJoin(
+                ChatMember,
+                'member',
+                'member."userId" = seen."userId" AND member."chatId" = seen."chatId"',
+            )
+            .innerJoin(RoleChat, 'role', 'role.id = member."roleId"')
+            .where('seen."chatId" = :chatId', { chatId })
+            .andWhere('seen."userId" != :userId', { userId })
+            .andWhere('role.name != :banRole', {
+                banRole: RoleChatEnum.BAN,
+            })
+            .select('MAX(seen."messageId")', 'max')
+            .getRawOne<{ max: string | null }>();
+
+        return {
+            myLastSeenId,
+            othersLastSeenId:
+                raw?.max === null || raw?.max === undefined
+                    ? null
+                    : Number(raw.max),
+        };
+    }
+
+    private async getMyLastSeenId(
+        chatId: ChatId,
+        userId: UserId,
+    ): Promise<number | null> {
+        const raw = await this.seenRepository
+            .createQueryBuilder('seen')
+            .where('seen."chatId" = :chatId', { chatId })
+            .andWhere('seen."userId" = :userId', { userId })
+            .select('MAX(seen."messageId")', 'max')
+            .getRawOne<{ max: string | null }>();
+
+        return raw?.max === null || raw?.max === undefined
+            ? null
+            : Number(raw.max);
     }
 
     async getAllUser(chatId: ChatId) {

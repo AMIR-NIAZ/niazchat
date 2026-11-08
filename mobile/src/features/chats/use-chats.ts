@@ -8,15 +8,16 @@ import {
     sortChatsByActivity,
 } from './chats-mapper';
 import type { ChatPreview } from './chats-model';
+import { getActiveChat } from './active-chat';
 import { onSocketReconnect, useSocket } from '../../core/socket';
 import type { ChatListUpdateDto } from '../../core/api/dto/message.dto';
+import { useMe } from '../users';
 
 /**
  * Chat-list server state over TanStack Query, backed by the acked WS request
  * `getAllChats`, live-updated by `chatlist:updated` (delivered to each member's
- * personal `user:<id>` room — requires connection-time auth, now implemented
- * server-side). staleTime keeps a remount of this screen from re-hitting the
- * socket within 30 s (the old 3-calls-per-launch behaviour).
+ * personal `user:<id>` room). `getAllChats` is authoritative for unread counts;
+ * live events only bump a local estimate, which is replaced on focus/reconnect.
  */
 
 export const CHATS_QUERY_KEY = ['chats'] as const;
@@ -33,9 +34,30 @@ export function setChatsQueryData(
     queryClient.setQueryData<ChatPreview[]>(CHATS_QUERY_KEY, chats);
 }
 
+/** Replace one row's badge without refetching or re-ordering the list. */
+export function setChatUnreadCount(
+    queryClient: QueryClient,
+    chatId: number,
+    unreadCount: number,
+): void {
+    const current =
+        queryClient.getQueryData<ChatPreview[]>(CHATS_QUERY_KEY) ?? null;
+    if (current === null) {
+        return;
+    }
+    queryClient.setQueryData<ChatPreview[]>(
+        CHATS_QUERY_KEY,
+        current.map((chat) =>
+            Number(chat.id) === chatId ? { ...chat, unreadCount } : chat,
+        ),
+    );
+}
+
 export function useChats(): ReturnType<typeof useQuery<ChatPreview[]>> {
     const queryClient = useQueryClient();
     const socket = useSocket();
+    const me = useMe();
+    const myId = me.me?.id ?? null;
 
     const query = useQuery<ChatPreview[]>({
         queryKey: CHATS_QUERY_KEY,
@@ -48,7 +70,8 @@ export function useChats(): ReturnType<typeof useQuery<ChatPreview[]>> {
         },
     });
 
-    // Merge live previews: update lastMessage and keep the row fresh.
+    // Merge live previews and bump the local unread estimate: only when the
+    // message is not mine AND this chat is not being read on screen.
     // Depends on `socket` so a replaced instance gets a fresh listener.
     useEffect(() => {
         if (socket === null) {
@@ -64,6 +87,13 @@ export function useChats(): ReturnType<typeof useQuery<ChatPreview[]>> {
                 void invalidateChats(queryClient);
                 return;
             }
+            const active = getActiveChat();
+            const isMine =
+                update.lastMessage !== null &&
+                myId !== null &&
+                Number(update.lastMessage.senderId) === myId;
+            const isReadingHere = active.chatId === chatId && active.reading;
+
             // New array + new objects (never mutate the cache) + re-sort, so
             // the chat with the newest activity moves to the top.
             const next = sortChatsByActivity(
@@ -72,19 +102,38 @@ export function useChats(): ReturnType<typeof useQuery<ChatPreview[]>> {
                         ? {
                               ...chat,
                               lastMessage: lastMessageFromUpdate(update),
+                              // A deleted last message changes nothing.
+                              unreadCount:
+                                  update.lastMessage === null
+                                      ? chat.unreadCount
+                                      : isMine || isReadingHere
+                                        ? 0
+                                        : chat.unreadCount + 1,
                           }
                         : chat,
                 ),
             );
             queryClient.setQueryData<ChatPreview[]>(CHATS_QUERY_KEY, next);
         };
+        const onRead = (payload: {
+            chatId: number;
+            unreadCount: number;
+        }): void => {
+            setChatUnreadCount(
+                queryClient,
+                Number(payload.chatId),
+                Number(payload.unreadCount) || 0,
+            );
+        };
         socket.on('chatlist:updated', handler);
+        socket.on('chat:read', onRead);
         return () => {
             socket.off('chatlist:updated', handler);
+            socket.off('chat:read', onRead);
         };
-    }, [socket, queryClient]);
+    }, [socket, queryClient, myId]);
 
-    // Reconnect: room-independent, so a refetch keeps the list accurate.
+    // Reconnect/focus refetches keep the authoritative count (see the screen).
     useEffect(() => {
         const stop = onSocketReconnect(() => {
             void queryClient.invalidateQueries({ queryKey: CHATS_QUERY_KEY });

@@ -14,14 +14,24 @@ Messaging is **WebSocket-only** (docs/mobile-api/messages.md), implemented in th
 - `sendMessage:list`, `editMessage:list` — full `MessageDto` broadcasts to the chat room; the
   sender receives its own echo, which is how a send is confirmed in the UI.
 - `deleteMessage:list` — just the message id; the entry is removed from the cache.
-- `getMessages` — last 50, DESC, only to the caller; reversed to ascending here.
+- `getMessages` — one page (`limit` 30, `beforeId` cursor), newest first within the page;
+  reversed to ascending here. `loadOlder()` merges older pages into the ascending cache.
+- `seen` — another member advanced their read position → cache `othersLastSeenId` (my ticks).
+- `markSeen` — `use-mark-seen.ts` sends the newest confirmed id only while focused +
+  app active + near the bottom (300 ms debounce, monotonic); clears the chat-list badge.
+
+## Read state
+- `ChatMessage` stores no read flag. Ticks derive from `ConversationDetail.othersLastSeenId`:
+  pending → clock, confirmed and `id > othersLastSeenId` → one tick, `id <=` → two ticks
+  (group: at least one other member; private: the peer).
+- `ConversationDetail.myLastSeenId` drives a one-shot "New messages" divider captured when
+  the chat opens; it stays while open even after `markSeen`.
 
 ## UI
 - `message-bubble.tsx` / `message-composer.tsx` consume only the `ChatMessage` domain model
   (`messages-model.ts`) produced by `messages-mapper.ts`.
 
 ## Backend limitations surfaced (not faked)
-- No pagination — history is fixed at the last 50 messages.
 - No ack payload for sends — optimistic bubbles stay pending until the echo; a 10 s ack
   timeout marks them failed (tap to retry).
 - Deleted messages never appear in history — live `deleteMessage:list` removals only.

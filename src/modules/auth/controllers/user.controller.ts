@@ -1,4 +1,5 @@
 import {
+    BadRequestException,
     Body,
     Controller,
     Delete,
@@ -12,11 +13,9 @@ import {
 import { Role } from 'src/common/decorators/role.decorator';
 import { RoleEnum } from 'src/common/enums/role.enum';
 import { UpdateUserDto } from '../dtos/updateUser.dto';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
 import { UserService } from '../services/user.service';
 import { RequestAuth } from 'src/common/types/RequestAuth.type';
+import { AvatarUploadInterceptor } from '../interceptors/avatar-upload.interceptor';
 
 @Controller('user')
 export class UserController {
@@ -30,23 +29,17 @@ export class UserController {
 
     @Put('uploade-avatar')
     @Role([RoleEnum.ALL])
-    @UseInterceptors(
-        FileInterceptor('avatar', {
-            storage: diskStorage({
-                destination: './uploads/avatars',
-                filename: (req, file, cb) => {
-                    const uniqueName =
-                        Date.now() + '-' + Math.round(Math.random() * 1e9);
-                    cb(null, uniqueName + extname(file.originalname));
-                },
-            }),
-        }),
-    )
+    @UseInterceptors(AvatarUploadInterceptor)
     async updateAvatar(
-        @UploadedFile() file: Express.Multer.File,
+        @UploadedFile() file: Express.Multer.File | undefined,
         @Req() req: RequestAuth,
     ) {
-        return await this.userService.uploadAvatar(file.path, req.user);
+        if (!file) {
+            throw new BadRequestException(
+                'multipart field "avatar" with an image file is required',
+            );
+        }
+        return await this.userService.uploadAvatar(file, req.user);
     }
 
     @Delete('delete-avatar')

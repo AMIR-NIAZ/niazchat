@@ -17,7 +17,11 @@ import {
 } from 'src/common/types/brands.type';
 
 export class CreateMessageDto {
-    @IsNumber()
+    /**
+     * Id of the message being replied to. Missing/non-numeric means "no reply"
+     * (normalized server-side); a valid id must belong to the same chat and be
+     * not deleted, otherwise the request is rejected.
+     */
     @IsOptional()
     reply?: MessageId;
 

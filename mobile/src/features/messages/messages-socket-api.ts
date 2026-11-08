@@ -3,6 +3,7 @@ import type {
     CreateMessageSocketPayload,
     EditMessageSocketPayload,
     DeleteMessageSocketPayload,
+    MarkSeenSocketPayload,
 } from '../../core/socket';
 import { socketOrThrow } from '../chats/chats-socket-api';
 import { ApiError } from '../../core/api';
@@ -38,8 +39,12 @@ function connectedSocket(): ReturnType<typeof socketOrThrow> {
 export async function deliverMessage(
     chatId: number,
     content: string,
+    replyToId?: number,
 ): Promise<MessageDto | null> {
     const payload: CreateMessageSocketPayload = { chatId, content };
+    if (replyToId !== undefined) {
+        payload.reply = replyToId;
+    }
     return request<MessageDto>(connectedSocket(), 'sendMessage', payload);
 }
 
@@ -51,6 +56,19 @@ export async function editChatMessage(
 ): Promise<MessageDto | null> {
     const payload: EditMessageSocketPayload = { messageId, chatId, newContent };
     return request<MessageDto>(connectedSocket(), 'editMessage', payload);
+}
+
+/** WS `markSeen` — monotonic read position; resolves the effective id. */
+export async function markChatSeen(
+    chatId: number,
+    lastSeenId: number,
+): Promise<{ lastSeenId: number } | null> {
+    const payload: MarkSeenSocketPayload = { chatId, lastSeenId };
+    return request<{ lastSeenId: number }>(
+        connectedSocket(),
+        'markSeen',
+        payload,
+    );
 }
 
 /** WS `deleteMessage` — soft delete of own messages. */

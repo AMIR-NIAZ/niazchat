@@ -1,4 +1,5 @@
 import {
+    BadRequestException,
     ConflictException,
     Injectable,
     InternalServerErrorException,
@@ -11,8 +12,11 @@ import { Repository } from 'typeorm';
 import { JwtPayload } from 'src/common/types/jwt-payload.type';
 import { UpdateUserDto } from '../dtos/updateUser.dto';
 import * as fs from 'fs';
+import * as path from 'path';
 import { UserId } from 'src/common/types/brands.type';
 import { toUserResponse } from '../utils/user-response.util';
+import { detectFileMimeType } from 'src/modules/attachments/utils/file-signature.util';
+import { isAvatarMimeType } from '../utils/avatar.util';
 
 @Injectable()
 export class UserService {
@@ -81,13 +85,61 @@ export class UserService {
         return { message: 'user updated is 1' };
     }
 
-    async uploadAvatar(avatar: string, user: JwtPayload) {
+    /**
+     * Stores the uploaded file as the caller's current avatar and returns the
+     * updated user, so the client can confirm persistence without a refetch.
+     *
+     * The extension/Content-Type the client sent is not trusted: the bytes are
+     * sniffed first, and anything that is not a raster image is deleted again
+     * (avatars are served statically from the API origin).
+     */
+    async uploadAvatar(file: Express.Multer.File, user: JwtPayload) {
+        const detectedMime = await this.detectUploadedMime(file.path);
+        if (detectedMime === null || !isAvatarMimeType(detectedMime)) {
+            await fs.promises.unlink(file.path).catch(() => undefined);
+            throw new BadRequestException(
+                'avatar file content is not a supported image (jpeg, png, gif, webp)',
+            );
+        }
+
         const profile = await this.getOrCreateProfile(user.sub);
 
-        profile.avatars = [...(profile.avatars ?? []), avatar];
+        // Same shape the static handler serves: relative to the cwd, forward
+        // slashes, no absolute server paths in the database.
+        const storedPath = path
+            .relative(process.cwd(), file.path)
+            .split(path.sep)
+            .join('/');
+        profile.avatars = [...(profile.avatars ?? []), storedPath];
         await this.profileRepository.save(profile);
 
-        return { message: 'avatar updated successfully' };
+        const owner = await this.userRepository.findOne({
+            where: { id: user.sub },
+            relations: { role: true, profile: true },
+        });
+        if (!owner) throw new NotFoundException('user not found');
+
+        return {
+            message: 'avatar updated successfully',
+            user: toUserResponse(owner),
+        };
+    }
+
+    /** Reads the first bytes of an uploaded file to detect its real type. */
+    private async detectUploadedMime(filePath: string): Promise<string | null> {
+        const handle = await fs.promises.open(filePath, 'r');
+        try {
+            const buffer = Buffer.alloc(512);
+            const { bytesRead } = await handle.read(
+                buffer,
+                0,
+                buffer.length,
+                0,
+            );
+            return detectFileMimeType(buffer.subarray(0, bytesRead));
+        } finally {
+            await handle.close();
+        }
     }
 
     async deleteAvatar(avatarPath: string, user: JwtPayload) {

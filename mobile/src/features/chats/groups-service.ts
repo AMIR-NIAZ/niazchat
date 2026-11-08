@@ -3,11 +3,72 @@ import type {
     BannedChatMemberDto,
     CreateGroupPayloadDto,
 } from '../../core/api';
+import type { ChatRole } from '../../core/api/dto/chat.dto';
 
 /**
  * Group management REST layer — the ONLY place that touches /chats* endpoints.
  * Contracts from docs/mobile-api/chats.md (verbatim semantics below).
  */
+
+/**
+ * `GET /chats/manage/:chatId/members` (page size 1) → the per-caller extras
+ * include `myRole`; only the caller's own role is read here. `manager` is the
+ * group owner, `admin` is an ordinary chat admin.
+ */
+export async function getMyChatRole(chatId: number): Promise<ChatRole | null> {
+    const response = await httpClient.get<{ myRole?: ChatRole | null }>(
+        `/chats/manage/${chatId}/members`,
+        { params: { limit: 1 } },
+    );
+    return response.data.myRole ?? null;
+}
+
+/** One active (non-banned) group member from the members endpoint. */
+export interface ChatMemberRow {
+    memberId: number;
+    userId: number;
+    name: string;
+    username: string | null;
+    role: ChatRole | null;
+    isBanned: boolean;
+}
+
+/**
+ * `GET /chats/manage/:chatId/members` — one page (server caps `limit` at 100),
+ * banned rows excluded. Backend shape: `serializeMember` + per-caller extras.
+ */
+export async function listChatMembers(
+    chatId: number,
+): Promise<ChatMemberRow[]> {
+    const response = await httpClient.get<{ data: ChatMemberRow[] }>(
+        `/chats/manage/${chatId}/members`,
+        { params: { limit: 100 } },
+    );
+    return response.data.data;
+}
+
+/**
+ * `POST /chats/manage/ban/:memberId` — owner-only on the backend (chat role
+ * `manager`; admins are rejected). The member's role becomes `ban`.
+ */
+export async function banChatMember(memberId: number): Promise<void> {
+    await httpClient.post(`/chats/manage/ban/${memberId}`);
+}
+
+/**
+ * `POST /chats/:chatId/leave` → `{ message, chatId }`.
+ * The backend rejects the group owner (`manager` chat role, 400 — ownership
+ * transfer is not supported) and non-members/banned callers (403).
+ */
+export async function leaveGroup(
+    chatId: number,
+): Promise<{ message: string; chatId: number }> {
+    const response = await httpClient.post<{
+        message: string;
+        chatId: number;
+    }>(`/chats/${chatId}/leave`);
+    return response.data;
+}
 
 /** `POST /chats/create` — responds `{ message }`; the created chat id is NOT returned. */
 export async function createGroup(

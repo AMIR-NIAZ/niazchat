@@ -13,6 +13,8 @@ import { num } from 'src/common/utils/ws-serializer.utils';
  *   - `group:removed { chatId, reason }`  → the removed user's `user:<id>` room,
  *     and all their sockets are force-removed from the `chat:<id>` room
  *   - `group:added { chatId }`            → the added user's `user:<id>` room
+ *   - `chat:members { chatId, membersCount }` → `chat:<id>` room after a
+ *     membership change (count excludes banned members).
  */
 @Injectable()
 export class GroupRealtimeService {
@@ -50,6 +52,15 @@ export class GroupRealtimeService {
         this.server
             .to(userRoom(userId as UserId))
             .emit('group:added', { chatId: num(chatId) });
+    }
+
+    /** Live member count for everyone currently in the chat room. */
+    membersCountChanged(chatId: unknown, membersCount: number): void {
+        if (!this.server) return;
+        this.server.to(chatRoom(chatId as ChatId)).emit('chat:members', {
+            chatId: num(chatId),
+            membersCount,
+        });
     }
 
     /** Best-effort wrapper so a realtime failure never breaks the mutation. */

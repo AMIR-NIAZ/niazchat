@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
     KeyboardAvoidingView,
     Platform,
@@ -9,23 +9,67 @@ import {
     View,
 } from 'react-native';
 import { palette, radii, spacing } from '../../shared/theme';
+import type { ReplyPreview } from './messages-model';
 
 /**
  * Multiline message composer pinned above the keyboard. Send is disabled while
  * empty or while another send is still in flight (no duplicate submissions —
  * the backend confirms sends only via the `sendMessage:list` echo).
+ *
+ * When a reply is active, a compact bar above the input shows the target and
+ * focuses the input so typing can start immediately.
  */
 
 interface MessageComposerProps {
     disabled: boolean;
     onSend: (content: string) => void;
+    replyTo: ReplyPreview | null;
+    currentUserId: number | null;
+    onCancelReply: () => void;
+    /** Optional typing hooks (group chats only). */
+    onTextChange?: ((text: string) => void) | undefined;
+    onBlur?: (() => void) | undefined;
+}
+
+function replyName(
+    replyTo: ReplyPreview,
+    currentUserId: number | null,
+): string {
+    if (currentUserId !== null && replyTo.senderId === currentUserId) {
+        return 'You';
+    }
+    return replyTo.senderName !== '' ? replyTo.senderName : 'Unknown';
+}
+
+function replySnippet(replyTo: ReplyPreview): string {
+    if (replyTo.isDeleted) {
+        return 'Message deleted';
+    }
+    if (replyTo.content !== null && replyTo.content.trim() !== '') {
+        return replyTo.content;
+    }
+    if (replyTo.attachmentsCount > 0) {
+        return `📎 ${replyTo.attachmentsCount} attachment${
+            replyTo.attachmentsCount === 1 ? '' : 's'
+        }`;
+    }
+    return '';
 }
 
 export function MessageComposer(
     props: MessageComposerProps,
 ): React.ReactElement {
     const [text, setText] = useState('');
+    const inputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
     const canSend = !props.disabled && text.trim() !== '';
+    const replyTo = props.replyTo;
+
+    // Focus the input when a reply starts (target identity, not object identity).
+    useEffect((): void => {
+        if (replyTo !== null) {
+            inputRef.current?.focus();
+        }
+    }, [replyTo === null ? null : replyTo.id]);
 
     const submit = (): void => {
         if (!canSend) {
@@ -33,6 +77,7 @@ export function MessageComposer(
         }
         props.onSend(text);
         setText('');
+        props.onTextChange?.('');
     };
 
     return (
@@ -41,11 +86,38 @@ export function MessageComposer(
             style={styles.avoid}
             pointerEvents="box-none"
         >
+            {replyTo !== null && (
+                <View style={styles.replyBar}>
+                    <View style={styles.replyDivider} />
+                    <View style={styles.replyTextWrap}>
+                        <Text style={styles.replyTitle} numberOfLines={1}>
+                            Replying to{' '}
+                            {replyName(replyTo, props.currentUserId)}
+                        </Text>
+                        <Text style={styles.replySnippet} numberOfLines={1}>
+                            {replySnippet(replyTo)}
+                        </Text>
+                    </View>
+                    <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Cancel reply"
+                        style={styles.replyClose}
+                        onPress={props.onCancelReply}
+                    >
+                        <Text style={styles.replyCloseText}>✕</Text>
+                    </Pressable>
+                </View>
+            )}
             <View style={styles.composer}>
                 <TextInput
+                    ref={inputRef}
                     style={styles.input}
                     value={text}
-                    onChangeText={setText}
+                    onChangeText={(value): void => {
+                        setText(value);
+                        props.onTextChange?.(value);
+                    }}
+                    onBlur={props.onBlur}
                     placeholder="Message…"
                     placeholderTextColor={palette.neutral[300]}
                     multiline={true}
@@ -74,6 +146,37 @@ export function MessageComposer(
 
 const styles = StyleSheet.create({
     avoid: { flexShrink: 1 },
+    replyBar: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.xs,
+        paddingVertical: spacing.xs,
+        paddingHorizontal: spacing.xs,
+        backgroundColor: palette.neutral[50],
+        borderRadius: radii.sm,
+        marginTop: spacing.xxs,
+    },
+    replyDivider: {
+        width: 3,
+        alignSelf: 'stretch',
+        borderRadius: radii.full,
+        backgroundColor: palette.primary[500],
+    },
+    replyTextWrap: { flex: 1 },
+    replyTitle: {
+        color: palette.primary[700],
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    replySnippet: { color: palette.neutral[500], fontSize: 12 },
+    replyClose: {
+        width: 28,
+        height: 28,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: radii.full,
+    },
+    replyCloseText: { color: palette.neutral[500], fontSize: 14 },
     composer: {
         flexDirection: 'row',
         alignItems: 'flex-end',
