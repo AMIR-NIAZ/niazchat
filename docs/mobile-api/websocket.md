@@ -40,14 +40,15 @@ io('http://<host>:3000', {
 | Event | Payload | Purpose / Response to the caller |
 |---|---|---|
 | `getAllChats` | – | chat list → `getAllChats` (back to caller only) |
-| `joinChat` | `chatId` (bare number) | join chat room; returns `chatInfo` to caller too; also triggers `seen` + `countUsersOnline` |
+| `joinChat` | `{ chatId }` | join chat room; returns `chatInfo` (with seen state) to caller too; triggers `countUsersOnline` (no longer `seen`) |
+| `markSeen` | `{ chatId, lastSeenId }` | monotonic read position; broadcasts `seen` + caller's `chat:read` only on change |
 | `leaveChat` | – | leave current chat room; triggers `typing:stop` and `seen`/`countUsersOnline` first |
 | `userTyping` | `chatId` | broadcast `typing:start` to the chat room (not to the caller) |
 | `userEndTyping` | `chatId` | broadcast `typing:stop` |
 | `sendMessage` | `CreateMessageDto` | sends; broadcasts `sendMessage:list`, `chatlist:updated` (see messages.md). **No ack to sender.** |
 | `editMessage` | `EditMessageDto` `{ messageId, chatId, newContent(≤5000) }` | broadcasts `editMessage:list` |
 | `deleteMessage` | `deleteMessageDto` `{ messageId, chatId }` | broadcasts `deleteMessage:list` (just messageId) |
-| `getMessages` | bare `chatId` number | `getMessages` back to caller only |
+| `getMessages` | `{ chatId, beforeId?, limit? }` | ack `{ messages, hasMore, nextCursor }` (latest page when `beforeId` is omitted) |
 | `addReaction` | `ReactionDto` `{ messageId, reactId, chatId }` | broadcasts `reaction:added` |
 | `removeReaction` | `ReactionDto` | broadcasts `reaction:removed` |
 
@@ -60,12 +61,15 @@ socket.on('getAllChats', (chats: Chat[]) => {})
 /** chatInfo — to the client that just joinChat-ed */
 socket.on('chatInfo', (chat: Chat) => {})
 
-/** seen — to everyone in the chat room */
+/** seen — to everyone in the chat room, only after markSeen advances */
 {
   "chatId": 42,
   "userId": 7,
   "lastSeenId": 999        // message id the viewer has read up to
 }
+
+/** chat:read — to the reader's other devices (user room) */
+{ "chatId": 42, "unreadCount": 0 }
 
 /** countUsersOnline — distinct connected user count in the room; number */
 socket.on('countUsersOnline', (count: number) => {})
@@ -83,16 +87,17 @@ socket.on('countUsersOnline', (count: number) => {})
 }
 /** sendMessage:list, editMessage:list — full Message entity serialization (messages.md) */
 /** deleteMessage:list — number (message id) */
-/** getMessages — Message[] (last 50, DESC order) */
+/** getMessages ack data — { messages: MessageDto[], hasMore, nextCursor } (newest first per page) */
 /** reaction:added — MessageReact entity (raw): { id, createdAt, updatedAt, userId, messageId, reactId, react: React } */
 /** reaction:removed — the MessageReact row that was removed (same shape) */
 ```
 
-## RampWelcome / read-received flow
+## Read-received flow
 
-- Joining a chat emits `seen` (marks all prior messages read for the joining user via `ChatService.seening`, persists `chat_seen` row and emits `lastSeenId`).
-- Leaving (`leaveChat` or socket disconnect) triggers the same `seen` emission again, so peers get the final read position.
-- **There is no per-message `read` event** — one `lastSeenId` per (user, chat) pair; clients infer "read by X" by comparing message ids.
+- Reading is explicit: `markSeen { chatId, lastSeenId }` (validated DTO, member + non-banned guards). The server clamps to the chat's newest id, applies `max(existing, given)` monotonic semantics and only then broadcasts `seen { chatId, userId, lastSeenId }` to `chat:<chatId>`; a no-op emits nothing.
+- `joinChat`/`leaveChat`/disconnect **do not** mark messages read. Empty chats never throw: joining reports null seen ids and `markSeen` acks `lastSeenId: 0`.
+- The caller's other sockets receive `chat:read { chatId, unreadCount: 0 }` in `user:<id>` whenever their position advances.
+- **There is no per-message `read` event** — one `lastSeenId` per (user, chat) pair; clients infer "read by X" by comparing message ids. In groups, `othersLastSeenId` (from `chatInfo`) is the max over other members, so ticks mean "seen by at least one other member".
 
 ## Reactions gateway (broken)
 

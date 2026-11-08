@@ -19,11 +19,12 @@ A chat-list item is a raw `Chat` entity row (`getUserChats` returns `m.chat` wit
   "avatars": [],
   "type": "groupe",
   "isBan": false,
-  "lastMessageId": null   // lastMessage relation is NOT loaded by getUserChats
+  "unreadCount": 3,        // non-own, non-deleted messages newer than my seen id (capped 100)
+  "lastMessage": { ... }  // same preview shape as chatlist:updated, null when empty
 }
 ```
 
-> ⚠️ `lastMessage`, `messages` and `members` are **not** included in `getAllChats` — the client must merge with the `chatlist:updated` WS events and message data fetched per chat.
+> `messages` and `members` are **not** included in `getAllChats` — the client merges `chatlist:updated` for previews and fetches history per chat. `unreadCount` is computed in one grouped query for the whole list; it is authoritative, while live increments are a client-side estimate until the next refetch.
 
 ## REST endpoints
 

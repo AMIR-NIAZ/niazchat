@@ -11,7 +11,7 @@ Sources: `src/modules/messages/gateways/message.gateway.ts`, `src/modules/messag
 | `sendMessage` | `CreateMessageDto` | Send to a group chat or start a private chat |
 | `editMessage` | `EditMessageDto` | Edit own text message |
 | `deleteMessage` | `deleteMessageDto` | Soft-delete own message |
-| `getMessages` | `**bare number**` chatId (`ParseIntPipe` on the payload) | Fetch last 50 messages of a chat |
+| `getMessages` | `GetMessagesDto`: `{ chatId, beforeId?, limit? }` | Fetch one page of a chat's history (newest first; see [History / pagination](#history--pagination)) |
 
 ### `CreateMessageDto` (`src/modules/messages/dtos/createMessage.dto.ts`)
 
@@ -46,7 +46,7 @@ Sources: `src/modules/messages/gateways/message.gateway.ts`, `src/modules/messag
 | `sendMessage:list` | room `chat:<chatId>` | full serialized Message (sender → user response, type, attachments) |
 | `editMessage:list` | room | updated message (`isEdited: true`) |
 | `deleteMessage:list` | room | **just the number** `dto.messageId` |
-| `getMessages` | **only the requesting client** | array of last 50 Message (desc by id, then client reverses) |
+| `getMessages` | ack only | `{ messages, hasMore, nextCursor }` (ack data; desc by id within the page) |
 | `chatlist:updated` | each member's `user:<id>` room | chat-list preview payload (see below) |
 
 ### `chatlist:updated` payload
@@ -79,6 +79,15 @@ Sources: `src/modules/messages/gateways/message.gateway.ts`, `src/modules/messag
   senderId: number,
   sender: { ...toUserResponse object },   // merged profile fields
   replyToId: number | null,
+  replyTo: {              // compact quoted preview, null when not a reply
+    id: number,
+    content: string | null, // ~200-char truncation; null when isDeleted
+    senderId: number,
+    senderName: string,
+    type: string,
+    attachmentsCount: number,
+    isDeleted: boolean
+  } | null,
   attachments: [{
      id: number, originalName: string, mimeType: string,
      size: number, createdAt: string, messageId: number, uploaderId: number,
@@ -87,7 +96,14 @@ Sources: `src/modules/messages/gateways/message.gateway.ts`, `src/modules/messag
 }
 ```
 
-(`getMessages`/`loadMessage` output above, from `MessageService.getAllByChats` and `loadMessage`. `select` hides most Attachment columns except in the list — some attachments come from relations.)
+(`getMessages`/`loadMessage` output above, from `MessageService.getPage` and `loadMessage`. `select` hides most Attachment columns except in the list — some attachments come from relations.)
+
+## Reply rules
+
+- `sendMessage.reply` is validated server-side: the original must exist in the **same chat** and have `isDeleted: false`, otherwise `BadRequestException 'reply message not found in this chat (or deleted)'`.
+- Missing/non-numeric `reply` means "no reply" (normalized, not rejected).
+- Reply-to-a-reply is allowed; only one preview level is serialized (`replyTo`).
+- A reply to a soft-deleted original is still returned with `replyTo.isDeleted: true` and `content: null`.
 
 ## Editing rules (`MessageService.edit`)
 
@@ -98,17 +114,33 @@ Sources: `src/modules/messages/gateways/message.gateway.ts`, `src/modules/messag
 ## Deletion rules (`MessageService.delete`)
 
 - Sender-only soft delete (sets `isDeleted: true`).
-- **Deleted messages are filtered from `getAllByChats`** and do not appear in `getMessages`; peers learn of deletion only via the `deleteMessage:list` event.
+- **Deleted messages are filtered from `getPage`** and do not appear in `getMessages`; peers learn of deletion only via the `deleteMessage:list` event.
 
 ## History / pagination
 
-`getAllByChats`:
+`MessageService.getPage(chatId, beforeId?, limit = 30)`:
 
 ```ts
-order: { id: 'DESC' }, take: 50   // fixed last 50, no cursor/offset params
+where: { chat: { id: chatId }, isDeleted: false, ...(beforeId ? { id: LessThan(beforeId) } : {}) }
+order: { id: 'DESC' }
+take: limit + 1   // the extra row only computes hasMore; never returned
 ```
 
-**There is no pagination** — no `before/after` message id support anywhere. Once the client has the 50 latest messages there is no way to load older history. Flagged as a required backend change.
+Ack data:
+
+```ts
+{
+  messages: MessageDto[],  // newest first WITHIN the page, at most `limit`
+  hasMore: boolean,        // another older page exists
+  nextCursor: number | null // id of the OLDEST message in the page; null when empty
+}
+```
+
+- No `beforeId` → latest page (backwards compatible with old clients).
+- `beforeId` is exclusive (`id < beforeId`); pass the previous `nextCursor`.
+- `limit` default 30, min 1, max 100; values above max are rejected by validation (not clamped).
+- Deleted messages are excluded, so they never create gaps in the cursor flow.
+- Relations: sender (+profile), type, attachments, `replyTo` (id) — one joined query, no N+1.
 
 ## ⚠️ Inconsistencies to be aware of
 

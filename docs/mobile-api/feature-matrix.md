@@ -45,9 +45,9 @@ Backend-verified capabilities (each row cites the source modules analyzed). "Par
 | Reply to message | ⚠️ Partial | `reply` id accepted, but `replyTo` is **not loaded** in list/single payloads (added via `loadMessage` relationships — only `id` in rows) |
 | Edit message | ⚠️ Partial | Own, text-type only; no time limit | 
 | Delete message | ⚠️ Partial | Own-only soft delete; no admin/moderator deletion uses `delete_message` permission; peers get just the id (no tombstone) |
-| History fetch | ⚠️ Partial | Last **50** messages, DESC order, **no pagination** (`message.service.ts#getAllByChats`) |
+| History fetch | ✅ | Cursor pagination via `getMessages { chatId, beforeId?, limit? }` (default 30, max 100); newest-first pages with `hasMore`/`nextCursor` (`message.service.ts#getPage`) |
 | Message type ↑ image/video/voice/file | ⚠️ Partial | DTO accepts the types & `type_messages` rows are seeded; UI-wise only text handler registered; content isn't validated |
-| Read receipts | ✅ (single level) | One `lastSeenId` per viewer per chat via `seen` event (`chat.gateway.ts#emitSeen`) |
+| Read receipts | ✅ (single level) | Monotonic `markSeen` per viewer per chat (`chat_seen`); `seen` room event, `othersLastSeenId` in `chatInfo`; unread counts in `getAllChats`. No per-member seen list. |
 | Typing | ✅ | `userTyping`/`userEndTyping` → `typing:start/stop` (only bubbles to the current room; emitter excluded) |
 | Reactions | ❌ Broken | `addReaction` throws `user already reacted` when none exists — inverted guard (`reactions.service.ts`); kits also assume reacts seeded (they are not) |
 
@@ -83,7 +83,7 @@ Backend-verified capabilities (each row cites the source modules analyzed). "Par
 1. **Fix presence**: authenticate `UserGateway` (`wsPayload` at handshake or connection) and join personal rooms; update `isOnline/lastSeen`.
 2. **Fix reactions service** (inverted already-reacted check; wrongly rejects valid users).
 3. **Return `chat.id`** from `POST /chats/create` (and probably normalize list/info responses into DTOs with `lastMessage`, member count).
-4. **Plane (train/paginate) message history**: cursor-based `getMessages` (e.g. `before` id) instead of fixed last-50; include `replyTo` data and deleted-message tombstones.
+4. ~~Paginate message history~~ — done: cursor-based `getMessages` (`beforeId`/`limit`, `hasMore`/`nextCursor`). Still missing: full `replyTo` data and deleted-message tombstones.
 5. **Fix invite-link `code` length** mismatch (32 vs 20) in the DB/entity.
 6. **Fix `addPermissionforAdmin`** role lookup (`ban` → `admin`).
 7. **Member list endpoint** (REST or WS) per chat; group title update; leave/remove member flows.

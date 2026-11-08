@@ -24,6 +24,8 @@ Sources: `src/modules/auth/controllers/user.controller.ts`, `src/modules/auth/se
 ```
 
 > ⚠️ `avatars` are **server-relative file paths** such as `uploads/avatars/1700000000000-123.png`. The static file server exposes them at `/uploads/avatars/...` (ServeStaticModule, `src/modules/app/app.module.ts`). The client must prepend the host; the backend never returns a full URL.
+>
+> The stored path already contains the `uploads/` mount segment, so the mount must not be added twice: a client whose base is `http://host:3000/uploads` has to strip the leading `uploads/` (mobile: `absoluteUploadUrl()` in `core/config/env.ts`).
 
 ## Endpoints
 
@@ -56,9 +58,19 @@ Sources: `src/modules/auth/controllers/user.controller.ts`, `src/modules/auth/se
 
 ### `PUT /user/uploade-avatar`  *(typo is in the real route — do NOT "fix" it in the client)*
 
-- `@Role([RoleEnum.ALL])`, multipart field **`avatar`** (`FileInterceptor` with `diskStorage` to `./uploads/avatars`, filename `Date.now()-<rand><ext>`).
-- No size or content-type restrictions on this endpoint (`UserController.updateAvatar`).
-- Appends the stored path to `profile.avatars`. Returns `{ message: 'avatar updated successfully' }`.
+- `@Role([RoleEnum.ALL])`, multipart field **`avatar`** (`AvatarUploadInterceptor` → `diskStorage` in `uploads/avatars`, filename `<timestamp>-<rand>.<ext>`; the directory is created at boot).
+- **Images only**: the declared MIME must be jpeg/png/gif/webp, and the stored bytes are sniffed again (`detectFileMimeType`) so a renamed non-image is deleted and rejected. `UPLOAD_MAX_FILE_SIZE` (default 10 MiB) caps the size.
+- Errors: `400` (missing field, wrong type, content is not an image — the message is specific and safe to show), `413` (file too large), `401` (missing/expired token).
+- Appends the stored path (`uploads/avatars/...`, forward slashes) to `profile.avatars` and returns the updated profile:
+
+```json
+{
+  "message": "avatar updated successfully",
+  "user": { "id": 11, "avatars": ["uploads/avatars/1700000000000-123.png"], "...": "<UserResponse>" }
+}
+```
+
+The upload is only confirmed once this payload arrives — clients should refresh/seed their current-user cache from `user` instead of assuming success.
 
 ### `DELETE /user/delete-avatar`
 
