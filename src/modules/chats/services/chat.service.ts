@@ -25,6 +25,8 @@ import { User } from 'src/modules/auth/entities/user.entity';
 import { ChatAccessService, ChatCallerContext } from './chat-access.service';
 import { GroupRealtimeService } from './group-realtime.service';
 import { removeAvatarThumbnails } from 'src/modules/media/avatar-thumbnail.util';
+import { PeerDto, toPeerDto } from './private-chat.service';
+import { isChatVisibleInList } from '../utils/private-chat.util';
 
 export interface ChatMemberPageOptions {
     search?: string;
@@ -35,8 +37,10 @@ export interface ChatMemberPageOptions {
 /** A chat-list row plus the caller's unread count (capped at `UNREAD_CAP`). */
 export type ChatWithUnread = Chat & {
     unreadCount: number;
-    /** Other participant's display name for private chats (forward picker). */
+    /** Other participant's display name for private chats (older clients). */
     peerName?: string | null;
+    /** Other participant (never a phone number) on private chats. */
+    peer?: PeerDto | null;
 };
 
 /** Server-side cap for `unreadCount`; the app renders "99+" above 99. */
@@ -168,7 +172,7 @@ export class ChatService {
         await this.memberRepository.save(member);
 
         const wireMember = this.serializeMember(member, user, false);
-        this.groupRealtime.groupAdded(chatId, user.id as UserId);
+        this.groupRealtime.groupAdded(chatId, user.id);
         this.groupRealtime.groupChanged(chatId, 'member_joined');
         await this.notifyMembersCount(chatId);
 
@@ -180,10 +184,11 @@ export class ChatService {
 
     async getUserChats(user: JwtPayload): Promise<ChatWithUnread[]> {
         // `member.role` is joined so the caller's own banned membership hides
-        // the group entirely (role, not a flag, marks a ban).
+        // the group entirely (role, not a flag, marks a ban). LEFT join: a
+        // legacy private chat may have no role row and must still be listed.
         const memberships = await this.memberRepository
             .createQueryBuilder('member')
-            .innerJoinAndSelect('member.role', 'memberRole')
+            .leftJoinAndSelect('member.role', 'memberRole')
             .innerJoinAndSelect('member.chat', 'chat')
             .leftJoinAndMapOne(
                 'chat.lastMessage',
@@ -199,9 +204,12 @@ export class ChatService {
             .leftJoinAndSelect('lm.sender', 'lmSender')
             .where('member.user.id = :userId', { userId: user.sub })
             .andWhere('chat.isBan = :isban', { isban: false })
-            .andWhere('memberRole.name != :banRole', {
-                banRole: RoleChatEnum.BAN,
-            })
+            .andWhere(
+                '(memberRole.name IS NULL OR memberRole.name != :banRole)',
+                {
+                    banRole: RoleChatEnum.BAN,
+                },
+            )
             .getMany();
 
         const byId = new Map<string, Chat>();
@@ -214,47 +222,88 @@ export class ChatService {
         // non-deleted messages newer than the caller's stored read position.
         const unread = await this.getUnreadCounts(user.sub);
 
-        // Private chats have no title; the app's forward picker needs a
-        // human-readable peer name. One query for all PV peers (no N+1).
+        // Empty private chats stay out of both lists until the first message
+        // exists; deleting that message keeps the chat visible (`messages` rows
+        // are soft-deleted, never removed). ONE grouped query, no per-chat hit.
         const privateIds = [...byId.values()]
             .filter((chat) => chat.type === TypeChatEnum.PRIVATE)
             .map((chat) => chat.id);
-        const peerNames = new Map<string, string>();
-        if (privateIds.length > 0) {
-            const peers = await this.memberRepository.find({
-                where: {
-                    chat: { id: In(privateIds) },
-                    user: { id: Not(user.sub) },
-                },
-                relations: { chat: true, user: { profile: true } },
-                select: {
-                    chat: { id: true },
-                    user: {
-                        id: true,
-                        profile: { name: true, username: true },
-                    },
-                },
-            });
-            for (const peer of peers) {
-                const name =
-                    peer.user.profile?.name ??
-                    peer.user.profile?.username ??
-                    '';
-                if (name !== '') peerNames.set(String(peer.chat.id), name);
-            }
-        }
+        const withAnyMessage = await this.getChatIdsWithAnyMessage(privateIds);
+        const visible = [...byId.values()].filter((chat) =>
+            isChatVisibleInList(chat.type, withAnyMessage.has(String(chat.id))),
+        );
 
-        return [...byId.values()]
+        // ONE query for every peer (other member + profile), never one per chat.
+        const peers = await this.getPeersForChats(
+            visible
+                .filter((chat) => chat.type === TypeChatEnum.PRIVATE)
+                .map((chat) => chat.id),
+            user.sub,
+        );
+
+        return visible
             .sort((a, b) => activity(b) - activity(a))
-            .map((chat) =>
-                Object.assign(chat, {
+            .map((chat) => {
+                const peer = peers.get(String(chat.id)) ?? null;
+                return Object.assign(chat, {
                     unreadCount: Math.min(
                         unread.get(String(chat.id)) ?? 0,
                         UNREAD_CAP,
                     ),
-                    peerName: peerNames.get(String(chat.id)) ?? null,
-                }),
-            );
+                    peer,
+                    peerName: peer?.name ?? null,
+                });
+            });
+    }
+
+    /** Chat ids that have at least one row in `messages`, deleted included. */
+    private async getChatIdsWithAnyMessage(
+        chatIds: ChatId[],
+    ): Promise<Set<string>> {
+        if (chatIds.length === 0) return new Set();
+        const rows = await this.messageRepository
+            .createQueryBuilder('message')
+            .select('DISTINCT message.chatId', 'chatId')
+            .where('message.chatId IN (:...chatIds)', { chatIds })
+            .getRawMany<{ chatId: string }>();
+        return new Set(rows.map((row) => String(row.chatId)));
+    }
+
+    /**
+     * Peers for a batch of private chats in ONE query (join the other member
+     * and their profile). Keyed by a string chat id to match Map usage.
+     */
+    async getPeersForChats(
+        chatIds: ChatId[],
+        callerId: number,
+    ): Promise<Map<string, PeerDto>> {
+        const peers = new Map<string, PeerDto>();
+        if (chatIds.length === 0) return peers;
+        const rows = await this.memberRepository.find({
+            where: {
+                chat: { id: In(chatIds) },
+                user: { id: Not(callerId) as unknown as UserId },
+            },
+            relations: { chat: true, user: { profile: true } },
+        });
+        for (const row of rows) {
+            if (row.user) peers.set(String(row.chat.id), toPeerDto(row.user));
+        }
+        return peers;
+    }
+
+    /** The other participant of ONE private chat (null for groups). */
+    async getPeerForChat(
+        chatId: ChatId,
+        callerId: number,
+    ): Promise<PeerDto | null> {
+        const chat = await this.chatRepository.findOne({
+            where: { id: chatId },
+            select: { id: true, type: true },
+        });
+        if (!chat || chat.type !== TypeChatEnum.PRIVATE) return null;
+        const peers = await this.getPeersForChats([chatId], callerId);
+        return peers.get(String(chatId)) ?? null;
     }
 
     /**

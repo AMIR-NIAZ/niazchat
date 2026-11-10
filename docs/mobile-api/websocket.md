@@ -49,8 +49,7 @@ io('http://<host>:3000', {
 | `editMessage` | `EditMessageDto` `{ messageId, chatId, newContent(≤5000) }` | broadcasts `editMessage:list` |
 | `deleteMessage` | `deleteMessageDto` `{ messageId, chatId }` | broadcasts `deleteMessage:list` (just messageId) |
 | `getMessages` | `{ chatId, beforeId?, limit? }` | ack `{ messages, hasMore, nextCursor }` (latest page when `beforeId` is omitted) |
-| `addReaction` | `ReactionDto` `{ messageId, reactId, chatId }` | broadcasts `reaction:added` |
-| `removeReaction` | `ReactionDto` | broadcasts `reaction:removed` |
+| `reactMessage` | `{ chatId, messageId, emoji: string \| null }` | toggles the caller's one reaction; acks `{ ok: true, data }` and broadcasts `reaction:updated` |
 
 ## Server → client events (full list with examples)
 
@@ -88,8 +87,7 @@ socket.on('countUsersOnline', (count: number) => {})
 /** sendMessage:list, editMessage:list — full Message entity serialization (messages.md) */
 /** deleteMessage:list — number (message id) */
 /** getMessages ack data — { messages: MessageDto[], hasMore, nextCursor } (newest first per page) */
-/** reaction:added — MessageReact entity (raw): { id, createdAt, updatedAt, userId, messageId, reactId, react: React } */
-/** reaction:removed — the MessageReact row that was removed (same shape) */
+/** reaction:updated — { chatId, messageId, reactions: [{ reactId, emoji, count }], myReaction, actor } (never userIds) */
 ```
 
 ## Read-received flow
@@ -99,10 +97,14 @@ socket.on('countUsersOnline', (count: number) => {})
 - The caller's other sockets receive `chat:read { chatId, unreadCount: 0 }` in `user:<id>` whenever their position advances.
 - **There is no per-message `read` event** — one `lastSeenId` per (user, chat) pair; clients infer "read by X" by comparing message ids. In groups, `othersLastSeenId` (from `chatInfo`) is the max over other members, so ticks mean "seen by at least one other member".
 
-## Reactions gateway (broken)
+## Reactions gateway
 
-- `addReaction` throws `'user already reacted'` when the user has **no** user-react record yet (inverted guard, `ReactionsService.reaction`), making first reactions impossible. Order is preserved only for duplicates (` findOne` of any user-react regardless of reactId) — inconsistent with one-react-per-message UX.
-- `removeReaction` checks `reactId` belonging to that user correctly, but the error message `'react not found'` is used both for completely new and for wrong-react cases.
+- The legacy `addReaction`/`removeReaction` events were removed (no app or script used them).
+- `reactMessage { chatId, messageId, emoji | null }` is the single toggle: same emoji again or `null` removes, a different emoji switches, no row inserts. The message must belong to the chat and not be soft-deleted; the emoji must exist in `reacts`.
+- It acks `{ ok: true, data: ReactionSnapshot }` and broadcasts `reaction:updated` to the room. Each recipient gets their own `myReaction`; `reactions[]` carries only `reactId`, `emoji` and `count` — never `userIds`.
+- `getMessageReactions { chatId, messageId }` returns the grouped reactor list (`emoji`, `count`, `users[{ userId, name, username, avatars }]`), newest first, at most 100 users total, with the same guards as `reactMessage` and no phone numbers.
+- Message payloads (history, send/forward/edit echoes and send acks) carry count-only `reactions`; history acks also carry the caller's `myReaction`. Deleting a message removes its reaction rows; forwarding never copies reactions.
+- Reaction types come from the `reacts` table (`GET /react`). Six defaults are seeded idempotently at startup; `POST/PUT/DELETE /react` are admin-only.
 
 ## Broken presence (`UserGateway`)
 

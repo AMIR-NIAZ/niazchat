@@ -151,10 +151,7 @@ export class InviteLinkService {
         return inviteLink.chat;
     }
 
-    private async addUserToChat(
-        chatId: ChatId,
-        userId: UserId,
-    ): Promise<void> {
+    private async addUserToChat(chatId: ChatId, userId: UserId): Promise<void> {
         const user = await this.userRepository.findOneBy({ id: userId });
         if (!user) throw new NotFoundException('user not found');
 

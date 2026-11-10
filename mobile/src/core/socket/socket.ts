@@ -8,6 +8,10 @@ import type {
     MessageDto,
 } from '../api/dto/message.dto';
 import type { ChatDto } from '../api/dto/chat.dto';
+import type {
+    MessageReactionsDto,
+    ReactionSnapshotDto,
+} from '../api/dto/reaction.dto';
 
 /**
  * Socket.IO setup (docs/mobile-api/websocket-contract.md).
@@ -37,6 +41,7 @@ export interface ServerToClientEvents {
     'sendMessage:list': (message: MessageDto) => void;
     'editMessage:list': (message: MessageDto) => void;
     'deleteMessage:list': (messageId: number) => void;
+    'reaction:updated': (snapshot: ReactionSnapshotDto) => void;
     'chatlist:updated': (update: ChatListUpdateDto) => void;
     seen: (payload: {
         chatId: number;
@@ -110,6 +115,14 @@ export interface ClientToServerEvents {
         payload: ForwardMessagesSocketPayload,
         ack: SocketAckHandler,
     ) => void;
+    reactMessage: (
+        payload: ReactMessageSocketPayload,
+        ack: SocketAckHandler,
+    ) => void;
+    getMessageReactions: (
+        payload: MessageReactionsSocketPayload,
+        ack: SocketAckHandler,
+    ) => void;
 }
 
 export type ForwardMessagesSocketPayload = ForwardMessagesPayloadDto;
@@ -139,6 +152,21 @@ export interface DeleteMessageSocketPayload {
     messageId: number;
     chatId: number;
 }
+
+export interface ReactMessageSocketPayload {
+    chatId: number;
+    messageId: number;
+    /** Null removes the caller's reaction; the server requires a catalog emoji otherwise. */
+    emoji: string | null;
+}
+
+export interface MessageReactionsSocketPayload {
+    chatId: number;
+    messageId: number;
+}
+
+export type ReactionSnapshot = ReactionSnapshotDto;
+export type MessageReactionsResult = MessageReactionsDto;
 
 export type AppSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 

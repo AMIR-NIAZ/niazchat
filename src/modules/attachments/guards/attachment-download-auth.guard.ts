@@ -28,9 +28,9 @@ export class AttachmentDownloadAuthGuard implements CanActivate {
     ) {}
 
     async canActivate(context: ExecutionContext): Promise<boolean> {
-        const request = context.switchToHttp().getRequest<
-            Request & Partial<RequestAuth>
-        >();
+        const request = context
+            .switchToHttp()
+            .getRequest<Request & Partial<RequestAuth>>();
         const id = Number(request.params.id);
         if (!Number.isInteger(id) || id <= 0) {
             throw new NotFoundException('attachment not found');

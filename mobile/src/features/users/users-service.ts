@@ -1,5 +1,6 @@
 import { httpClient, ApiError } from '../../core/api';
 import type { PublicUserProfileDto, UserDto } from '../../core/api';
+import type { UserSearchItemDto } from '../../core/api/dto/user.dto';
 import { absoluteUploadUrl } from '../../core/config/env';
 import { describeAuthError } from '../auth/auth-service';
 import { toPublicProfileView } from './public-profile-model';
@@ -18,6 +19,27 @@ export async function getUserByUsername(userName: string): Promise<UserDto> {
         `/user/pv/${encodeURIComponent(userName)}`,
     );
     return response.data.data;
+}
+
+/**
+ * `GET /user/search?q=<text>&limit=<n>` — username prefix search for the
+ * new-chat screen. `q` is already normalized by the caller (min 2 chars); the
+ * server strips a leading `@` and lowercases again. Response is `{ data }`.
+ */
+export async function searchUsers(
+    query: string,
+    limit: number = 20,
+): Promise<UserSearchItemDto[]> {
+    const response = await httpClient.get<{ data: UserSearchItemDto[] }>(
+        '/user/search',
+        { params: { q: query, limit } },
+    );
+    return (response.data.data ?? []).map((item) => ({
+        ...item,
+        id: Number(item.id),
+        username: item.username ?? '',
+        avatars: item.avatars ?? [],
+    }));
 }
 
 /** `GET /auth/getme` → bare `toUserResponse` (NOT wrapped in `data`). */

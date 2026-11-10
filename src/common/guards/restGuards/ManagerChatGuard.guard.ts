@@ -2,11 +2,13 @@ import {
     BadRequestException,
     CanActivate,
     ExecutionContext,
-    ForbiddenException,
     Injectable,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { ChatAccessOptions, CHAT_ACCESS_KEY } from 'src/common/decorators/chatAccess.decorator';
+import {
+    ChatAccessOptions,
+    CHAT_ACCESS_KEY,
+} from 'src/common/decorators/chatAccess.decorator';
 import { RoleChatEnum } from 'src/common/enums/roleChat.enum';
 import { ChatId } from 'src/common/types/brands.type';
 import { RequestAuth } from 'src/common/types/RequestAuth.type';

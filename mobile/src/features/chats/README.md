@@ -19,8 +19,16 @@
 - `GET /chats/manage/:chatId/bans` → `{ data: BannedChatMemberDto[] }`.
 - `POST /chats/:chatId/ban` — platform-admin surface.
 
+## Private (one-to-one) chats
+- `private-chat-service.ts`: `POST /chats/private { userId }` → `{ chatId, created, peer }`; server-side idempotent per unordered pair, 30 creations/hour (existing chats do not count).
+- `open-private-chat.ts`: THE entry point. Reuses a cached private chat with the peer (no request), otherwise creates it, seeds the conversation cache with the peer (header paints immediately), never inserts the empty chat into the list cache, and navigates (`push` from a profile, `replace` from the new-chat screen). One in-flight request per peer blocks double taps.
+- `new-chat.tsx`: debounced (300 ms) username search, auto-focused, min 2 chars after one optional `@`, stale answers dropped, `keyboardShouldPersistTaps="handled"`; result tap calls `openPrivateChat(..., { replace: true })`.
+- `chat-search-model.ts`: pure query normalization + stale-response predicate (unit-tested).
+- `chats-model.ts`: `isPrivateChat(chat)` is the ONLY private test (`type === 'private'`; unknown = group) and `getChatDisplay(chat)` is the ONLY name/avatar resolver (peer for private, group data otherwise). Chat list, header, context menu, forward picker and search all use them.
+- Chat screen: private header shows the peer name/photo (tap → profile) and a presence subtitle from `useUserProfile` (30 s while focused + on foreground, seeded from `peer`); typing shows the animated "typing" line. No member count, no admin button, no sender names/avatars.
+
 ## Members/lookup
-`features/users/users-service.ts`: `GET /user/pv/:userName` (`{ data }`), `GET /auth/getme` (bare).
+`features/users/users-service.ts`: `GET /user/pv/:userName` (`{ data }`), `GET /user/search?q=` (`{ data }` whitelist: id/name/username/current avatar only), `GET /auth/getme` (bare).
 
 ## Backend gaps honored (NOT faked anywhere in UI)
 - Unread counts exist (`getAllChats`); no server-side search (client-side filter only); no chat-list pagination (single fetch of the full list).

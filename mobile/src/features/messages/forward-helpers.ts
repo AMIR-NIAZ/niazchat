@@ -1,3 +1,4 @@
+import { getChatDisplay } from '../chats/chats-model';
 import type { ChatPreview } from '../chats/chats-model';
 import type {
     ForwardMessagesResultDto,
@@ -55,17 +56,7 @@ export function selectedMessageIds(selected: ReadonlySet<number>): number[] {
 }
 
 export function chatForwardLabel(chat: ChatPreview): string {
-    if (chat.title !== null && chat.title.trim() !== '') {
-        return chat.title;
-    }
-    if (chat.type === 'private') {
-        return chat.peerName !== undefined &&
-            chat.peerName !== null &&
-            chat.peerName.trim() !== ''
-            ? chat.peerName
-            : 'Private chat';
-    }
-    return 'Untitled chat';
+    return getChatDisplay(chat).title;
 }
 
 export function filterForwardChats(

@@ -16,7 +16,7 @@ import { palette, radii, spacing, typography } from '../../shared/theme';
 import { markChatSeen } from '../messages/messages-socket-api';
 import { purgeChatFromCaches } from './chats-cache';
 import type { ChatPreview } from './chats-model';
-import { isGroupOwner } from './chats-model';
+import { getChatDisplay, isGroupOwner, isPrivateChat } from './chats-model';
 import { setChatUnreadCount } from './use-chats';
 import { useLeaveGroup, useMyChatRole } from './use-groups';
 
@@ -50,7 +50,7 @@ export function ChatContextMenu(
     const queryClient = useQueryClient();
     const chat = props.chat;
     const chatId = chat === null ? null : Number(chat.id);
-    const isGroup = chat?.type === 'groupe';
+    const isGroup = chat !== null && !isPrivateChat(chat);
     const roleQuery = useMyChatRole(chatId, isGroup);
     const leaveGroup = useLeaveGroup();
     const [marking, setMarking] = useState(false);
@@ -65,12 +65,9 @@ export function ChatContextMenu(
 
     const busy = leaveGroup.isPending || marking;
     const role = roleQuery.data ?? null;
-    const name =
-        chat === null
-            ? ''
-            : (chat.title ??
-              (chat.type === 'private' ? 'Private chat' : 'Unnamed group'));
-    const avatarUrl = chat?.avatarUrls[0];
+    const display = chat === null ? null : getChatDisplay(chat);
+    const name = display?.title ?? '';
+    const avatarUrl = display?.avatarUri ?? null;
 
     const markRead = async (): Promise<void> => {
         if (chat === null || chat.lastMessage === null || marking) {
@@ -172,7 +169,7 @@ export function ChatContextMenu(
                         <>
                             <View style={styles.header}>
                                 <UserAvatar
-                                    userId={Number(chat.id)}
+                                    userId={display?.userId ?? Number(chat.id)}
                                     name={name}
                                     uri={avatarUrl}
                                     size={44}

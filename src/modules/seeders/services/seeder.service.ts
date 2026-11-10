@@ -6,6 +6,7 @@ import { RoleChatSeeder } from '../seeds/roleChat.seeder';
 import { PermmisionChatSeeder } from '../seeds/PermissionChat.seeder';
 import { PermmisionSeeder } from '../seeds/permission.seeder';
 import { TypeMessageSeeder } from '../seeds/TypeMessage.seeder';
+import { ReactSeeder } from '../seeds/react.seeder';
 
 const SEEDERS = [
     OwnerSeeder,
@@ -14,6 +15,7 @@ const SEEDERS = [
     RoleChatSeeder,
     PermmisionChatSeeder,
     TypeMessageSeeder,
+    ReactSeeder,
 ];
 
 @Injectable()

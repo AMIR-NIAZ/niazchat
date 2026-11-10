@@ -21,6 +21,8 @@ import { InviteLinkService } from './services/inviteLink.service';
 import { Link } from './entities/link.entity';
 import { ChatAccessService } from './services/chat-access.service';
 import { GroupRealtimeService } from './services/group-realtime.service';
+import { PrivateChatService } from './services/private-chat.service';
+import { RateLimitService } from 'src/common/services/rate-limit.service';
 
 @Module({
     imports: [
@@ -43,12 +45,19 @@ import { GroupRealtimeService } from './services/group-realtime.service';
         InviteLinkService,
         ChatAccessService,
         GroupRealtimeService,
+        PrivateChatService,
+        RateLimitService,
         ChatGateway,
         UserService,
         JwtAppService,
         JwtService,
     ],
     controllers: [ChatsController, ManageChatsController],
-    exports: [ChatService, GroupRealtimeService, ChatAccessService],
+    exports: [
+        ChatService,
+        GroupRealtimeService,
+        ChatAccessService,
+        PrivateChatService,
+    ],
 })
 export class ChatsModule {}

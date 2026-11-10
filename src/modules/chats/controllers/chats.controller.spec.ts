@@ -3,6 +3,7 @@ import { ChatsController } from './chats.controller';
 import { ChatService } from '../services/chat.service';
 import { InviteLinkService } from '../services/inviteLink.service';
 import { GroupRealtimeService } from '../services/group-realtime.service';
+import { PrivateChatService } from '../services/private-chat.service';
 
 describe('ChatsController', () => {
     let controller: ChatsController;
@@ -14,6 +15,7 @@ describe('ChatsController', () => {
                 { provide: ChatService, useValue: {} },
                 { provide: InviteLinkService, useValue: {} },
                 { provide: GroupRealtimeService, useValue: {} },
+                { provide: PrivateChatService, useValue: {} },
             ],
         }).compile();
 

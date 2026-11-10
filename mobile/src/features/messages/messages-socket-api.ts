@@ -6,10 +6,16 @@ import type {
     MarkSeenSocketPayload,
     ForwardMessagesSocketPayload,
     ForwardMessagesResult,
+    ReactMessageSocketPayload,
+    MessageReactionsSocketPayload,
 } from '../../core/socket';
 import { socketOrThrow } from '../chats/chats-socket-api';
 import { ApiError } from '../../core/api';
-import type { MessageDto } from '../../core/api';
+import type {
+    MessageDto,
+    MessageReactionsDto,
+    ReactionSnapshotDto,
+} from '../../core/api';
 
 /** WebSocket API for messaging (docs/mobile-api/websocket-contract.md).
  *
@@ -99,4 +105,31 @@ export async function deleteChatMessage(
 ): Promise<unknown> {
     const payload: DeleteMessageSocketPayload = { messageId, chatId };
     return request(connectedSocket(), 'deleteMessage', payload);
+}
+
+/** WS `reactMessage` — one reaction per user; null clears, same emoji toggles. */
+export async function reactToMessage(
+    chatId: number,
+    messageId: number,
+    emoji: string | null,
+): Promise<ReactionSnapshotDto | null> {
+    const payload: ReactMessageSocketPayload = { chatId, messageId, emoji };
+    return request<ReactionSnapshotDto>(
+        connectedSocket(),
+        'reactMessage',
+        payload,
+    );
+}
+
+/** WS `getMessageReactions` — grouped reactor list, max 100 users. */
+export async function fetchMessageReactions(
+    chatId: number,
+    messageId: number,
+): Promise<MessageReactionsDto | null> {
+    const payload: MessageReactionsSocketPayload = { chatId, messageId };
+    return request<MessageReactionsDto>(
+        connectedSocket(),
+        'getMessageReactions',
+        payload,
+    );
 }

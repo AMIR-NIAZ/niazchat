@@ -8,6 +8,7 @@ import {
     View,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import {
     AppText,
     Screen,
@@ -25,6 +26,8 @@ import { presenceLabel } from '../../../features/users/public-profile-model';
 import { useRegisterOpenUserProfile } from '../../../features/users/profile-navigation';
 import { useUserProfile } from '../../../features/users/use-user-profile';
 import { describePublicProfileError } from '../../../features/users/users-service';
+import { useCurrentUserId } from '../../../features/auth';
+import { openPrivateChat } from '../../../features/chats';
 
 /**
  * User info screen (`GET /user/:userId/profile`).
@@ -92,7 +95,12 @@ function UserProfile({
     // Guarded navigation must know this screen is the open one.
     useRegisterOpenUserProfile(userId);
     const query = useUserProfile(userId);
+    const queryClient = useQueryClient();
+    const currentUserId = useCurrentUserId();
+    const isSelf = currentUserId !== null && currentUserId === userId;
     const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+    const [messagePending, setMessagePending] = useState(false);
+    const [messageError, setMessageError] = useState<string | null>(null);
 
     const profile = query.profile;
     const name = profile?.name ?? initialName ?? 'Profile';
@@ -100,6 +108,24 @@ function UserProfile({
     const currentAvatarPath = avatars[0]?.storedPath ?? initialAvatar;
     const presence = profile === null ? null : presenceLabel(profile);
     const bio = profile?.biografy?.trim();
+
+    const handleMessage = async (): Promise<void> => {
+        if (messagePending) return;
+        setMessagePending(true);
+        setMessageError(null);
+        try {
+            // Reuses an existing chat from the list cache without a request.
+            await openPrivateChat(userId, { queryClient });
+        } catch (error) {
+            setMessageError(
+                error instanceof Error
+                    ? error.message
+                    : 'Could not start this chat.',
+            );
+        } finally {
+            setMessagePending(false);
+        }
+    };
 
     return (
         <Screen style={styles.screen} withTopInset={true}>
@@ -158,6 +184,38 @@ function UserProfile({
                         )}
                     {presence !== null && (
                         <AppText variant="caption">{presence}</AppText>
+                    )}
+                    {!isSelf && (
+                        <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Message ${name}`}
+                            accessibilityState={{ disabled: messagePending }}
+                            disabled={messagePending}
+                            onPress={(): void => {
+                                void handleMessage();
+                            }}
+                            style={({ pressed }) => [
+                                styles.messageButton,
+                                pressed && styles.pressed,
+                                messagePending && styles.messageButtonBusy,
+                            ]}
+                        >
+                            {messagePending ? (
+                                <ActivityIndicator
+                                    size="small"
+                                    color={palette.neutral[0]}
+                                />
+                            ) : (
+                                <Text style={styles.messageButtonText}>
+                                    Message
+                                </Text>
+                            )}
+                        </Pressable>
+                    )}
+                    {messageError !== null && (
+                        <AppText style={styles.errorText}>
+                            {messageError}
+                        </AppText>
                     )}
                 </View>
 
@@ -269,6 +327,22 @@ const styles = StyleSheet.create({
         color: palette.primary[600],
         fontSize: 14,
         fontWeight: '600',
+    },
+    messageButton: {
+        marginTop: spacing.xs,
+        minWidth: 128,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: palette.primary[500],
+        borderRadius: radii.lg,
+        paddingHorizontal: spacing.md,
+        paddingVertical: spacing.xs,
+    },
+    messageButtonBusy: { opacity: 0.6 },
+    messageButtonText: {
+        color: palette.neutral[0],
+        fontSize: 15,
+        fontWeight: '700',
     },
     section: { gap: spacing.xxs },
     sectionLabel: { color: palette.neutral[500] },

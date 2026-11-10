@@ -11,7 +11,6 @@ import { ReactionsService } from '../services/reactions.service';
 import { CreateReactDto } from '../dto/create-react.dto';
 import { Role } from 'src/common/decorators/role.decorator';
 import { RoleEnum } from 'src/common/enums/role.enum';
-import { IsPublic } from 'src/common/decorators/public.decorator';
 import { ReactId } from 'src/common/types/brands.type';
 
 @Controller('react')
@@ -19,7 +18,7 @@ export class ReactionController {
     constructor(private readonly reactionService: ReactionsService) {}
 
     @Post('/')
-    @IsPublic()
+    @Role([RoleEnum.ADMIN])
     async create(@Body() dto: CreateReactDto) {
         return await this.reactionService.create(dto);
     }

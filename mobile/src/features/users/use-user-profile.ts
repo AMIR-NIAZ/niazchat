@@ -16,7 +16,10 @@ export function userProfileQueryKey(userId: number) {
     return ['user', userId] as const;
 }
 
-export function useUserProfile(userId: number | null): {
+export function useUserProfile(
+    userId: number | null,
+    options: { refetchInterval?: number | false } = {},
+): {
     profile: PublicUserProfileView | null;
     isLoading: boolean;
     error: Error | null;
@@ -32,6 +35,7 @@ export function useUserProfile(userId: number | null): {
         },
         enabled: userId !== null && userId > 0,
         staleTime: 60_000,
+        refetchInterval: options.refetchInterval ?? false,
         retry: (failureCount: number, error: Error): boolean => {
             if (
                 error instanceof ApiError &&

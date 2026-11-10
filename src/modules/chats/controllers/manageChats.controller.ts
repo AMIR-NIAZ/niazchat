@@ -80,7 +80,11 @@ export class ManageChatsController {
         @Param('chatId', ParseIntPipe) chatId: ChatId,
         @Body() dto: CreateChatTitleDto,
     ) {
-        return await this.chatService.updateTitle(chatId, request.user.sub, dto.title);
+        return await this.chatService.updateTitle(
+            chatId,
+            request.user.sub,
+            dto.title,
+        );
     }
 
     @Post('upload/avatar/:chatId')
@@ -106,7 +110,11 @@ export class ManageChatsController {
         @UploadedFile() file: Express.Multer.File,
         @Param('chatId', ParseIntPipe) chatId: ChatId,
     ) {
-        return await this.chatService.uploadAvatar(file.path, chatId, request.user.sub);
+        return await this.chatService.uploadAvatar(
+            file.path,
+            chatId,
+            request.user.sub,
+        );
     }
 
     @Delete('delete/avatar/:chatId')
@@ -120,7 +128,11 @@ export class ManageChatsController {
         @Body('avatar') avatar: string,
         @Param('chatId', ParseIntPipe) chatId: ChatId,
     ) {
-        return await this.chatService.deleteAvatar(chatId, avatar, request.user.sub);
+        return await this.chatService.deleteAvatar(
+            chatId,
+            avatar,
+            request.user.sub,
+        );
     }
 
     // ── members mutation ───────────────────────────────────────────────────
@@ -148,7 +160,11 @@ export class ManageChatsController {
         @Param('chatId', ParseIntPipe) chatId: ChatId,
         @Param('memberId', ParseIntPipe) memberId: number,
     ) {
-        return await this.chatService.kickMember(chatId, memberId, request.user.sub);
+        return await this.chatService.kickMember(
+            chatId,
+            memberId,
+            request.user.sub,
+        );
     }
 
     /** Leave the group (owner rejected server-side: no ownership transfer). */

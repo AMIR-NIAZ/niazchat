@@ -3,7 +3,8 @@ import { attachmentPreviewLabel } from '../attachments/attachment-labels';
 import type { ChatDto } from '../../core/api/dto/chat.dto';
 import type { ChatListUpdateDto } from '../../core/api/dto/message.dto';
 import type { UserDto } from '../../core/api/dto/user.dto';
-import type { ChatPreview } from './chats-model';
+import { getChatDisplay } from './chats-model';
+import type { ChatPeer, ChatPreview } from './chats-model';
 
 /**
  * Wire → domain mapping. Rules from the docs:
@@ -15,10 +16,11 @@ import type { ChatPreview } from './chats-model';
 
 export function toChatPreview(chat: ChatDto): ChatPreview {
     return {
-        id: chat.id,
+        id: Number(chat.id),
         type: chat.type,
-        title: chat.title,
+        title: chat.title ?? null,
         peerName: chat.peerName ?? null,
+        peer: toChatPeer(chat.peer),
         isBan: chat.isBan,
         avatarUrls: chat.avatars.map(absoluteUploadUrl),
         createdAt: chat.createdAt,
@@ -65,6 +67,21 @@ export function lastMessageFromUpdate(
                 ? attachments[0].duration
                 : null,
         firstAttachmentName: attachments[0]?.originalName ?? null,
+    };
+}
+
+/** Wire peer → domain peer (numbers normalized, name never empty). */
+export function toChatPeer(peer: ChatPeer | null | undefined): ChatPeer | null {
+    if (peer === null || peer === undefined) {
+        return null;
+    }
+    return {
+        id: Number(peer.id),
+        name: peer.name?.trim() || 'بدون نام',
+        username: peer.username ?? '',
+        avatars: peer.avatars ?? [],
+        isOnline: peer.isOnline === true,
+        lastSeen: peer.lastSeen ?? null,
     };
 }
 
@@ -137,7 +154,7 @@ export function filterChats(
         return chats;
     }
     return chats.filter((chat) => {
-        const name = chat.title?.toLowerCase() ?? '';
+        const name = getChatDisplay(chat).title.toLowerCase();
         const preview = chat.lastMessage?.content.toLowerCase() ?? '';
         return name.includes(q) || preview.includes(q);
     });

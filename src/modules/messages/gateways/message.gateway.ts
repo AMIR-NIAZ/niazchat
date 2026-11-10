@@ -36,6 +36,7 @@ import {
     serializeMessage,
 } from 'src/common/utils/ws-serializer.utils';
 import { num } from 'src/common/utils/ws-serializer.utils';
+import { ReactionsService } from 'src/modules/reactions/services/reactions.service';
 
 @WebSocketGateway({ maxHttpBufferSize: 1e6 })
 @UseGuards(wsPayload, wsIsBanMember)
@@ -49,6 +50,7 @@ export class MessageGateway {
         private readonly messageService: MessageService,
         private readonly forwardService: MessageForwardService,
         private readonly chatService: ChatService,
+        private readonly reactions: ReactionsService,
     ) {}
 
     @SubscribeMessage('sendMessage')
@@ -113,7 +115,14 @@ export class MessageGateway {
         @MessageBody() dto: EditMessageDto,
     ) {
         const message = await this.messageService.edit(dto, client.data.user);
-        const wireMessage = serializeMessage(message);
+        // An edit echo must carry the current chips, otherwise editing wipes them.
+        const summaries = await this.reactions.summariesFor([
+            Number(message.id),
+        ]);
+        const wireMessage = serializeMessage(
+            message,
+            summaries.get(Number(message.id)) ?? [],
+        );
 
         this.server
             .to(chatRoom(dto.chatId))
@@ -154,18 +163,33 @@ export class MessageGateway {
 
     @SubscribeMessage('getMessages')
     @UseGuards(wsIsMemberChat)
-    async getMessages(@MessageBody() dto: GetMessagesDto) {
+    async getMessages(
+        @ConnectedSocket() client: SocketAuth,
+        @MessageBody() dto: GetMessagesDto,
+    ) {
         const page = await this.messageService.getPage(
             dto.chatId,
             dto.beforeId,
             dto.limit ?? DEFAULT_MESSAGES_PAGE_SIZE,
         );
+        const ids = page.messages.map((message) => Number(message.id));
+        // Exactly two reaction queries for the whole page, regardless of size.
+        const [summaries, mine] = await Promise.all([
+            this.reactions.summariesFor(ids),
+            this.reactions.myReactionsFor(ids, client.data.user.sub),
+        ]);
 
         return {
             ok: true,
             data: {
                 // Newest first WITHIN the page, exactly like the old ack.
-                messages: page.messages.map(serializeMessage),
+                messages: page.messages.map((message) =>
+                    serializeMessage(
+                        message,
+                        summaries.get(Number(message.id)) ?? [],
+                        mine.get(Number(message.id)) ?? null,
+                    ),
+                ),
                 hasMore: page.hasMore,
                 // Id of the OLDEST message in this page; null when empty.
                 nextCursor: page.nextCursor,

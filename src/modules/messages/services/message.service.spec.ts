@@ -14,6 +14,8 @@ import { TypeMessage } from '../entities/typeMessage.entity';
 import { ContentResolverService } from './content-resolver.service';
 import { AttachmentService } from 'src/modules/attachments/services/attachment.service';
 import { ChatAccessService } from 'src/modules/chats/services/chat-access.service';
+import { PrivateChatService } from 'src/modules/chats/services/private-chat.service';
+import { ReactionsService } from 'src/modules/reactions/services/reactions.service';
 import { TypeChatEnum } from 'src/common/enums/typeChat.enum';
 import { DataSource } from 'typeorm';
 import { JwtPayload } from 'src/common/types/jwt-payload.type';
@@ -114,6 +116,18 @@ describe('MessageService (attachment integration)', () => {
                 {
                     provide: ChatAccessService,
                     useValue: { getCallerContext: jest.fn() },
+                },
+                {
+                    provide: PrivateChatService,
+                    useValue: { ensureChat: jest.fn() },
+                },
+                {
+                    provide: ReactionsService,
+                    useValue: {
+                        clearForMessage: jest.fn(),
+                        summariesFor: jest.fn(),
+                        myReactionsFor: jest.fn(),
+                    },
                 },
             ],
         }).compile();
@@ -439,6 +453,7 @@ describe('MessageService edit/delete rules (ownership, chat match, state)', () =
         update: jest.Mock;
     };
     let access: { getCallerContext: jest.Mock };
+    let reactions: { clearForMessage: jest.Mock };
 
     const user: JwtPayload = { sub: 1 as never, role: 'user' };
     const otherUser: JwtPayload = { sub: 2 as never, role: 'user' };
@@ -462,6 +477,7 @@ describe('MessageService edit/delete rules (ownership, chat match, state)', () =
             update: jest.fn().mockResolvedValue(undefined),
         };
         access = { getCallerContext: jest.fn() };
+        reactions = { clearForMessage: jest.fn() };
 
         const module: TestingModule = await Test.createTestingModule({
             providers: [
@@ -481,6 +497,14 @@ describe('MessageService edit/delete rules (ownership, chat match, state)', () =
                 },
                 { provide: AttachmentService, useValue: {} },
                 { provide: ChatAccessService, useValue: access },
+                {
+                    provide: PrivateChatService,
+                    useValue: { ensureChat: jest.fn() },
+                },
+                {
+                    provide: ReactionsService,
+                    useValue: reactions,
+                },
             ],
         }).compile();
 
@@ -677,6 +701,7 @@ describe('MessageService edit/delete rules (ownership, chat match, state)', () =
         expect(messageRepository.update).toHaveBeenCalledWith(200, {
             isDeleted: true,
         });
+        expect(reactions.clearForMessage).toHaveBeenCalledWith(200);
     });
 
     it("soft-deletes the sender's own text message", async () => {
@@ -825,6 +850,18 @@ describe('MessageService.getPage (cursor pagination)', () => {
                 {
                     provide: ChatAccessService,
                     useValue: { getCallerContext: jest.fn() },
+                },
+                {
+                    provide: PrivateChatService,
+                    useValue: { ensureChat: jest.fn() },
+                },
+                {
+                    provide: ReactionsService,
+                    useValue: {
+                        clearForMessage: jest.fn(),
+                        summariesFor: jest.fn(),
+                        myReactionsFor: jest.fn(),
+                    },
                 },
             ],
         }).compile();

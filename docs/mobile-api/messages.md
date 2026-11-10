@@ -211,6 +211,14 @@ chat has been banned`, and `An attachment is no longer available`.
 - Attachments and their files are cleaned up by the existing delayed cleanup job, while downloads of a soft-deleted message immediately return 404.
 - **Deleted messages are filtered from `getPage`** and do not appear in `getMessages`; peers learn of deletion only via the `deleteMessage:list` event.
 
+## Reactions
+
+- Message payloads (send/forward/edit echoes, send acks and history) carry `reactions: [{ emoji, count }]`, ordered by count descending then seeded catalog order; `[]` when none. No `reactId` or `userIds`.
+- History acks also carry `myReaction: string | null`. Broadcast payloads omit it; clients keep their cached value. The edit echo carries current `reactions` so editing never wipes chips.
+- `reactMessage` is the toggle event. `reaction:updated` is a personalized snapshot `{ chatId, messageId, reactions: [{ reactId, emoji, count }], myReaction, actor }`; `userIds` is never broadcast.
+- `getMessageReactions` returns `{ reactions: [{ emoji, count, users: [{ userId, name, username, avatars }] }] }`, newest first, at most 100 users total, with no phone numbers. Message deletion removes reaction rows; forwarding does not copy them.
+- History pages load all summaries with one grouped query and all caller `myReaction` values with one extra query, regardless of page size.
+
 ## History / pagination
 
 `MessageService.getPage(chatId, beforeId?, limit = 30)`:
@@ -239,8 +247,8 @@ Ack data:
 
 ## ⚠️ Inconsistencies to be aware of
 
-1. Reactions bug (inverted check) — `ReactionsService.reaction` throws `'user already reacted'` when the user **has not** reacted yet (`if (!hasUserReacted) throw ...`), and `unReaction` queries by `reactId` but the stored permission row check is inverted (`reactions.service.ts`). Cant actually add a reaction the first time — noted in feature matrix.
+1. Reactions are a separate WS flow: `reactMessage` / `getMessageReactions` (see websocket-contract.md).
 2. `type` field in WS payloads is the entity row (`{id, name}`), not the enum string. Client must map via `type.name`.
 3. `deleteMessage:list` emits only the id; the client must find & remove it locally.
 4. Deleted messages can be edited/deleted further only while `isDeleted:false` reads — deletion is not checked on `edit` path (`isDeleted: false` IS checked — false alarm, only noted).
-5. The gateway emits broadcasts to rooms; **callers never get an ack payload** — rely on receiving `sendMessage:list` to confirm the send. Unsent validation failures surface as WS errors only, so implement send-time optimistic UI carefully.
+5. Message sends still rely on the `sendMessage:list` echo; `reactMessage` is the acked reaction event.

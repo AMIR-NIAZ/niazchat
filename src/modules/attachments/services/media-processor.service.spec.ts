@@ -14,7 +14,10 @@ describe('buildWaveform', () => {
     };
 
     it('returns exactly 64 integers in 0..100', () => {
-        const waveform = buildWaveform(samples(() => 12_000), 64);
+        const waveform = buildWaveform(
+            samples(() => 12_000),
+            64,
+        );
         expect(waveform).not.toBeNull();
         expect(waveform).toHaveLength(64);
         for (const bar of waveform ?? []) {
@@ -25,7 +28,10 @@ describe('buildWaveform', () => {
     });
 
     it('keeps silence at zero', () => {
-        const waveform = buildWaveform(samples(() => 0), 64);
+        const waveform = buildWaveform(
+            samples(() => 0),
+            64,
+        );
         expect(waveform).toEqual(new Array(64).fill(0));
     });
 

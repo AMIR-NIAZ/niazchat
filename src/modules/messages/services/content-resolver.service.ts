@@ -11,18 +11,11 @@ export class ContentResolverService {
         private readonly handlers: ContentHandler[],
     ) {}
 
-    async resolve(
-        content: string,
-        type: TypeMessageEnum,
-    ): Promise<string> {
-        const handler = this.handlers.find((handler) =>
-            handler.supports(type),
-        );
+    async resolve(content: string, type: TypeMessageEnum): Promise<string> {
+        const handler = this.handlers.find((handler) => handler.supports(type));
 
         if (!handler) {
-            throw new BadRequestException(
-                `Unsupported message type: ${type}`,
-            );
+            throw new BadRequestException(`Unsupported message type: ${type}`);
         }
 
         return handler.resolve(content, type);

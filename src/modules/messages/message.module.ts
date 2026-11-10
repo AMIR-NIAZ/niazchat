@@ -20,11 +20,13 @@ import {
 import { ChatsModule } from '../chats/chats.module';
 import { AttachmentsModule } from '../attachments/attachments.module';
 import { Attachment } from '../attachments/entities/attachment.entity';
+import { ReactionsModule } from '../reactions/reaction.module';
 
 @Module({
     imports: [
         ChatsModule,
         AttachmentsModule,
+        ReactionsModule,
         TypeOrmModule.forFeature([
             Message,
             ChatMember,

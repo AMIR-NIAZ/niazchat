@@ -34,7 +34,7 @@ All enums live in `src/common/enums/`.
 | `permissions` | `ban_user`, `ban_chat`, `manage_react` (`permission.seeder.ts`) |
 | `permission_chats` | `all`, `ban_user`, `change_info_chat`, `delete_message` (`PermissionChat.seeder.ts`) |
 | `type_messages` | `file`, `ice`, `image`, `text`, `video`, `voice` (`TypeMessage.seeder.ts`) |
-| `reacts` | **not seeded** — the client can't assume any reaction exists; admin creates them via `POST /react` |
+| `reacts` | six defaults seeded idempotently: `thumbs_up` 👍, `heart` ❤️, `joy` 😂, `open_mouth` 😮, `cry` 😢, `pray` 🙏 (`react.seeder.ts`); admins manage the catalog via `/react` |
 
 ## Shared types (not user-facing, for reference)
 

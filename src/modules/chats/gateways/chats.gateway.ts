@@ -161,7 +161,9 @@ export class ChatGateway implements OnGatewayDisconnect, OnGatewayInit {
         );
         const summary = await this.chatService.getChatSummary(chatId, userId);
         const seen = await this.chatService.getChatSeenState(chatId, userId);
-        return { ...info, ...summary, ...seen };
+        // Private chat info carries the other participant (presence included).
+        const peer = await this.chatService.getPeerForChat(chatId, userId);
+        return { ...info, peer, ...summary, ...seen };
     }
 
     /**
@@ -199,9 +201,9 @@ export class ChatGateway implements OnGatewayDisconnect, OnGatewayInit {
     }
 
     /**
-     * Group chats only, current room only, active (non-banned) members only.
-     * A start is throttled to one per second per socket; stop is always sent.
-     * Never throws to the caller (handlers swallow rejections).
+     * Group AND private chats, current room only, active (non-banned) members
+     * only. A start is throttled to one per second per socket; stop is always
+     * sent. Never throws to the caller (handlers swallow rejections).
      */
     private async broadcastTyping(
         client: SocketAuth,
@@ -209,7 +211,12 @@ export class ChatGateway implements OnGatewayDisconnect, OnGatewayInit {
         event: 'typing:start' | 'typing:stop',
     ): Promise<void> {
         if (client.data.chatId !== chatId) return;
-        if (client.data.chatType !== TypeChatEnum.GRUPE) return;
+        if (
+            client.data.chatType !== TypeChatEnum.GRUPE &&
+            client.data.chatType !== TypeChatEnum.PRIVATE
+        ) {
+            return;
+        }
 
         const userId = client.data.user?.sub;
         if (userId === undefined) return;

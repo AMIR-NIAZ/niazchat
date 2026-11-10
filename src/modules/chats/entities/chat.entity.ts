@@ -1,7 +1,7 @@
 import { BaseEntity } from 'src/common/entities/base.entity';
 import { TypeChatEnum } from 'src/common/enums/typeChat.enum';
 import { Message } from 'src/modules/messages/entities/message.entity';
-import { Column, Entity, OneToMany, OneToOne } from 'typeorm';
+import { Column, Entity, Index, OneToMany, OneToOne } from 'typeorm';
 import { ChatSeen } from './chats_seen.entity';
 import { ChatMember } from './chat_members.entity';
 import { ChatId } from 'src/common/types/brands.type';
@@ -36,4 +36,13 @@ export class Chat extends BaseEntity {
 
     @Column({ default: false })
     isBan: boolean;
+
+    /**
+     * Canonical `"<smallerUserId>:<largerUserId>"` for private chats, NULL for
+     * groups. The unique index makes one chat per unordered pair enforceable
+     * under races (Postgres allows any number of NULLs).
+     */
+    @Index('UQ_chats_pairKey', { unique: true })
+    @Column({ type: 'varchar', length: 40, nullable: true })
+    pairKey?: string | null;
 }

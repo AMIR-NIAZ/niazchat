@@ -49,7 +49,7 @@ Backend-verified capabilities (each row cites the source modules analyzed). "Par
 | Message type ↑ image/video/voice/file | ⚠️ Partial        | DTO accepts the types & `type_messages` rows are seeded; UI-wise only text handler registered; content isn't validated. Voice is delivered as `kind: 'voice'` on a text-type message with a single attachment (see attachments.md) |
 | Read receipts                         | ✅ (single level) | Monotonic `markSeen` per viewer per chat (`chat_seen`); `seen` room event, `othersLastSeenId` in `chatInfo`; unread counts in `getAllChats`. No per-member seen list.                                                              |
 | Typing                                | ✅                | `userTyping`/`userEndTyping` → `typing:start/stop` (only bubbles to the current room; emitter excluded)                                                                                                                            |
-| Reactions                             | ❌ Broken         | `addReaction` throws `user already reacted` when none exists — inverted guard (`reactions.service.ts`); kits also assume reacts seeded (they are not)                                                                              |
+| Reactions                             | ✅                | WS `reactMessage { chatId, messageId, emoji \| null }`: one reaction per user/message, toggle/switch/clear, acked and broadcast as `reaction:updated` with counts, per-recipient `myReaction` and actor (never `userIds`); `getMessageReactions` returns grouped users capped at 100. Message payloads carry count-only `reactions`, history also `myReaction`. Six default types seeded idempotently; admin-managed catalog via `/react` (`reactions.gateway.ts`, `react.seeder.ts`) |
 | Forward messages                      | ✅                | WS `forwardMessages`: 1–20 source messages → 1–5 targets, copied attachments (new rows/files), `forwardedFrom` origin snapshot, per-target isolation, request idempotency + rate limit (`message-forward.service.ts`)              |
 
 ## Attachments
@@ -82,7 +82,6 @@ Backend-verified capabilities (each row cites the source modules analyzed). "Par
 ## What the backend CANNOT support yet — backend changes required before frontend integration
 
 1. **Fix presence**: authenticate `UserGateway` (`wsPayload` at handshake or connection) and join personal rooms; update `isOnline/lastSeen`.
-2. **Fix reactions service** (inverted already-reacted check; wrongly rejects valid users).
 3. **Return `chat.id`** from `POST /chats/create` (and probably normalize list/info responses into DTOs with `lastMessage`, member count).
 4. ~~Paginate message history~~ — done: cursor-based `getMessages` (`beforeId`/`limit`, `hasMore`/`nextCursor`). Still missing: full `replyTo` data and deleted-message tombstones.
 5. **Fix invite-link `code` length** mismatch (32 vs 20) in the DB/entity.

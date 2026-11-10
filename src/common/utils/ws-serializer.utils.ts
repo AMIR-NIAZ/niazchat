@@ -2,7 +2,9 @@ import { Message } from 'src/modules/messages/entities/message.entity';
 import { Chat } from 'src/modules/chats/entities/chat.entity';
 import { User } from 'src/modules/auth/entities/user.entity';
 import { UserProfile } from 'src/modules/auth/entities/user_profile.entity';
+import { TypeChatEnum } from 'src/common/enums/typeChat.enum';
 import { attachmentKindOf } from './attachment-kind.util';
+import type { MessageReactionSummary } from 'src/modules/reactions/reaction.types';
 
 export const num = (value: unknown): number =>
     typeof value === 'number' ? value : Number(value);
@@ -134,15 +136,24 @@ export function serializeLastMessage(message: Message) {
     };
 }
 
-/** Chat wire shape: numeric ids, no relations (lastMessage/members unloaded). */
-export function serializeChat(chat: Chat & { unreadCount?: number }) {
+/**
+ * Chat wire shape: numeric ids, no relations (lastMessage/members unloaded).
+ * Private chats always serialize `title: null`; groups keep their title.
+ */
+export function serializeChat(
+    chat: Chat & {
+        unreadCount?: number;
+        peerName?: string | null;
+        peer?: unknown;
+    },
+) {
     return {
         id: num(chat.id),
         createdAt: chat.createdAt,
         updatedAt: chat.updatedAt,
-        title: chat.title ?? null,
-        peerName:
-            (chat as Chat & { peerName?: string | null }).peerName ?? null,
+        title: chat.type === TypeChatEnum.PRIVATE ? null : (chat.title ?? null),
+        peerName: chat.peerName ?? null,
+        peer: chat.peer ?? null,
         avatars: chat.avatars ?? [],
         type: chat.type,
         isBan: chat.isBan,
@@ -205,7 +216,11 @@ function serializeMessageSender(message: Message) {
  * sender, the type row and the attachments. No `chat` object. Attachment paths
  * and storage keys never leave the server.
  */
-export function serializeMessage(message: Message) {
+export function serializeMessage(
+    message: Message,
+    reactions: MessageReactionSummary[] = [],
+    myReaction?: string | null,
+) {
     // `clientMessageId` is a transient echo field (not persisted): history
     // pages and older messages simply do not carry it.
     const clientMessageId = (
@@ -244,6 +259,10 @@ export function serializeMessage(message: Message) {
         attachments: (message.attachments ?? []).map((attachment) =>
             serializeAttachmentMeta(attachment),
         ),
+        // Count-only summaries: no react ids or reactor ids in message payloads.
+        reactions: reactions.map(({ emoji, count }) => ({ emoji, count })),
+        // Only history (`getMessages`) personalizes this; broadcasts omit it.
+        ...(myReaction !== undefined ? { myReaction } : {}),
         ...(clientMessageId !== undefined && clientMessageId !== null
             ? { clientMessageId }
             : {}),

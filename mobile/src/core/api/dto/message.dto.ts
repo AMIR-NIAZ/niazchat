@@ -3,6 +3,7 @@
  */
 import type { ChatLastMessageDto } from './chat.dto';
 import type { UserDto } from './user.dto';
+import type { MessageReactionDto } from './reaction.dto';
 
 export type MessageTypeName =
     | 'text'
@@ -57,6 +58,10 @@ export interface MessageDto {
     /** First forward origin; null for ordinary messages. */
     forwardedFrom?: { userId: number | null; name: string } | null;
     attachments: MessageAttachmentDto[];
+    /** Count-only chips, ordered by count then the seeded catalog order. */
+    reactions?: MessageReactionDto[];
+    /** Caller-specific; present on history acks, omitted from broadcasts. */
+    myReaction?: string | null;
     /** Echoed on the send ack/room event; absent in history pages. */
     clientMessageId?: string | null;
 }

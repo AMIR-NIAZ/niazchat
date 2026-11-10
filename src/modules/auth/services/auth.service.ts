@@ -149,7 +149,9 @@ export class AuthService {
             where: { id: payload.sub },
         });
         const isTokenValid =
-            user && typeof user.refreshToken === 'string' && user.refreshToken !== ''
+            user &&
+            typeof user.refreshToken === 'string' &&
+            user.refreshToken !== ''
                 ? await Compare(token, user.refreshToken)
                 : false;
         if (!user || !isTokenValid) {
@@ -218,7 +220,7 @@ export class AuthService {
         });
 
         await this.userProfileRepository.delete({
-            userId: id
+            userId: id,
         });
 
         await this.userService.deleteAllAvatar(id);

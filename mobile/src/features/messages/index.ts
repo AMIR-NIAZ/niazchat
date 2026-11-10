@@ -2,6 +2,8 @@ export * from './messages-model';
 export * from './forward-helpers';
 export * from './forward-picker';
 export * from './messages-mapper';
+export * from './reaction-helpers';
+export * from './message-reactions-sheet';
 export * from './message-runs';
 export * from './message-actions';
 export * from './messages-socket-api';

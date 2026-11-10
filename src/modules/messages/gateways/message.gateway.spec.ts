@@ -12,18 +12,32 @@ import {
     CONTENT_HANDLERS,
     ContentResolverService,
 } from '../services/content-resolver.service';
+import { ReactionsService } from 'src/modules/reactions/services/reactions.service';
 
 describe('MessageGateway', () => {
     let gateway: MessageGateway;
-    let messageService: { create: jest.Mock; getPage: jest.Mock };
+    let messageService: {
+        create: jest.Mock;
+        getPage: jest.Mock;
+        edit: jest.Mock;
+    };
     let chatService: { getMemberIds: jest.Mock };
     let forwardService: { forward: jest.Mock };
+    let reactions: { summariesFor: jest.Mock; myReactionsFor: jest.Mock };
     let roomEmit: jest.Mock;
 
     beforeEach(async () => {
-        messageService = { create: jest.fn(), getPage: jest.fn() };
+        messageService = {
+            create: jest.fn(),
+            getPage: jest.fn(),
+            edit: jest.fn(),
+        };
         chatService = { getMemberIds: jest.fn().mockResolvedValue([1, 2]) };
         forwardService = { forward: jest.fn() };
+        reactions = {
+            summariesFor: jest.fn().mockResolvedValue(new Map()),
+            myReactionsFor: jest.fn().mockResolvedValue(new Map()),
+        };
         roomEmit = jest.fn();
 
         const module: TestingModule = await Test.createTestingModule({
@@ -35,6 +49,7 @@ describe('MessageGateway', () => {
                     useValue: forwardService,
                 },
                 { provide: ChatService, useValue: chatService },
+                { provide: ReactionsService, useValue: reactions },
                 { provide: JwtAppService, useValue: {} },
                 { provide: JwtService, useValue: {} },
                 { provide: getRepositoryToken(ChatMember), useValue: {} },
@@ -240,11 +255,14 @@ describe('MessageGateway', () => {
 
         const ack = await (
             gateway as unknown as {
-                getMessages: (dto: unknown) => Promise<{
+                getMessages: (
+                    client: unknown,
+                    dto: unknown,
+                ) => Promise<{
                     data: { messages: Array<Record<string, unknown>> };
                 }>;
             }
-        ).getMessages({ chatId: 10 });
+        ).getMessages(makeClient(), { chatId: 10 });
 
         expect(ack.data.messages[0]?.attachments).toEqual([
             expect.objectContaining({
@@ -256,6 +274,100 @@ describe('MessageGateway', () => {
                 hasPoster: false,
             }),
         ]);
+    });
+
+    it('loads reactions once for the page and personalizes myReaction', async () => {
+        messageService.getPage.mockResolvedValue({
+            messages: [
+                {
+                    id: 121,
+                    content: 'one',
+                    chat: { id: 10 },
+                    sender: { id: 2 },
+                    type: { id: 1, name: 'text' },
+                    createdAt: new Date('2026-01-01'),
+                    attachments: [],
+                },
+                {
+                    id: 120,
+                    content: 'two',
+                    chat: { id: 10 },
+                    sender: { id: 1 },
+                    type: { id: 1, name: 'text' },
+                    createdAt: new Date('2026-01-01'),
+                    attachments: [],
+                },
+            ],
+            hasMore: false,
+            nextCursor: 120,
+        });
+        reactions.summariesFor.mockResolvedValue(
+            new Map([[121, [{ emoji: '👍', count: 2 }]]]),
+        );
+        reactions.myReactionsFor.mockResolvedValue(new Map([[121, '👍']]));
+
+        const ack = await (
+            gateway as unknown as {
+                getMessages: (
+                    client: unknown,
+                    dto: unknown,
+                ) => Promise<{
+                    data: { messages: Array<Record<string, unknown>> };
+                }>;
+            }
+        ).getMessages(makeClient(), { chatId: 10 });
+
+        expect(reactions.summariesFor).toHaveBeenCalledTimes(1);
+        expect(reactions.summariesFor).toHaveBeenCalledWith([121, 120]);
+        expect(reactions.myReactionsFor).toHaveBeenCalledTimes(1);
+        expect(reactions.myReactionsFor).toHaveBeenCalledWith([121, 120], 1);
+        expect(ack.data.messages[0]?.reactions).toEqual([
+            { emoji: '👍', count: 2 },
+        ]);
+        expect(ack.data.messages[0]?.myReaction).toBe('👍');
+        expect(ack.data.messages[1]?.myReaction).toBeNull();
+    });
+
+    it('keeps reactions on the edit echo without personalizing it', async () => {
+        const edited = {
+            id: 130,
+            content: 'edited',
+            chat: { id: 10 },
+            sender: { id: 1 },
+            type: { id: 1, name: 'text' },
+            createdAt: new Date('2026-01-01'),
+            isEdited: true,
+            attachments: [],
+        };
+        messageService.edit.mockResolvedValue(edited);
+        reactions.summariesFor.mockResolvedValue(
+            new Map([[130, [{ emoji: '❤️', count: 1 }]]]),
+        );
+
+        const ack = await (
+            gateway as unknown as {
+                editMessage: (
+                    client: unknown,
+                    dto: unknown,
+                ) => Promise<{
+                    data: Record<string, unknown>;
+                }>;
+            }
+        ).editMessage(makeClient(), {
+            chatId: 10,
+            messageId: 130,
+            newContent: 'edited',
+        });
+
+        expect(roomEmit).toHaveBeenCalledWith(
+            'editMessage:list',
+            expect.objectContaining({
+                id: 130,
+                reactions: [{ emoji: '❤️', count: 1 }],
+            }),
+        );
+        expect(ack.data.reactions).toEqual([{ emoji: '❤️', count: 1 }]);
+        expect(ack.data.myReaction).toBeUndefined();
     });
 
     it('still emits chat-list updates for plain text messages', async () => {

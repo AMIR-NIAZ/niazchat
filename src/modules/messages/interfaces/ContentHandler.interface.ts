@@ -1,4 +1,4 @@
-import { TypeMessageEnum } from "src/common/enums/typeMessage.enum";
+import { TypeMessageEnum } from 'src/common/enums/typeMessage.enum';
 
 export interface ContentHandler {
     supports(type: TypeMessageEnum): boolean;

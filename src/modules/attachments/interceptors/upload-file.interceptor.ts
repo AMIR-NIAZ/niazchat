@@ -40,7 +40,10 @@ export class UploadFileInterceptor implements NestInterceptor {
                     destination: (
                         _req: unknown,
                         _file: unknown,
-                        callback: (error: Error | null, destination: string) => void,
+                        callback: (
+                            error: Error | null,
+                            destination: string,
+                        ) => void,
                     ): void => {
                         const dir = path.join(
                             config.storageDir,
@@ -54,7 +57,10 @@ export class UploadFileInterceptor implements NestInterceptor {
                     filename: (
                         _req: unknown,
                         _file: unknown,
-                        callback: (error: Error | null, filename: string) => void,
+                        callback: (
+                            error: Error | null,
+                            filename: string,
+                        ) => void,
                     ): void => {
                         callback(null, `${crypto.randomUUID()}.part`);
                     },
@@ -87,9 +93,9 @@ export class UploadFileInterceptor implements NestInterceptor {
                     .filter((dir) => dir !== ''),
             );
             for (const dir of dirs) {
-                void fs.rm(dir, { recursive: true, force: true }).catch(
-                    (): void => undefined,
-                );
+                void fs
+                    .rm(dir, { recursive: true, force: true })
+                    .catch((): void => undefined);
             }
         };
         response.once('close', cleanup);

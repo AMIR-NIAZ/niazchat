@@ -1,4 +1,12 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import {
+    AccessibilityInfo,
+    Animated,
+    Pressable,
+    StyleSheet,
+    Text,
+    View,
+} from 'react-native';
 import { UserAvatar } from '../../shared/components';
 import { palette, radii, spacing } from '../../shared/theme';
 import { LONG_PRESS_DELAY_MS } from '../../shared/long-press';
@@ -52,6 +60,12 @@ interface MessageBubbleProps {
     onForwardedProfilePress?:
         | ((userId: number, name: string) => void)
         | undefined;
+    /** Toggle the caller's reaction with a chip/quick-bar emoji. */
+    onToggleReaction?:
+        | ((message: ChatMessage, emoji: string) => void)
+        | undefined;
+    /** Long-press on the reaction row: open the grouped reactor sheet. */
+    onOpenReactions?: ((message: ChatMessage) => void) | undefined;
 }
 
 /** Bubble avatar edge length (the spacer keeps the other rows aligned). */
@@ -94,6 +108,8 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
         selected = false,
         onToggleSelect,
         onForwardedProfilePress,
+        onToggleReaction,
+        onOpenReactions,
     } = props;
     const showSender = !mine && isGroup && showSenderName;
     const showFailedHint = message.status === 'failed';
@@ -353,6 +369,14 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                     {message.content}
                 </Text>
             )}
+            {message.reactions.length > 0 && (
+                <ReactionChips
+                    message={message}
+                    mine={mine}
+                    onToggle={onToggleReaction}
+                    onOpen={onOpenReactions}
+                />
+            )}
             {showPendingActions && (
                 <View style={styles.pendingActions}>
                     {failed &&
@@ -529,6 +553,114 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
     );
 }
 
+interface ReactionChipsProps {
+    message: ChatMessage;
+    mine: boolean;
+    onToggle?: ((message: ChatMessage, emoji: string) => void) | undefined;
+    onOpen?: ((message: ChatMessage) => void) | undefined;
+}
+
+/**
+ * Wrapped emoji + count chips inside the bubble, above the meta line. Tapping
+ * toggles the caller's reaction; long-pressing any chip opens the reactor list.
+ * The whole row scales in once when a new chip appears (native driver).
+ */
+function ReactionChips(props: ReactionChipsProps): React.ReactElement {
+    const { message, mine, onToggle, onOpen } = props;
+    const scale = useRef(new Animated.Value(1)).current;
+    const [reduceMotion, setReduceMotion] = useState(false);
+
+    useEffect((): (() => void) => {
+        let active = true;
+        void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
+            if (active) setReduceMotion(enabled);
+        });
+        const subscription = AccessibilityInfo.addEventListener(
+            'reduceMotionChanged',
+            setReduceMotion,
+        );
+        return (): void => {
+            active = false;
+            subscription.remove();
+        };
+    }, []);
+
+    useEffect((): void => {
+        if (reduceMotion) {
+            scale.setValue(1);
+            return;
+        }
+        scale.setValue(0.88);
+        Animated.spring(scale, {
+            toValue: 1,
+            damping: 16,
+            mass: 0.5,
+            stiffness: 220,
+            useNativeDriver: true,
+        }).start();
+    }, [message.reactions.length, reduceMotion, scale]);
+
+    return (
+        <Animated.View
+            style={[styles.reactionRow, { transform: [{ scale }] }]}
+            accessibilityLabel="Reactions list"
+        >
+            {message.reactions.map((reaction) => {
+                const selected =
+                    message.myReaction !== null &&
+                    message.myReaction.replace(/\uFE0F/g, '') ===
+                        reaction.emoji.replace(/\uFE0F/g, '');
+                return (
+                    <Pressable
+                        key={reaction.emoji}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${reaction.emoji}, ${reaction.count} reactions${selected ? ', you reacted' : ''}`}
+                        accessibilityState={{ selected }}
+                        onPress={
+                            onToggle === undefined
+                                ? undefined
+                                : (): void => onToggle(message, reaction.emoji)
+                        }
+                        onLongPress={
+                            onOpen === undefined
+                                ? undefined
+                                : (): void => onOpen(message)
+                        }
+                        delayLongPress={400}
+                        style={({ pressed }) => [
+                            styles.reactionChip,
+                            mine
+                                ? selected
+                                    ? styles.reactionMineSelected
+                                    : styles.reactionMine
+                                : selected
+                                  ? styles.reactionTheirsSelected
+                                  : styles.reactionTheirs,
+                            pressed && styles.pressed,
+                        ]}
+                    >
+                        <Text
+                            style={[
+                                styles.reactionText,
+                                mine
+                                    ? selected
+                                        ? styles.reactionTextMineSelected
+                                        : styles.reactionTextMine
+                                    : selected
+                                      ? styles.reactionTextTheirsSelected
+                                      : styles.reactionTextTheirs,
+                            ]}
+                        >
+                            {reaction.emoji}
+                            {` ${reaction.count}`}
+                        </Text>
+                    </Pressable>
+                );
+            })}
+        </Animated.View>
+    );
+}
+
 /** Divider shown where the user's unread messages start (when the chat opens). */
 export function UnreadDivider(): React.ReactElement {
     return (
@@ -662,6 +794,41 @@ const styles = StyleSheet.create({
     content: { color: palette.neutral[900], fontSize: 15 },
     contentMine: { color: palette.neutral[0] },
     caption: { marginTop: spacing.xxs },
+    reactionRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        gap: spacing.xxs,
+        marginTop: spacing.xxs,
+        maxWidth: '100%',
+    },
+    reactionChip: {
+        borderRadius: radii.sm,
+        borderWidth: 1,
+        paddingHorizontal: spacing.xs,
+        paddingVertical: 2,
+    },
+    reactionMine: {
+        backgroundColor: 'rgba(255,255,255,0.18)',
+        borderColor: 'rgba(255,255,255,0.28)',
+    },
+    reactionMineSelected: {
+        backgroundColor: palette.primary[100],
+        borderColor: palette.neutral[0],
+    },
+    reactionTheirs: {
+        backgroundColor: palette.neutral[100],
+        borderColor: palette.neutral[100],
+    },
+    reactionTheirsSelected: {
+        backgroundColor: palette.primary[500],
+        borderColor: palette.primary[600],
+    },
+    reactionText: { fontSize: 12, fontWeight: '600' },
+    reactionTextMine: { color: palette.neutral[0] },
+    reactionTextMineSelected: { color: palette.primary[700] },
+    reactionTextTheirs: { color: palette.neutral[700] },
+    reactionTextTheirsSelected: { color: palette.neutral[0] },
     uploadError: {
         color: palette.semantic.danger,
         fontSize: 11,

@@ -12,7 +12,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { palette, radii, spacing, typography } from '../../shared/theme';
+import { UserAvatar } from '../../shared/components';
 import { useDebouncedValue } from '../../shared/hooks/use-debounced-value';
+import { getChatDisplay, isPrivateChat } from '../chats/chats-model';
 import { useChats } from '../chats/use-chats';
 import type { ChatPreview } from '../chats/chats-model';
 import { ApiError } from '../../core/api';
@@ -239,6 +241,7 @@ export function ForwardPicker({
                         }
                         renderItem={({ item }): React.ReactElement => {
                             const isSelected = selected.has(item.id);
+                            const display = getChatDisplay(item);
                             return (
                                 <Pressable
                                     accessibilityRole="button"
@@ -275,18 +278,24 @@ export function ForwardPicker({
                                             {isSelected ? '✓' : ''}
                                         </Text>
                                     </View>
+                                    <UserAvatar
+                                        userId={display.userId ?? item.id}
+                                        name={display.title}
+                                        uri={display.avatarUri}
+                                        size={36}
+                                    />
                                     <View style={styles.rowBody}>
                                         <Text
                                             style={styles.rowTitle}
                                             numberOfLines={1}
                                         >
-                                            {chatForwardLabel(item)}
+                                            {display.title}
                                         </Text>
                                         <Text
                                             style={styles.rowType}
                                             numberOfLines={1}
                                         >
-                                            {item.type === 'private'
+                                            {isPrivateChat(item)
                                                 ? 'Private chat'
                                                 : 'Group chat'}
                                         </Text>

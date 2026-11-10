@@ -51,6 +51,11 @@ function message(
         replyToId: null,
         status,
         pendingContent: null,
+
+        // New reaction fields
+        reactions: [],
+        myReaction: null,
+        myReactionProvided: false,
     };
 }
 

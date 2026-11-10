@@ -5,6 +5,19 @@
 export type ChatType = 'private' | 'groupe' | 'channel';
 
 /**
+ * Other participant of a private chat (`getAllChats`, `chatInfo`, create ack).
+ * `avatars` holds at most the CURRENT photo; never a phone number.
+ */
+export interface PeerDto {
+    id: number;
+    name: string;
+    username: string;
+    avatars: string[];
+    isOnline: boolean;
+    lastSeen: string | null;
+}
+
+/**
  * Chat-member roles (seeded `role_chat` names). `manager` is the group OWNER;
  * `admin` is an ordinary chat admin and must never be treated as the owner.
  */
@@ -45,6 +58,8 @@ export interface ChatDto {
     title: string | null;
     /** Other participant's display name on private chat-list rows. */
     peerName?: string | null;
+    /** Other participant on private chats; null/absent elsewhere. */
+    peer?: PeerDto | null;
     avatars: string[];
     type: ChatType;
     isBan: boolean;

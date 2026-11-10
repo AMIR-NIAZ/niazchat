@@ -5,6 +5,8 @@ Messaging is **WebSocket-only** (docs/mobile-api/messages.md), implemented in th
 ## Client → server (delivered by `messages-socket-api.ts`)
 - `sendMessage` (`CreateMessageSocketPayload`), `editMessage`, `deleteMessage` — all via
   `emitWithAck` (the ack carries only errors; there is NO ack payload for sends).
+- `reactMessage` — one reaction per user/message; the same emoji again (or `null`)
+  removes it. `getMessageReactions` loads the grouped reactor list for the sheet.
 - `sendMessage` is issued with `{ chatId, content }` — `MessageService.sendChat` accepts any
   chat the caller belongs to (private included); `userId` is only needed to *create* a PV chat.
 - `getMessages` / `joinChat` reuse `joinChat()` from the chats feature (room join + `chatInfo`
@@ -14,6 +16,9 @@ Messaging is **WebSocket-only** (docs/mobile-api/messages.md), implemented in th
 - `sendMessage:list`, `editMessage:list` — full `MessageDto` broadcasts to the chat room; the
   sender receives its own echo, which is how a send is confirmed in the UI.
 - `deleteMessage:list` — just the message id; the entry is removed from the cache.
+- `reaction:updated` — personalized snapshot (`reactions[{ emoji, count }]`,
+  `myReaction`, `actor`; never `userIds`). `applyReactionUpdate` replaces counts
+  and keeps the caller's own reaction when the payload omits it.
 - `getMessages` — one page (`limit` 30, `beforeId` cursor), newest first within the page;
   reversed to ascending here. `loadOlder()` merges older pages into the ascending cache.
 - `seen` — another member advanced their read position → cache `othersLastSeenId` (my ticks).
@@ -36,6 +41,22 @@ Messaging is **WebSocket-only** (docs/mobile-api/messages.md), implemented in th
 - Forwarded bubbles show `↗ Forwarded from <name>` above content/reply; tapping a known user opens
   the existing profile helper. Edit is hidden and the server rejects `editMessage`.
 
+## Reactions
+- Message payloads carry count-only `reactions`; history acks also carry the caller's
+  `myReaction`. `mergeMessages` and `replaceMessage` keep a cached `myReaction` when a
+  broadcast echo omits it.
+- The emoji list comes from `GET /react` (`useReactionEmojis`, cached with a long
+  `staleTime`) with the fixed `👍 ❤️ 😂 😮 😢 🙏` fallback. `normalizeEmoji` strips
+  `U+FE0F` and whitespace for comparisons.
+- The action sheet opens with a horizontal quick bar at the top (the caller's current
+  emoji highlighted). Tapping sends `reactMessage`, closes the sheet, applies an
+  optimistic update and rolls back with a short message if the ack fails. Taps for a
+  message already in flight are ignored.
+- Chips render inside the bubble above the meta line, wrap within the 85% bubble width,
+  and use the accent color for the caller's chip. Tapping a chip toggles that emoji;
+  long-pressing one opens `MessageReactionsSheet` (`getMessageReactions`) with grouped
+  users, loading/error/retry/empty states, and profile navigation (self is inert).
+
 ## Message actions
 - Long-press anywhere on a confirmed bubble opens the sheet, including photo/video tiles,
   the voice player controls and waveform/time, document rows, forwarded headers and reply quotes.
@@ -56,4 +77,4 @@ Messaging is **WebSocket-only** (docs/mobile-api/messages.md), implemented in th
 - No ack payload for sends — optimistic bubbles stay pending until the echo; a 10 s ack
   timeout marks them failed (tap to retry).
 - Deleted messages never appear in history — live `deleteMessage:list` removals only.
-- Reactions and presence are broken server-side; not implemented in this feature.
+- Presence is still broken server-side (documented in the websocket contract); reactions are implemented end to end.

@@ -52,6 +52,17 @@ export interface PublicUserProfileDto {
   lastSeen: string | null;
 }
 
+/**
+ * `GET /user/search?q=` item — whitelist only: no phone, status, presence or
+ * timestamps. `avatars` holds at most the CURRENT photo (server-relative).
+ */
+export interface UserSearchItemDto {
+  id: number;
+  name: string;
+  username: string;
+  avatars: string[];
+}
+
 /** `GET /chats/manage/:chatId/bans` → `{ data: [...] }` item (docs/mobile-api/groups.md). */
 export interface BannedChatMemberDto {
   id: number;

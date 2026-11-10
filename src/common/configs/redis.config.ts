@@ -9,7 +9,6 @@ export class RedisConfig implements SharedBullConfigurationFactory {
     createSharedConfiguration():
         | Promise<BullRootModuleOptions>
         | BullRootModuleOptions {
-
         return {
             connection: {
                 host: process.env.REDIS_HOST ?? 'localhost',

@@ -7,6 +7,7 @@ import { absoluteUploadUrl } from '../../core/config/env';
 import { CHATS_QUERY_KEY } from './use-chats';
 import * as groupsService from './groups-service';
 import { joinChat } from './chats-socket-api';
+import { toChatPeer } from './chats-mapper';
 import type { ChatInfo } from './chats-model';
 
 /**
@@ -162,9 +163,10 @@ export function useChatDetail(chatId: number) {
 
 function parseChatInfo(raw: ChatDto): ChatInfo {
     return {
-        id: raw.id,
+        id: Number(raw.id),
         type: raw.type,
-        title: raw.title,
+        title: raw.title ?? null,
+        peer: toChatPeer(raw.peer),
         isBan: raw.isBan,
         avatarUrls: raw.avatars.map(absoluteUploadUrl),
         createdAt: raw.createdAt,

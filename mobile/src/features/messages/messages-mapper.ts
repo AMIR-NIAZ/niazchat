@@ -173,6 +173,23 @@ export function toChatMessage(dto: MessageDto): ChatMessage {
         senderAvatarPath: dto.sender?.avatars?.[0] ?? null,
         attachments: toAttachmentViews(dto),
         attachmentsCount: dto.attachments?.length ?? 0,
+        reactions: (dto.reactions ?? [])
+            .filter(
+                (reaction) =>
+                    typeof reaction.emoji === 'string' &&
+                    Number.isFinite(Number(reaction.count)) &&
+                    Number(reaction.count) > 0,
+            )
+            .map((reaction) => ({
+                emoji: reaction.emoji,
+                count: Number(reaction.count),
+            })),
+        // Broadcasts omit myReaction; history acks always include it (null = none).
+        myReaction: dto.myReaction ?? null,
+        myReactionProvided: Object.prototype.hasOwnProperty.call(
+            dto,
+            'myReaction',
+        ),
         clientMessageId: dto.clientMessageId ?? null,
         forwardedFrom:
             dto.forwardedFrom === null || dto.forwardedFrom === undefined
@@ -210,6 +227,9 @@ export function toPendingChatMessage(
         senderAvatarPath: null,
         attachments,
         attachmentsCount: attachments.length,
+        reactions: [],
+        myReaction: null,
+        myReactionProvided: false,
         clientMessageId,
         forwardedFrom: null,
         replyTo,
@@ -327,7 +347,16 @@ export function mergeMessages(
         if (existing !== undefined) {
             // Already known (duplicate echo / re-delivery): update, never consume a bubble.
             // The echo is authoritative and carries `replyTo`, so the preview survives.
-            confirmed.set(message.id, { ...existing, ...message });
+            // A broadcast/edit echo omits `myReaction`; keep the cached one.
+            confirmed.set(message.id, {
+                ...existing,
+                ...message,
+                myReaction: message.myReactionProvided
+                    ? message.myReaction
+                    : existing.myReaction,
+                myReactionProvided:
+                    existing.myReactionProvided || message.myReactionProvided,
+            });
             continue;
         }
         confirmed.set(message.id, message);
@@ -427,6 +456,12 @@ export function replaceMessage(
                   // A reply keeps its quoted preview even if a light echo omits it.
                   replyTo: updated.replyTo ?? message.replyTo,
                   replyToId: updated.replyToId ?? message.replyToId,
+                  // Broadcast echoes omit myReaction; history/ack values win.
+                  myReaction: updated.myReactionProvided
+                      ? updated.myReaction
+                      : message.myReaction,
+                  myReactionProvided:
+                      message.myReactionProvided || updated.myReactionProvided,
               }
             : message,
     );

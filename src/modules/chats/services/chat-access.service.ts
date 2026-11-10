@@ -1,4 +1,5 @@
 import {
+    BadRequestException,
     ForbiddenException,
     Injectable,
     NotFoundException,
@@ -71,12 +72,12 @@ export class ChatAccessService {
             throw new ForbiddenException('you are not a member of this group');
         }
 
-        const permissions = (await this.permissionAdminRepository.find({
-            where: { member: { id: member.id } },
-            relations: { permission: true },
-        })).map(
-            (row) => row.permission.name as PermissionChatEnum,
-        );
+        const permissions = (
+            await this.permissionAdminRepository.find({
+                where: { member: { id: member.id } },
+                relations: { permission: true },
+            })
+        ).map((row) => row.permission.name as PermissionChatEnum);
 
         const roleName = (member.role?.name ?? '') as RoleChatEnum;
         return {
@@ -94,9 +95,11 @@ export class ChatAccessService {
      * read guard for the members list.
      */
     assertUsableGroup(caller: ChatCallerContext): void {
+        // One shared group-only gate for every management route (private chats
+        // answer 400, not 403: the caller is a member, the chat type is wrong).
         if (caller.chat.type !== TypeChatEnum.GRUPE) {
-            throw new ForbiddenException(
-                'this action is only available for group chats',
+            throw new BadRequestException(
+                'This action is only available in groups',
             );
         }
         if (caller.chat.isBan) {
@@ -111,10 +114,7 @@ export class ChatAccessService {
                 'you have been banned from this group',
             );
         }
-        if (
-            CHAT_ROLE_RANK[caller.roleName] <
-            CHAT_ROLE_RANK[minRole]
-        ) {
+        if (CHAT_ROLE_RANK[caller.roleName] < CHAT_ROLE_RANK[minRole]) {
             throw new ForbiddenException('insufficient role for this action');
         }
     }
@@ -150,9 +150,14 @@ export class ChatAccessService {
         }
         const targetRole = (target.role?.name ?? '') as RoleChatEnum;
         if (targetRole === RoleChatEnum.MANAGER) {
-            throw new ForbiddenException(`you cannot ${action} the group owner`);
+            throw new ForbiddenException(
+                `you cannot ${action} the group owner`,
+            );
         }
-        if (caller.isAdmin && CHAT_ROLE_RANK[targetRole] >= CHAT_ROLE_RANK[RoleChatEnum.ADMIN]) {
+        if (
+            caller.isAdmin &&
+            CHAT_ROLE_RANK[targetRole] >= CHAT_ROLE_RANK[RoleChatEnum.ADMIN]
+        ) {
             throw new ForbiddenException(
                 `admins cannot ${action} other admins`,
             );
@@ -192,9 +197,7 @@ export class ChatAccessService {
     /** Owner-only actions reject everyone else with a clear message. */
     assertOwner(caller: ChatCallerContext, action: string): void {
         if (!caller.isManager) {
-            throw new ForbiddenException(
-                `only the group owner can ${action}`,
-            );
+            throw new ForbiddenException(`only the group owner can ${action}`);
         }
     }
 }

@@ -103,8 +103,12 @@ describe('avatar thumbnail rules', () => {
         expect(generate).toHaveBeenCalledTimes(1);
         expect(results.filter((result) => result.generated)).toHaveLength(1);
         expect(new Set(results.map((result) => result.path)).size).toBe(1);
-        expect(await fs.promises.readFile(avatarThumbnailPath(64, FILE_NAME), 'utf8'))
-            .toBe('thumb');
+        expect(
+            await fs.promises.readFile(
+                avatarThumbnailPath(64, FILE_NAME),
+                'utf8',
+            ),
+        ).toBe('thumb');
     });
 
     it('removes every cached thumbnail of a deleted avatar', async () => {
@@ -122,7 +126,9 @@ describe('avatar thumbnail rules', () => {
             ).rejects.toBeTruthy();
         }
         // Never throws for hostile input either.
-        await expect(removeAvatarThumbnails('../../etc/passwd')).resolves.toBeUndefined();
+        await expect(
+            removeAvatarThumbnails('../../etc/passwd'),
+        ).resolves.toBeUndefined();
     });
 });
 

@@ -11,6 +11,7 @@ import {
     Modal,
     Platform,
     Pressable,
+    ScrollView,
     StyleSheet,
     Text,
     TextInput,
@@ -29,12 +30,14 @@ import {
     typography,
 } from '../../../shared/components';
 import { ApiError } from '../../../core/api';
+import type { ReactionUserDto } from '../../../core/api';
 import { useAndroidKeyboardInset } from '../../../shared/hooks/use-android-keyboard-inset';
 import {
     DateSeparator,
     ForwardPicker,
     MessageBubble,
     MessageComposer,
+    MessageReactionsSheet,
     ScrollToBottomButton,
     UnreadDivider,
     GroupChatSubtitle,
@@ -64,7 +67,9 @@ import {
     shareLocalFile,
 } from '../../../features/attachments';
 import {
+    getChatDisplay,
     isGroupOwner,
+    isPrivateChat,
     purgeChatFromCaches,
     setActiveChat,
     useAddMemberByPhone,
@@ -82,7 +87,12 @@ import {
     stopVoice,
     voiceCachePath,
 } from '../../../features/voice';
-import { openUserProfile } from '../../../features/users';
+import {
+    openUserProfile,
+    presenceLabel,
+    useUserProfile,
+} from '../../../features/users';
+import { normalizeEmoji, useReactionEmojis } from '../../../features/reactions';
 
 /**
  * Conversation screen (chat list → tap → this screen).
@@ -97,7 +107,7 @@ import { openUserProfile } from '../../../features/users';
  *   screen revision, now behind the header admin toggle.
  *
  * Unavailable server-side (not shown): member list for normal members, roles,
- * group rename, read receipts per user, reactions (broken server-side).
+ * group rename, read receipts per user, reactions (not implemented in the app).
  */
 
 type ChatDetailRouteParams = { chatId?: string | string[] };
@@ -144,6 +154,10 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     const conversation = useChatMessages(chatId, true, currentUserId);
     const [adminPanelOpen, setAdminPanelOpen] = useState(false);
     const [sheetTarget, setSheetTarget] = useState<ChatMessage | null>(null);
+    const [reactionsTarget, setReactionsTarget] = useState<ChatMessage | null>(
+        null,
+    );
+    const reactionEmojis = useReactionEmojis();
     const [actionTarget, setActionTarget] = useState<ChatMessage | null>(null);
     const [actionDraft, setActionDraft] = useState('');
     const [actionError, setActionError] = useState<string | null>(null);
@@ -165,9 +179,27 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     const detail = conversation.detail;
     const messages = detail?.messages ?? [];
     const info = detail?.info ?? null;
-    const isGroup = info?.type !== undefined && info.type !== 'private';
-    const typing = useTypingEmitter(chatId, isGroup);
-    const typingUsers = useTypingUsers(chatId, isGroup, currentUserId);
+    // Server `type` is the single source of truth; unknown/missing = group.
+    const isPrivate = info !== null && isPrivateChat(info);
+    const isGroup = !isPrivate;
+    const typing = useTypingEmitter(chatId, info !== null);
+    const typingUsers = useTypingUsers(chatId, info !== null, currentUserId);
+    /** Peer target for the header tap (private chats only). */
+    const peerUserId = isPrivate ? (info?.peer?.id ?? null) : null;
+    // Presence refresh without new socket events: the public profile is
+    // refetched every 30 s while this screen is focused and the app active,
+    // plus once on every return to the foreground.
+    const presenceQuery = useUserProfile(peerUserId, {
+        refetchInterval: screenFocused && appActive ? 30_000 : false,
+    });
+    const presenceRefetchRef = useRef(presenceQuery.refetch);
+    presenceRefetchRef.current = presenceQuery.refetch;
+    useEffect((): void => {
+        if (peerUserId === null || !screenFocused || !appActive) {
+            return;
+        }
+        presenceRefetchRef.current();
+    }, [peerUserId, screenFocused, appActive]);
     const rawMembersCount = info?.membersCount;
     const membersCount =
         rawMembersCount === null || rawMembersCount === undefined
@@ -654,28 +686,40 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     };
 
     /**
-     * Private chats have no server-side title; fall back to the peer's display
-     * name from history senders (no user directory for PV chats exists).
+     * Header identity comes from `peer` for private chats (name + current
+     * photo). An older backend that has no `peer` falls back to the last
+     * message from the other participant, never to an empty title.
      */
-    const peer = isGroup
-        ? null
-        : (messages.find(
-              (message) => !isOwnMessage(currentUserId, message.senderId),
-          ) ?? null);
+    const display = getChatDisplay(info);
+    const legacyPeer =
+        isPrivate && info?.peer == null
+            ? (messages.find(
+                  (message) => !isOwnMessage(currentUserId, message.senderId),
+              ) ?? null)
+            : null;
     const name =
-        info?.title !== undefined && info.title !== null
-            ? info.title
-            : (peer?.senderName ??
-              (isGroup ? 'Unnamed group' : 'Private chat'));
+        isPrivate && info?.peer == null
+            ? (legacyPeer?.senderName ?? 'Private chat')
+            : display.title;
     // Server-relative path (group photo or the peer's current photo) so the
     // header asks for a thumbnail rather than the original file.
     const avatarPath =
-        info?.avatars !== undefined && info.avatars.length > 0
-            ? (info.avatars[0] ?? null)
-            : (peer?.senderAvatarPath ?? peer?.senderAvatarUrls[0] ?? null);
-    const headerAvatarUserId = isGroup ? chatId : (peer?.senderId ?? chatId);
-    /** Private-chat peer is the only person a header tap may open. */
-    const peerUserId = isGroup ? null : (peer?.senderId ?? null);
+        display.avatarUri ??
+        legacyPeer?.senderAvatarPath ??
+        legacyPeer?.senderAvatarUrls[0] ??
+        null;
+    const headerAvatarUserId = display.userId ?? legacyPeer?.senderId ?? chatId;
+    const presenceProfile = presenceQuery.profile;
+    const peerPresence = !isPrivate
+        ? null
+        : presenceProfile !== null
+          ? presenceLabel(presenceProfile)
+          : info?.peer !== undefined && info?.peer !== null
+            ? presenceLabel({
+                  isOnline: info.peer.isOnline,
+                  lastSeen: info.peer.lastSeen,
+              })
+            : null;
 
     /**
      * Runs only after the backend confirms the leave: drop the list row and every
@@ -732,9 +776,13 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                         suffix={info.isBan ? ' · banned' : ''}
                     />
                 ) : (
-                    <AppText variant="caption">
-                        Private{info.isBan ? ' · banned' : ''}
-                    </AppText>
+                    <GroupChatSubtitle
+                        names={[]}
+                        membersCount={null}
+                        fallbackText={peerPresence ?? ''}
+                        typing={typingUsers.length > 0}
+                        typingLabel="typing"
+                    />
                 )}
             </View>
         </>
@@ -824,14 +872,16 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                     ) : (
                         headerIdentity
                     )}
-                    <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Open chat admin panel"
-                        style={styles.pillButton}
-                        onPress={(): void => setAdminPanelOpen(true)}
-                    >
-                        <Text style={styles.pillText}>Admin</Text>
-                    </Pressable>
+                    {isGroup && (
+                        <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel="Open chat admin panel"
+                            style={styles.pillButton}
+                            onPress={(): void => setAdminPanelOpen(true)}
+                        >
+                            <Text style={styles.pillText}>Admin</Text>
+                        </Pressable>
+                    )}
                 </View>
             )}
 
@@ -1037,6 +1087,25 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                                                       index: mediaIndex,
                                                   })
                                     }
+                                    onToggleReaction={
+                                        selecting
+                                            ? undefined
+                                            : (message, emoji): void => {
+                                                  if (message.id === null) {
+                                                      return;
+                                                  }
+                                                  void conversation.toggleReaction(
+                                                      message.id,
+                                                      emoji,
+                                                  );
+                                              }
+                                    }
+                                    onOpenReactions={
+                                        selecting
+                                            ? undefined
+                                            : (message): void =>
+                                                  setReactionsTarget(message)
+                                    }
                                 />
                             );
                         }}
@@ -1063,6 +1132,11 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
             {conversation.sendError !== null && (
                 <Text style={styles.sendError}>{conversation.sendError}</Text>
             )}
+            {conversation.reactionError !== null && (
+                <Text style={styles.sendError}>
+                    {conversation.reactionError}
+                </Text>
+            )}
 
             {jumpNotice !== null && (
                 <Text style={styles.jumpNotice}>{jumpNotice}</Text>
@@ -1082,6 +1156,25 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
             <MessageActionSheet
                 target={sheetTarget}
                 actions={sheetActions}
+                reactionEmojis={reactionEmojis}
+                myReaction={sheetTarget?.myReaction ?? null}
+                canReact={
+                    sheetTarget !== null &&
+                    sheetTarget.id !== null &&
+                    sheetTarget.status === 'sent' &&
+                    !sheetTarget.isDeleted
+                }
+                reacting={
+                    sheetTarget?.id !== null &&
+                    sheetTarget?.id !== undefined &&
+                    conversation.reactingIds.has(sheetTarget.id)
+                }
+                onReact={(emoji): void => {
+                    const target = sheetTarget;
+                    setSheetTarget(null);
+                    if (target === null || target.id === null) return;
+                    void conversation.toggleReaction(target.id, emoji);
+                }}
                 onForward={(): void => handleOpenForward(sheetTarget)}
                 onSelect={(): void => {
                     const target = sheetTarget;
@@ -1235,6 +1328,24 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                 onDismiss={(): void => setSheetTarget(null)}
             />
 
+            <MessageReactionsSheet
+                chatId={chatId}
+                target={reactionsTarget}
+                currentUserId={currentUserId}
+                onClose={(): void => setReactionsTarget(null)}
+                onOpenUser={(user: ReactionUserDto): void => {
+                    setReactionsTarget(null);
+                    openUserProfile({
+                        userId: user.userId,
+                        name: user.name,
+                        avatar: user.avatars[0] ?? null,
+                        isSelf:
+                            currentUserId !== null &&
+                            Number(user.userId) === Number(currentUserId),
+                    });
+                }}
+            />
+
             <MessageActionModal
                 visible={actionTarget !== null}
                 target={actionTarget}
@@ -1292,16 +1403,18 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                 onClose={(): void => setViewer(null)}
             />
 
-            <AdminPanel
-                visible={adminPanelOpen}
-                chatId={chatId}
-                isGroup={isGroup}
-                myRole={myRole}
-                isOwner={isOwner}
-                currentUserId={currentUserId}
-                onClose={(): void => setAdminPanelOpen(false)}
-                onLeft={handleLeftGroup}
-            />
+            {isGroup && (
+                <AdminPanel
+                    visible={adminPanelOpen}
+                    chatId={chatId}
+                    isGroup={isGroup}
+                    myRole={myRole}
+                    isOwner={isOwner}
+                    currentUserId={currentUserId}
+                    onClose={(): void => setAdminPanelOpen(false)}
+                    onLeft={handleLeftGroup}
+                />
+            )}
         </Screen>
     );
 
@@ -1322,6 +1435,11 @@ type List = ListChunk;
 interface MessageActionSheetProps {
     target: ChatMessage | null;
     actions: MessageActions;
+    reactionEmojis: string[];
+    myReaction: string | null;
+    canReact: boolean;
+    reacting: boolean;
+    onReact: (emoji: string) => void;
     onReply: () => void;
     onEdit: () => void;
     onDelete: () => void;
@@ -1346,6 +1464,57 @@ function MessageActionSheet(
         >
             <Pressable style={styles.sheetBackdrop} onPress={props.onDismiss}>
                 <Pressable style={styles.sheetCard}>
+                    {props.canReact && (
+                        <View style={styles.quickReactions}>
+                            <ScrollView
+                                horizontal={true}
+                                showsHorizontalScrollIndicator={false}
+                                contentContainerStyle={
+                                    styles.quickReactionsContent
+                                }
+                            >
+                                {props.reactionEmojis.map((emoji) => {
+                                    const selected =
+                                        props.myReaction !== null &&
+                                        normalizeEmoji(props.myReaction) ===
+                                            normalizeEmoji(emoji);
+                                    return (
+                                        <Pressable
+                                            key={emoji}
+                                            accessibilityRole="button"
+                                            accessibilityLabel={`React ${emoji}`}
+                                            accessibilityState={{ selected }}
+                                            disabled={props.reacting}
+                                            onPress={(): void =>
+                                                props.onReact(emoji)
+                                            }
+                                            style={({ pressed }) => [
+                                                styles.quickReaction,
+                                                selected &&
+                                                    styles.quickReactionSelected,
+                                                (pressed || props.reacting) &&
+                                                    styles.pressed,
+                                            ]}
+                                        >
+                                            <Text
+                                                style={
+                                                    styles.quickReactionEmoji
+                                                }
+                                            >
+                                                {emoji}
+                                            </Text>
+                                        </Pressable>
+                                    );
+                                })}
+                                {props.reacting && (
+                                    <ActivityIndicator
+                                        size="small"
+                                        color={palette.primary[500]}
+                                    />
+                                )}
+                            </ScrollView>
+                        </View>
+                    )}
                     {props.actions.reply && (
                         <Pressable
                             accessibilityRole="button"
@@ -2059,6 +2228,31 @@ const styles = StyleSheet.create({
         borderRadius: radii.md,
         overflow: 'hidden',
     },
+    quickReactions: {
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: palette.neutral[100],
+        paddingVertical: spacing.xs,
+    },
+    quickReactionsContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.xs,
+        paddingHorizontal: spacing.sm,
+    },
+    quickReaction: {
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: palette.neutral[50],
+    },
+    quickReactionSelected: {
+        backgroundColor: palette.primary[100],
+        borderWidth: 1,
+        borderColor: palette.primary[500],
+    },
+    quickReactionEmoji: { fontSize: 22 },
     sheetButton: { padding: spacing.md },
     sheetActionText: {
         color: palette.primary[600],

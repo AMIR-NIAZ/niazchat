@@ -23,6 +23,7 @@ import {
     ChatContextMenu,
     chatPreviewText,
     filterChats,
+    getChatDisplay,
     invalidateChats,
     sortPinnedFirst,
     useChats,
@@ -67,6 +68,16 @@ export default function ChatsScreen(): React.ReactElement {
         <Screen style={styles.screen} withTopInset={true}>
             <View style={styles.header}>
                 <AppText variant="title">Chats</AppText>
+                <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="New chat"
+                    onPress={(): void => {
+                        router.push('/(app)/new-chat');
+                    }}
+                    style={styles.buttonGhost}
+                >
+                    <Text style={styles.buttonGhostText}>New chat</Text>
+                </Pressable>
                 <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Open profile"
@@ -117,7 +128,7 @@ export default function ChatsScreen(): React.ReactElement {
                     title={search === '' ? 'No chats yet' : 'No matching chats'}
                     detail={
                         search === ''
-                            ? 'Create a group or start a private chat from messaging (coming next).'
+                            ? 'Start a private chat with "New chat" or create a group with "+ Group".'
                             : 'Try a different search term.'
                     }
                     retry={
@@ -188,10 +199,9 @@ function ChatRowItem(props: ChatRowItemProps): React.ReactElement {
     const { chat, pinned, selected } = props;
     // Releasing a hold that opened the menu must not also navigate.
     const pressStartedAtRef = useRef(0);
-    const name =
-        chat.title ??
-        (chat.type === 'private' ? 'Private chat' : 'Unnamed group');
-    const avatar = chat.avatarUrls.length > 0 ? chat.avatarUrls[0] : undefined;
+    const display = getChatDisplay(chat);
+    const name = display.title;
+    const avatar = display.avatarUri;
     const previewText = chatPreviewText(chat.lastMessage);
     const time = chat.lastMessage?.createdAt ?? chat.updatedAt;
     const unread = chat.unreadCount;
@@ -220,7 +230,7 @@ function ChatRowItem(props: ChatRowItemProps): React.ReactElement {
             }}
         >
             <UserAvatar
-                userId={Number(chat.id)}
+                userId={display.userId ?? Number(chat.id)}
                 name={name}
                 uri={avatar}
                 size={44}

@@ -26,6 +26,7 @@ export default function ProtectedLayout(): React.ReactElement {
       <Stack.Screen name="index" />
       <Stack.Screen name="chat/[chatId]" />
       <Stack.Screen name="create-group" />
+      <Stack.Screen name="new-chat" />
       <Stack.Screen name="profile" />
       <Stack.Screen name="profile-edit" />
       <Stack.Screen name="user/[userId]" />

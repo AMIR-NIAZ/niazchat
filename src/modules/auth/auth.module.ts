@@ -21,6 +21,7 @@ import { Permission } from './entities/permission.entity';
 import { PermissionService } from './services/permission.service';
 import { AvatarUploadInterceptor } from './interceptors/avatar-upload.interceptor';
 import { AvatarLimitGuard } from './guards/avatar-limit.guard';
+import { RateLimitService } from 'src/common/services/rate-limit.service';
 
 @Module({
     imports: [
@@ -47,6 +48,7 @@ import { AvatarLimitGuard } from './guards/avatar-limit.guard';
         CacheService,
         JwtAppService,
         JwtService,
+        RateLimitService,
         UserGateway,
         // Resolved from this module when used in `@UseInterceptors`/`@UseGuards`.
         AvatarUploadInterceptor,

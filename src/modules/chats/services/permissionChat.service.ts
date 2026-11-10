@@ -185,7 +185,9 @@ export class PermissionChatService {
 
         // Keep everything NOT in the delete list.
         const newPermissions = permissionAdmin
-            .filter((per) => !permissions.includes(per.permission.name as never))
+            .filter(
+                (per) => !permissions.includes(per.permission.name as never),
+            )
             .map((perData) => perData.permission.name);
         await this.setPermissions(member.id, newPermissions);
         this.notifyAdminsChanged(member.chat.id);
@@ -214,10 +216,7 @@ export class PermissionChatService {
         };
     }
 
-    private async setPermissions(
-        adminId: number,
-        permissions?: string[],
-    ) {
+    private async setPermissions(adminId: number, permissions?: string[]) {
         await this.permissionAdminRepository.delete({
             member: { id: adminId },
         });

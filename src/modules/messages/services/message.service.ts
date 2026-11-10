@@ -11,7 +11,6 @@ import { ChatMember } from 'src/modules/chats/entities/chat_members.entity';
 import { EditMessageDto } from '../dtos/EditMessage.dto';
 import { JwtPayload } from 'src/common/types/jwt-payload.type';
 import { deleteMessageDto } from '../dtos/deleteMessage.dto';
-import { Chat } from 'src/modules/chats/entities/chat.entity';
 import { TypeChatEnum } from 'src/common/enums/typeChat.enum';
 import { User } from 'src/modules/auth/entities/user.entity';
 import { WsException } from '@nestjs/websockets';
@@ -27,6 +26,8 @@ import { ContentResolverService } from './content-resolver.service';
 import { AttachmentService } from 'src/modules/attachments/services/attachment.service';
 import { Attachment } from 'src/modules/attachments/entities/attachment.entity';
 import { ChatAccessService } from 'src/modules/chats/services/chat-access.service';
+import { PrivateChatService } from 'src/modules/chats/services/private-chat.service';
+import { ReactionsService } from 'src/modules/reactions/services/reactions.service';
 
 @Injectable()
 export class MessageService {
@@ -35,8 +36,6 @@ export class MessageService {
         private readonly messageRepository: Repository<Message>,
         @InjectRepository(ChatMember)
         private readonly memberRepository: Repository<ChatMember>,
-        @InjectRepository(Chat)
-        private readonly chatRepository: Repository<Chat>,
         @InjectRepository(User)
         private readonly userRepository: Repository<User>,
         @InjectRepository(TypeMessage)
@@ -46,6 +45,8 @@ export class MessageService {
         private readonly contentResolver: ContentResolverService,
         private readonly attachmentService: AttachmentService,
         private readonly access: ChatAccessService,
+        private readonly privateChats: PrivateChatService,
+        private readonly reactions: ReactionsService,
     ) {}
 
     async create(user: JwtPayload, dto: CreateMessageDto): Promise<Message> {
@@ -137,39 +138,12 @@ export class MessageService {
 
         if (!hasUserReceiver) throw new NotFoundException('receiver not Found');
 
-        const chats = await this.chatRepository.find({
-            where: {
-                type: TypeChatEnum.PRIVATE,
-                members: {
-                    user: { id: user.sub },
-                },
-            },
-            relations: ['members', 'members.user'],
-        });
-        const existingChat = chats.find((chat) =>
-            chat.members.some((m) => m.user.id === userId),
+        // Same pair-key path as `POST /chats/private`: one chat per unordered
+        // pair, both members on the normal `user` role, race-safe.
+        const { chatId: finalChatId } = await this.privateChats.ensureChat(
+            Number(user.sub),
+            Number(userId),
         );
-
-        let finalChatId: ChatId;
-        if (existingChat) {
-            finalChatId = existingChat.id;
-        } else {
-            const newPrivateChat = await this.chatRepository.save({
-                type: TypeChatEnum.PRIVATE,
-            });
-            await this.memberRepository.save([
-                {
-                    chat: { id: newPrivateChat.id },
-                    user: { id: user.sub },
-                },
-                {
-                    chat: { id: newPrivateChat.id },
-                    user: { id: userId },
-                },
-            ]);
-
-            finalChatId = newPrivateChat.id;
-        }
 
         const typeData = await this.typeMessageRepository.findOneOrFail({
             where: { name: type },
@@ -551,6 +525,8 @@ export class MessageService {
         }
 
         await this.messageRepository.update(messageId, { isDeleted: true });
+        // Soft delete keeps the row, so its reactions would otherwise linger.
+        await this.reactions.clearForMessage(Number(messageId));
     }
 
     /**

@@ -47,7 +47,6 @@ describe('ChatService membersCount', () => {
             {} as never,
             {} as never,
             {} as never,
-            {} as never,
             access as never,
             {} as never,
         );

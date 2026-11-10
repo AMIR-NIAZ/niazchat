@@ -22,8 +22,9 @@ export class wsIsMemberChat implements CanActivate {
         const user = client.data.user;
 
         const eventId = Ws.getPattern?.() ?? 'unknown event';
-        const chatId = (data as { chatId?: unknown; fromChatId?: unknown } | null)
-            ?.chatId ??
+        const chatId =
+            (data as { chatId?: unknown; fromChatId?: unknown } | null)
+                ?.chatId ??
             (data as { fromChatId?: unknown } | null)?.fromChatId;
         const normalizedChatId =
             typeof chatId === 'number' ? (chatId as ChatId) : undefined;

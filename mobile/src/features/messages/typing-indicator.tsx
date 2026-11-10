@@ -134,8 +134,17 @@ export function GroupChatSubtitle(props: {
     names: string[];
     membersCount: number | null;
     suffix?: string;
+    /** Private chats: show the animated dots without naming the person. */
+    typing?: boolean;
+    /** Private chats: label shown while typing instead of "X is typing". */
+    typingLabel?: string;
+    /** Private chats: base line when there is no member count (presence). */
+    fallbackText?: string;
 }): React.ReactElement {
-    const typingText = formatTypingText(props.names);
+    const typingActive = props.typing === true || props.names.length > 0;
+    const typingText = typingActive
+        ? (props.typingLabel ?? formatTypingText(props.names) ?? null)
+        : null;
     const memberText =
         props.membersCount === null
             ? ''
@@ -143,7 +152,9 @@ export function GroupChatSubtitle(props: {
                   props.membersCount === 1 ? '' : 's'
               }`;
     const countText =
-        memberText === '' ? '' : `${memberText}${props.suffix ?? ''}`;
+        props.membersCount === null
+            ? (props.fallbackText ?? '')
+            : `${memberText}${props.suffix ?? ''}`;
 
     const [showTyping, setShowTyping] = useState(typingText !== null);
     const shownAtRef = useRef(Date.now());

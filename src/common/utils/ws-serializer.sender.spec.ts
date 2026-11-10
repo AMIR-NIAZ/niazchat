@@ -31,10 +31,7 @@ const fullUser = {
         name: 'Ada',
         username: 'ada_dev',
         biografy: 'private notes',
-        avatars: [
-            'uploads/avatars/new.png',
-            'uploads/avatars/old.png',
-        ],
+        avatars: ['uploads/avatars/new.png', 'uploads/avatars/old.png'],
     },
 };
 

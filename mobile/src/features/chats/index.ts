@@ -18,3 +18,6 @@ export * from './chat-context-menu';
 export * from './use-chats';
 export * from './use-groups';
 export * from './groups-service';
+export * from './private-chat-service';
+export * from './open-private-chat';
+export * from './chat-search-model';

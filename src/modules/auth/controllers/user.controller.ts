@@ -9,6 +9,7 @@ import {
     ParseIntPipe,
     Post,
     Put,
+    Query,
     Req,
     UploadedFile,
     UseGuards,
@@ -112,6 +113,20 @@ export class UserController {
     @Role([RoleEnum.ALL])
     async getUserById(@Param('userName') userName: string) {
         return await this.userService.getUserByUsername(userName);
+    }
+
+    /**
+     * Username prefix search for "new chat". Declared BEFORE `:userId/profile`
+     * so the literal segment can never be read as a user id.
+     */
+    @Get('search')
+    @Role([RoleEnum.ALL])
+    async searchUsers(
+        @Req() req: RequestAuth,
+        @Query('q') q?: string,
+        @Query('limit') limit?: string,
+    ) {
+        return await this.userService.searchUsers(req.user.sub, q, limit);
     }
 
     /**

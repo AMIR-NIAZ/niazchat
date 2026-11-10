@@ -66,7 +66,7 @@ Sourced from `../docs/mobile-api/`:
 ## Phase-1 limitations (backend, pending server work)
 
 - Presence (`isOnline`/`lastSeen`) is broken server-side.
-- Reactions are broken; reacts are not seeded.
+- Reactions exist server-side (`reactMessage` / `reaction:updated`) but are not implemented in the app yet.
 - No message pagination (fixed last 50), no chat member list, no leave/remove member, no group rename.
 - `POST /chats/create` returns no chat id; invite-link creation likely fails (32 vs 20 char code).
 

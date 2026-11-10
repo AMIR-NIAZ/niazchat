@@ -125,6 +125,7 @@ describe('UserService avatars', () => {
             userRepository as never,
             profileRepository as never,
             store as never,
+            { consume: jest.fn() } as never,
         );
     });
 

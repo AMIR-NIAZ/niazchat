@@ -80,6 +80,9 @@ function message(over: Partial<ChatMessage> = {}): ChatMessage {
         senderAvatarPath: null,
         attachments: [],
         attachmentsCount: 0,
+        reactions: [],
+        myReaction: null,
+        myReactionProvided: false,
         clientMessageId: null,
         forwardedFrom: null,
         replyTo: null,
@@ -270,24 +273,18 @@ test('cache eviction deletes oldest first and honors both caps', () => {
 });
 
 test('open strategy uses Android VIEW except for blocklisted files', () => {
-    assertEqual(
-        selectOpenStrategy('android', 'report.pdf'),
-        {
-            strategy: 'android-view',
-            reason: 'android',
-        },
-    );
+    assertEqual(selectOpenStrategy('android', 'report.pdf'), {
+        strategy: 'android-view',
+        reason: 'android',
+    });
     assertEqual(selectOpenStrategy('ios', 'report.pdf'), {
         strategy: 'share',
         reason: 'ios',
     });
-    assertEqual(
-        selectOpenStrategy('android', 'setup.apk'),
-        {
-            strategy: 'share',
-            reason: 'blocked',
-        },
-    );
+    assertEqual(selectOpenStrategy('android', 'setup.apk'), {
+        strategy: 'share',
+        reason: 'blocked',
+    });
 });
 
 test('no-app error is explicit and UTI is available for iOS sharing', () => {

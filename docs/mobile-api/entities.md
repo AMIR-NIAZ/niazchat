@@ -94,7 +94,7 @@ API output: upload response = narrow `{id, originalName, mimeType, size, chatId,
 React:        { id, name: string (unique), emoji: string (unique) }
 MessageReact: { id, userId, messageId, reactId, react: React (eager) }
 ```
-`GET /react` returns `React[]` (raw rows); `reaction:added`/`reaction:removed` WS payloads return the raw `MessageReact` entity (with eager `react`).
+`GET /react` returns `React[]` (raw rows; the active reaction-type allowlist). `reactMessage` acks and broadcasts an aggregated snapshot `{ chatId, messageId, reactions: [{ reactId, emoji, count }], myReaction, actor }`, never the raw `MessageReact` rows or reactor ids. `getMessageReactions` returns grouped users (`userId`, `name`, `username`, `avatars`) capped at 100. Message payloads carry count-only `reactions`; history also carries the caller's `myReaction`.
 
 ## Relations map
 

@@ -55,6 +55,12 @@ export interface ReplyPreview {
     isDeleted: boolean;
 }
 
+/** One count-only reaction chip. */
+export interface MessageReaction {
+    emoji: string;
+    count: number;
+}
+
 export interface ChatMessage {
     /**
      * Stable FlatList key: the server message id when known, a virtual
@@ -83,6 +89,12 @@ export interface ChatMessage {
     clientMessageId: string | null;
     /** First forward origin; null for ordinary messages. */
     forwardedFrom: { userId: number | null; name: string } | null;
+    /** Count-only reactions, ordered by count then catalog order. */
+    reactions: MessageReaction[];
+    /** The caller's own emoji on this message, if any. */
+    myReaction: string | null;
+    /** False for broadcast/echo payloads that omitted `myReaction`. */
+    myReactionProvided: boolean;
     /** Quoted preview when this message replies to another, else null. */
     replyTo: ReplyPreview | null;
     /** Wire id of the replied-to message, kept even if the preview is null. */

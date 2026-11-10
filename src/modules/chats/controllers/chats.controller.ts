@@ -14,6 +14,8 @@ import { RequestAuth } from 'src/common/types/RequestAuth.type';
 import { InviteLinkService } from '../services/inviteLink.service';
 import { ChatId } from 'src/common/types/brands.type';
 import { GroupRealtimeService } from '../services/group-realtime.service';
+import { PrivateChatService } from '../services/private-chat.service';
+import { CreatePrivateChatDto } from '../dtos/createPrivateChat.dto';
 
 @Controller('chats')
 export class ChatsController {
@@ -21,12 +23,27 @@ export class ChatsController {
         private readonly chatService: ChatService,
         private readonly linkService: InviteLinkService,
         private readonly groupRealtime: GroupRealtimeService,
+        private readonly privateChatService: PrivateChatService,
     ) {}
 
     @Post('create')
     @Role([RoleEnum.ALL])
     async createGroup(@Body() dto: createChatDto, @Req() req: RequestAuth) {
         return await this.chatService.createGroup(dto, req.user);
+    }
+
+    /**
+     * Find or create the ONE private chat of the caller and `userId`.
+     * Idempotent and symmetric; a newly created empty chat stays hidden from
+     * both chat lists until its first message.
+     */
+    @Post('private')
+    @Role([RoleEnum.ALL])
+    async createPrivateChat(
+        @Body() dto: CreatePrivateChatDto,
+        @Req() req: RequestAuth,
+    ) {
+        return await this.privateChatService.create(req.user, dto.userId);
     }
 
     @Post('/:chatId/ban')

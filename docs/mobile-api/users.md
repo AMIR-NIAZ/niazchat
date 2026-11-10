@@ -56,6 +56,23 @@ Small circles (chat list, message bubbles, headers, profile tiles) must use this
 - 404 `{ message: 'user not found' }` if unknown username.
 - Note: `role` is absent here (not selected).
 
+### `GET /user/search?q=<text>&limit=<n>` — username prefix search
+
+- Authenticated. Route is declared BEFORE `:userId/profile`, so `search` can
+  never be read as an id.
+- `q` is trimmed, ONE leading `@` is stripped, and lowercased; minimum 2
+  characters after that (`400 search query must be at least 2 characters`).
+- Prefix match on `profile.username`, case-insensitive (`ILIKE`), with `%`, `_`
+  and `\` in the pattern escaped to literals. Active users only, never the
+  caller, ordered by lowercase username.
+- `limit` defaults to 20 and is capped at 20.
+- Rate limit: 30 requests per minute per caller (`429 Too many searches, try again later`).
+- Response (wrapped), whitelist only — **no phone, no status, no presence**:
+
+```json
+{ "data": [ { "id": 7, "name": "Sara", "username": "sara_1990", "avatars": ["uploads/avatars/current.png"] } ] }
+```
+
 ### `GET /user/:userId/profile` — public profile of any user
 
 - Auth: authenticated users only (global guard → `401` without a token). **No** shared-chat or role requirement: any user may view any other user.

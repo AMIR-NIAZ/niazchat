@@ -64,7 +64,13 @@ export function avatarThumbnailPath(
     size: AvatarThumbnailSize,
     fileName: string,
 ): string {
-    return join(process.cwd(), 'uploads', 'thumbs', String(size), `${fileName}.webp`);
+    return join(
+        process.cwd(),
+        'uploads',
+        'thumbs',
+        String(size),
+        `${fileName}.webp`,
+    );
 }
 
 /**

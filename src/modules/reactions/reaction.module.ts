@@ -11,6 +11,7 @@ import { JwtAppService } from '../auth/services/jwt.service';
 import { JwtService } from '@nestjs/jwt';
 import { ChatMember } from '../chats/entities/chat_members.entity';
 import { RoleChat } from '../chats/entities/role_chat.entity';
+import { RateLimitService } from 'src/common/services/rate-limit.service';
 
 @Module({
     imports: [
@@ -23,7 +24,14 @@ import { RoleChat } from '../chats/entities/role_chat.entity';
             RoleChat,
         ]),
     ],
-    providers: [ReactionsGateway, ReactionsService, JwtAppService, JwtService],
+    providers: [
+        ReactionsGateway,
+        ReactionsService,
+        RateLimitService,
+        JwtAppService,
+        JwtService,
+    ],
     controllers: [ReactionController],
+    exports: [ReactionsService],
 })
 export class ReactionsModule {}

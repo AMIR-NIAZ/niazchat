@@ -27,6 +27,15 @@ import {
     storedAvatarPath,
 } from '../utils/avatar.util';
 import { removeAvatarThumbnails } from 'src/modules/media/avatar-thumbnail.util';
+import { RateLimitService } from 'src/common/services/rate-limit.service';
+import {
+    USER_SEARCH_RATE_LIMIT,
+    USER_SEARCH_RATE_WINDOW_SECONDS,
+    escapeLikePattern,
+    normalizeSearchLimit,
+    normalizeUserSearch,
+    userSearchRateKey,
+} from '../utils/user-search.util';
 
 /** Row shape of the locked profile inside an avatar transaction. */
 interface LockedProfileRow {
@@ -44,6 +53,7 @@ export class UserService {
         @InjectRepository(UserProfile)
         private readonly profileRepository: Repository<UserProfile>,
         private readonly dataSource: DataSource,
+        private readonly rateLimit: RateLimitService,
     ) {}
 
     async onlineUser(user: JwtPayload) {
@@ -76,6 +86,48 @@ export class UserService {
         }
 
         return toPublicUserProfile(user);
+    }
+
+    /**
+     * `GET /user/search`: prefix search over usernames, active users only,
+     * never the caller. Returns a whitelist projection (no phone, no status).
+     * ILIKE wildcards in the query are escaped, so `%`/`_` match literally.
+     */
+    async searchUsers(callerId: number, rawQuery: unknown, rawLimit: unknown) {
+        const query = normalizeUserSearch(rawQuery);
+        const limit = normalizeSearchLimit(rawLimit);
+
+        await this.rateLimit.consume(
+            userSearchRateKey(callerId),
+            USER_SEARCH_RATE_LIMIT,
+            USER_SEARCH_RATE_WINDOW_SECONDS,
+            'Too many searches, try again later',
+        );
+
+        const pattern = `${escapeLikePattern(query)}%`;
+        const rows = await this.profileRepository
+            .createQueryBuilder('profile')
+            .innerJoinAndSelect('profile.user', 'user')
+            .where('user.status = :status', { status: UserStatusEnum.ACTIVE })
+            .andWhere('user.id != :callerId', { callerId })
+            .andWhere('profile.username IS NOT NULL')
+            .andWhere("profile.username ILIKE :pattern ESCAPE '\\'", {
+                pattern,
+            })
+            .orderBy('LOWER(profile.username)', 'ASC')
+            .take(limit)
+            .getMany();
+
+        return {
+            data: rows.map((profile) => ({
+                id: Number(profile.user.id),
+                name: profile.name ?? 'بدون نام',
+                username: profile.username ?? '',
+                // Current photo only (backend convention: `avatars[0]`).
+                avatars:
+                    profile.avatars?.length > 0 ? [profile.avatars[0]] : [],
+            })),
+        };
     }
 
     async getUserByUsername(username: string) {

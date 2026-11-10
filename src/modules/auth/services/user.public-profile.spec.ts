@@ -41,6 +41,7 @@ function makeService(findOne: jest.Mock): UserService {
         userRepository as never,
         profileRepository as never,
         dataSource as never,
+        { consume: jest.fn() } as never,
     );
 }
 

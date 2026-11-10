@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { onSocketReconnect, useSocket } from '../../core/socket';
 import { registerSessionCleanup } from '../../core/session/cleanup-registry';
-import type { ChatDto, MessageDto } from '../../core/api';
+import type { ChatDto, MessageDto, ReactionSnapshotDto } from '../../core/api';
 import {
     joinChat,
     fetchChatMessages,
@@ -24,6 +24,7 @@ import type {
     ReplyPreview,
 } from './messages-model';
 import { toNumericId } from './messages-model';
+import { applyMyReaction, applyReactionUpdate } from './reaction-helpers';
 import {
     mapWithConcurrency,
     uploadAttachment,
@@ -40,6 +41,7 @@ import {
     deliverMessage,
     editChatMessage,
     deleteChatMessage,
+    reactToMessage,
 } from './messages-socket-api';
 
 /**
@@ -125,6 +127,10 @@ export interface ChatMessagesApi {
     cancelSend: (key: string) => void;
     edit: (messageId: number, newContent: string) => Promise<void>;
     remove: (messageId: number) => Promise<void>;
+    /** One-reaction-per-user toggle with optimistic update and rollback. */
+    toggleReaction: (messageId: number, emoji: string) => Promise<void>;
+    reactionError: string | null;
+    reactingIds: ReadonlySet<number>;
     mutating: boolean;
 }
 
@@ -203,7 +209,15 @@ export function useChatMessages(
     const [mutating, setMutating] = useState(false);
     const [loadingOlder, setLoadingOlder] = useState(false);
     const [loadOlderError, setLoadOlderError] = useState<string | null>(null);
+    const [reactionError, setReactionError] = useState<string | null>(null);
+    const [reactingIds, setReactingIds] = useState<ReadonlySet<number>>(
+        new Set(),
+    );
     const loadingOlderRef = useRef(false);
+    const reactionInFlightRef = useRef<Set<number>>(new Set());
+    const reactionErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+        null,
+    );
     const pendingSends = useMemo(() => pendingSendsFor(chatId), [chatId]);
     const olderRequestId = useRef(0);
     const olderPagePromise = useRef<Promise<OlderPageOutcome> | null>(null);
@@ -286,6 +300,19 @@ export function useChatMessages(
                 applyOriginalEdited(replaceMessage(current, edited), edited),
             );
         };
+        const onReactionUpdated = (event: ReactionSnapshotDto): void => {
+            if (
+                event === null ||
+                typeof event !== 'object' ||
+                Number(event.chatId) !== chatId ||
+                !Array.isArray(event.reactions)
+            ) {
+                return;
+            }
+            applyToCache((current) =>
+                applyReactionUpdate(current, event, currentUserId),
+            );
+        };
         const onDeletedMessage = (messageId: number): void => {
             // The message leaves the cache; replies quoting it switch to the
             // content-less "Message deleted" preview without a refetch.
@@ -354,6 +381,7 @@ export function useChatMessages(
         socket.on('sendMessage:list', onNewMessage);
         socket.on('editMessage:list', onEditedMessage);
         socket.on('deleteMessage:list', onDeletedMessage);
+        socket.on('reaction:updated', onReactionUpdated);
         socket.on('seen', onSeen);
         socket.on('chat:members', onMembersCount);
 
@@ -361,6 +389,7 @@ export function useChatMessages(
             socket.off('sendMessage:list', onNewMessage);
             socket.off('editMessage:list', onEditedMessage);
             socket.off('deleteMessage:list', onDeletedMessage);
+            socket.off('reaction:updated', onReactionUpdated);
             socket.off('seen', onSeen);
             socket.off('chat:members', onMembersCount);
         };
@@ -418,6 +447,10 @@ export function useChatMessages(
     // bubble, and a failed send stays retryable when the chat is reopened.
     useEffect((): (() => void) => {
         return (): void => {
+            if (reactionErrorTimerRef.current !== null) {
+                clearTimeout(reactionErrorTimerRef.current);
+                reactionErrorTimerRef.current = null;
+            }
             olderRequestId.current += 1;
             loadingOlderRef.current = false;
             olderPagePromise.current = null;
@@ -943,6 +976,78 @@ export function useChatMessages(
         [chatId, applyToCache],
     );
 
+    const toggleReaction = useCallback(
+        async (messageId: number, emoji: string): Promise<void> => {
+            if (reactionInFlightRef.current.has(messageId)) {
+                return;
+            }
+            const detailNow = queryClient.getQueryData<ConversationDetail>(
+                messagesQueryKey(chatId),
+            );
+            const target = detailNow?.messages.find(
+                (message) => message.id === messageId,
+            );
+            if (
+                target === undefined ||
+                target.id === null ||
+                target.isDeleted ||
+                target.status !== 'sent'
+            ) {
+                return;
+            }
+            const rollback = {
+                reactions: target.reactions.map((reaction) => ({
+                    ...reaction,
+                })),
+                myReaction: target.myReaction,
+                myReactionProvided: target.myReactionProvided,
+            };
+
+            reactionInFlightRef.current.add(messageId);
+            setReactingIds((current) => new Set(current).add(messageId));
+            setReactionError(null);
+            applyToCache((current) =>
+                applyMyReaction(current, messageId, emoji),
+            );
+
+            try {
+                const snapshot = await reactToMessage(chatId, messageId, emoji);
+                if (snapshot !== null) {
+                    applyToCache((current) =>
+                        applyReactionUpdate(current, snapshot, currentUserId),
+                    );
+                }
+            } catch (error: unknown) {
+                applyToCache((current) =>
+                    current.map((message) =>
+                        message.id === messageId
+                            ? { ...message, ...rollback }
+                            : message,
+                    ),
+                );
+                setReactionError(
+                    error instanceof Error
+                        ? error.message
+                        : 'Could not update the reaction.',
+                );
+                if (reactionErrorTimerRef.current !== null) {
+                    clearTimeout(reactionErrorTimerRef.current);
+                }
+                reactionErrorTimerRef.current = setTimeout((): void => {
+                    setReactionError(null);
+                }, 3000);
+            } finally {
+                reactionInFlightRef.current.delete(messageId);
+                setReactingIds((current) => {
+                    const next = new Set(current);
+                    next.delete(messageId);
+                    return next;
+                });
+            }
+        },
+        [chatId, currentUserId, applyToCache, queryClient],
+    );
+
     const remove = useCallback(
         async (messageId: number): Promise<void> => {
             setMutating(true);
@@ -998,6 +1103,9 @@ export function useChatMessages(
             cancelSend,
             edit,
             remove,
+            toggleReaction,
+            reactionError,
+            reactingIds,
             mutating,
         }),
         [
@@ -1015,6 +1123,9 @@ export function useChatMessages(
             cancelSend,
             edit,
             remove,
+            toggleReaction,
+            reactionError,
+            reactingIds,
             mutating,
         ],
     );
