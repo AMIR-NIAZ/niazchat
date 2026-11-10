@@ -26,7 +26,14 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      "expo-image"
+      "expo-image",
+      "expo-sharing",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow niazchat to record voice messages"
+        }
+      ]
     ]
   }
 }

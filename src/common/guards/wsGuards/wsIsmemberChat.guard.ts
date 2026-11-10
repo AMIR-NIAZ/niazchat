@@ -22,11 +22,16 @@ export class wsIsMemberChat implements CanActivate {
         const user = client.data.user;
 
         const eventId = Ws.getPattern?.() ?? 'unknown event';
-        const chatId = (data as { chatId?: unknown } | null)?.chatId as
-            | ChatId
-            | undefined;
+        const chatId = (data as { chatId?: unknown; fromChatId?: unknown } | null)
+            ?.chatId ??
+            (data as { fromChatId?: unknown } | null)?.fromChatId;
+        const normalizedChatId =
+            typeof chatId === 'number' ? (chatId as ChatId) : undefined;
 
-        if (typeof chatId !== 'number' || !Number.isFinite(chatId)) {
+        if (
+            typeof normalizedChatId !== 'number' ||
+            !Number.isFinite(normalizedChatId)
+        ) {
             throw new WsException(
                 `Invalid chat ID: "${eventId}" takes a payload object { chatId: number }`,
             );
@@ -34,7 +39,7 @@ export class wsIsMemberChat implements CanActivate {
 
         const member = await this.memberRepository.findOne({
             where: {
-                chat: { id: chatId },
+                chat: { id: normalizedChatId },
                 user: { id: user.sub },
             },
             relations: { role: true },

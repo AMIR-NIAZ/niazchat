@@ -24,7 +24,10 @@ export class wsIsBanMember implements CanActivate {
         const data: WebSocketData = Ws.getData();
         const userPayload = client.data.user;
 
-        const chatId = data?.chatId as ChatId;
+        // Forwarding carries `fromChatId`; the source guard checks that chat,
+        // then the service authorizes every target individually.
+        const chatId = (data?.chatId ??
+            (data as { fromChatId?: unknown } | null)?.fromChatId) as ChatId;
         if (typeof chatId !== 'number' || !Number.isFinite(chatId)) {
             throw new WsException(
                 'chat id not valid: payload must be { chatId: number }',

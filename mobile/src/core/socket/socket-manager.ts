@@ -12,6 +12,8 @@ import { createAppSocket, AppSocket } from './socket';
  * staying attached to a dead one.
  */
 let socket: AppSocket | null = null;
+/** Access token captured by the CURRENT handshake (headers are fixed there). */
+let socketAccessToken: string | null = null;
 
 type SocketListener = (socket: AppSocket | null) => void;
 const socketListeners = new Set<SocketListener>();
@@ -29,9 +31,11 @@ function setSocket(next: AppSocket | null): void {
 export function reconnectSocket(newAccessToken: string): AppSocket {
     if (socket === null) {
         const created = createAppSocket(newAccessToken);
+        socketAccessToken = newAccessToken;
         setSocket(created);
         return created;
     }
+    socketAccessToken = newAccessToken;
     const ioOptions = socket.io as unknown as {
         opts: { extraHeaders?: Record<string, string> };
     };
@@ -49,6 +53,7 @@ export function reconnectSocket(newAccessToken: string): AppSocket {
 export function connectSocket(accessToken: string): AppSocket {
     disconnectSocket();
     const created = createAppSocket(accessToken);
+    socketAccessToken = accessToken;
     setSocket(created);
     return created;
 }
@@ -57,7 +62,13 @@ export function disconnectSocket(): void {
     if (socket) {
         socket.disconnect();
     }
+    socketAccessToken = null;
     setSocket(null);
+}
+
+/** Token the live socket was created with; null when there is no socket. */
+export function getSocketToken(): string | null {
+    return socketAccessToken;
 }
 
 /** Returns the live socket; `null` only before authentication. */

@@ -36,8 +36,12 @@ export class IsBanMember implements CanActivate {
                 chat: { id: chatId },
                 user: { id: userPayload.sub },
             },
+            // Without the relation `IsBan.role` is undefined and reading its id
+            // crashes the request with a 500 (every upload failed here).
+            relations: { role: true },
         });
         if (!IsBan) throw new NotFoundException('member not found');
+        if (!IsBan.role) throw new NotFoundException('member role not found');
 
         const manageRole = await this.roleChatRepository.findOne({
             where: { name: RoleChatEnum.BAN },

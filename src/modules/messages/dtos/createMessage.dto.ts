@@ -1,11 +1,14 @@
 import {
     ArrayMaxSize,
     ArrayMinSize,
+    ArrayUnique,
     IsArray,
     IsEnum,
     IsNumber,
     IsOptional,
+    IsPositive,
     IsString,
+    Matches,
     MaxLength,
 } from 'class-validator';
 import { TypeMessageEnum } from 'src/common/enums/typeMessage.enum';
@@ -15,6 +18,7 @@ import {
     MessageId,
     UserId,
 } from 'src/common/types/brands.type';
+import { MAX_ATTACHMENTS_PER_MESSAGE } from 'src/modules/attachments/attachment.constants';
 
 export class CreateMessageDto {
     /**
@@ -34,8 +38,8 @@ export class CreateMessageDto {
     userId?: UserId;
 
     /**
-     * Text body. Optional when attachments are present (attachment-only or
-     * text+attachment messages); required for text-only messages.
+     * Text body / caption. Optional when attachments are present; required for
+     * text-only messages. Empty strings are allowed with attachments.
      */
     @IsString()
     @IsOptional()
@@ -46,9 +50,23 @@ export class CreateMessageDto {
     @IsOptional()
     @IsArray()
     @ArrayMinSize(1)
-    @ArrayMaxSize(10)
+    @ArrayMaxSize(MAX_ATTACHMENTS_PER_MESSAGE)
+    @ArrayUnique()
+    @IsPositive({ each: true })
     @IsNumber({}, { each: true })
     attachments?: AttachmentId[];
+
+    /**
+     * Client-generated id echoed back on the room event and the ack so the app
+     * can match its optimistic bubble even when the caption is empty or two
+     * identical messages are sent in a row.
+     */
+    @IsOptional()
+    @IsString()
+    @Matches(/^[A-Za-z0-9_-]{1,64}$/, {
+        message: 'clientMessageId must be 1-64 characters of A-Z a-z 0-9 _ -',
+    })
+    clientMessageId?: string;
 
     @IsOptional()
     @IsEnum(TypeMessageEnum)

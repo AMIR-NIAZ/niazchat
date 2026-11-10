@@ -8,7 +8,7 @@ FROM node:${NODE_VERSION}-alpine
 WORKDIR /app
 
 # Toolchain for native modules (bcrypt) + tini for proper signal handling.
-RUN apk add --no-cache python3 make g++ tini \
+RUN apk add --no-cache python3 make g++ tini ffmpeg \
     && mkdir -p uploads/avatars storage/attachments \
     && chown -R node:node /app
 

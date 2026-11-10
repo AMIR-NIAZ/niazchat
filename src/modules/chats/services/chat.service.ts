@@ -10,7 +10,7 @@ import { JwtPayload } from 'src/common/types/jwt-payload.type';
 import { createChatDto } from '../dtos/createChat.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Chat } from '../entities/chat.entity';
-import { Not, Repository } from 'typeorm';
+import { In, Not, Repository } from 'typeorm';
 import { ChatMember } from '../entities/chat_members.entity';
 import { TypeChatEnum } from 'src/common/enums/typeChat.enum';
 import { PermissionChatEnum } from 'src/common/enums/permissionChat.enum';
@@ -19,14 +19,10 @@ import { ChatSeen } from '../entities/chats_seen.entity';
 import { Message } from 'src/modules/messages/entities/message.entity';
 import * as fs from 'fs';
 import { RoleChat } from '../entities/role_chat.entity';
-import { PermissionChat } from '../entities/permission_chat.entity';
 import { PermissionAdmin } from '../entities/permission_admin.entity';
 import { ChatId, UserId } from 'src/common/types/brands.type';
 import { User } from 'src/modules/auth/entities/user.entity';
-import {
-    ChatAccessService,
-    ChatCallerContext,
-} from './chat-access.service';
+import { ChatAccessService, ChatCallerContext } from './chat-access.service';
 import { GroupRealtimeService } from './group-realtime.service';
 import { removeAvatarThumbnails } from 'src/modules/media/avatar-thumbnail.util';
 
@@ -37,7 +33,11 @@ export interface ChatMemberPageOptions {
 }
 
 /** A chat-list row plus the caller's unread count (capped at `UNREAD_CAP`). */
-export type ChatWithUnread = Chat & { unreadCount: number };
+export type ChatWithUnread = Chat & {
+    unreadCount: number;
+    /** Other participant's display name for private chats (forward picker). */
+    peerName?: string | null;
+};
 
 /** Server-side cap for `unreadCount`; the app renders "99+" above 99. */
 export const UNREAD_CAP = 100;
@@ -68,8 +68,6 @@ export class ChatService {
         private readonly messageRepository: Repository<Message>,
         @InjectRepository(RoleChat)
         private readonly roleChatRepository: Repository<RoleChat>,
-        @InjectRepository(PermissionChat)
-        private readonly permissionChatRepository: Repository<PermissionChat>,
         @InjectRepository(User)
         private readonly userRepository: Repository<User>,
         private readonly access: ChatAccessService,
@@ -216,6 +214,36 @@ export class ChatService {
         // non-deleted messages newer than the caller's stored read position.
         const unread = await this.getUnreadCounts(user.sub);
 
+        // Private chats have no title; the app's forward picker needs a
+        // human-readable peer name. One query for all PV peers (no N+1).
+        const privateIds = [...byId.values()]
+            .filter((chat) => chat.type === TypeChatEnum.PRIVATE)
+            .map((chat) => chat.id);
+        const peerNames = new Map<string, string>();
+        if (privateIds.length > 0) {
+            const peers = await this.memberRepository.find({
+                where: {
+                    chat: { id: In(privateIds) },
+                    user: { id: Not(user.sub) },
+                },
+                relations: { chat: true, user: { profile: true } },
+                select: {
+                    chat: { id: true },
+                    user: {
+                        id: true,
+                        profile: { name: true, username: true },
+                    },
+                },
+            });
+            for (const peer of peers) {
+                const name =
+                    peer.user.profile?.name ??
+                    peer.user.profile?.username ??
+                    '';
+                if (name !== '') peerNames.set(String(peer.chat.id), name);
+            }
+        }
+
         return [...byId.values()]
             .sort((a, b) => activity(b) - activity(a))
             .map((chat) =>
@@ -224,6 +252,7 @@ export class ChatService {
                         unread.get(String(chat.id)) ?? 0,
                         UNREAD_CAP,
                     ),
+                    peerName: peerNames.get(String(chat.id)) ?? null,
                 }),
             );
     }
@@ -291,10 +320,7 @@ export class ChatService {
             },
             relations: { role: true },
         });
-        return (
-            member !== null &&
-            member.role?.name !== RoleChatEnum.BAN
-        );
+        return member !== null && member.role?.name !== RoleChatEnum.BAN;
     }
 
     /** Non-banned member count, in one query (role names, never role ids). */
@@ -332,18 +358,15 @@ export class ChatService {
         const membersCount = await this.countActiveMembers(caller.chat.id);
 
         return {
-            myRole: caller.roleName === RoleChatEnum.BAN ? null : caller.roleName,
+            myRole:
+                caller.roleName === RoleChatEnum.BAN ? null : caller.roleName,
             myPermissions:
                 caller.isManager || !caller.isAdmin ? null : caller.permissions,
             membersCount,
         };
     }
 
-    async updateTitle(
-        chatId: ChatId,
-        callerUserId: UserId,
-        rawTitle: string,
-    ) {
+    async updateTitle(chatId: ChatId, callerUserId: UserId, rawTitle: string) {
         const caller = await this.access.getCallerContext(chatId, callerUserId);
         this.access.assertUsableGroup(caller);
         this.access.assertPermissions(caller, [
@@ -357,7 +380,9 @@ export class ChatService {
             );
         }
 
-        const chat = await this.chatRepository.findOne({ where: { id: chatId } });
+        const chat = await this.chatRepository.findOne({
+            where: { id: chatId },
+        });
         if (!chat) throw new NotFoundException('chat not found');
 
         await this.chatRepository.update(chat.id, { title });
@@ -384,7 +409,8 @@ export class ChatService {
         const includePhone = caller.isManager || caller.isAdmin;
 
         const limit = Math.min(Math.max(Number(options.limit) || 50, 1), 100);
-        const cursor = Number(options.cursor) > 0 ? Number(options.cursor) : null;
+        const cursor =
+            Number(options.cursor) > 0 ? Number(options.cursor) : null;
 
         const qb = this.memberRepository
             .createQueryBuilder('member')
@@ -402,9 +428,12 @@ export class ChatService {
 
         if (options.search?.trim()) {
             const term = `%${options.search.trim()}%`;
-            qb.andWhere('(profile.name ILIKE :term OR profile.username ILIKE :term)', {
-                term,
-            });
+            qb.andWhere(
+                '(profile.name ILIKE :term OR profile.username ILIKE :term)',
+                {
+                    term,
+                },
+            );
         }
 
         const rows = await qb.getMany();
@@ -412,7 +441,9 @@ export class ChatService {
         const hasMore = rows.length > limit;
         const page = hasMore ? rows.slice(0, limit) : rows;
         const nextCursor =
-            hasMore && page.length > 0 ? Number(page[page.length - 1].id) : null;
+            hasMore && page.length > 0
+                ? Number(page[page.length - 1].id)
+                : null;
 
         return {
             data: page.map((member) =>
@@ -425,13 +456,14 @@ export class ChatService {
 
     /** Kick: removes the member row (ownership + outranking enforced inside). */
     async kickMember(chatId: ChatId, memberId: number, callerUserId: UserId) {
-        const target = await this.access.getTargetMemberInChat(memberId, chatId);
+        const target = await this.access.getTargetMemberInChat(
+            memberId,
+            chatId,
+        );
         const caller = await this.access.getCallerContext(chatId, callerUserId);
         this.access.assertUsableGroup(caller);
         this.access.assertRole(caller, RoleChatEnum.ADMIN);
-        this.access.assertPermissions(caller, [
-            PermissionChatEnum.BAN_USER,
-        ]);
+        this.access.assertPermissions(caller, [PermissionChatEnum.BAN_USER]);
         this.access.assertCanTarget(caller, target, 'kick');
 
         if (target.role?.name === RoleChatEnum.BAN) {
@@ -459,7 +491,9 @@ export class ChatService {
             );
         }
         if (caller.roleName === RoleChatEnum.BAN) {
-            throw new ForbiddenException('you have been banned from this group');
+            throw new ForbiddenException(
+                'you have been banned from this group',
+            );
         }
 
         await this.removePermissionsForMember(caller.member.id);
@@ -541,10 +575,7 @@ export class ChatService {
     }
 
     /** Convenience adapter for record-level serialization with caller-gated phone. */
-    private recordMemberWithPhone(
-        member: ChatMember,
-        includePhone: boolean,
-    ) {
+    private recordMemberWithPhone(member: ChatMember, includePhone: boolean) {
         return this.serializeMember(member, member.user, includePhone);
     }
 
@@ -568,15 +599,13 @@ export class ChatService {
             .getMany();
 
         return {
-            data: banUsers.map((member) => this.recordMemberWithPhone(member, true)),
+            data: banUsers.map((member) =>
+                this.recordMemberWithPhone(member, true),
+            ),
         };
     }
 
-    async uploadAvatar(
-        avatar: string,
-        chatId: ChatId,
-        _callerUserId: UserId,
-    ) {
+    async uploadAvatar(avatar: string, chatId: ChatId, _callerUserId: UserId) {
         const chat = await this.chatRepository.findOne({
             where: {
                 type: Not(TypeChatEnum.PRIVATE),
@@ -593,7 +622,11 @@ export class ChatService {
         return { message: 'avatar updated successfully' };
     }
 
-    async deleteAvatar(chatId: ChatId, avatarPath: string, _callerUserId: UserId) {
+    async deleteAvatar(
+        chatId: ChatId,
+        avatarPath: string,
+        _callerUserId: UserId,
+    ) {
         const chat = await this.chatRepository.findOne({
             where: {
                 type: Not(TypeChatEnum.PRIVATE),
@@ -777,7 +810,9 @@ export class ChatService {
             .getMany();
 
         return {
-            data: members.map((member) => this.recordMemberWithPhone(member, true)),
+            data: members.map((member) =>
+                this.recordMemberWithPhone(member, true),
+            ),
         };
     }
 
@@ -817,7 +852,13 @@ export class ChatService {
      */
     serializeMember(
         member: ChatMember,
-        user: User & { profile?: { name: string | null; username: string | null; avatars: string[] } | null },
+        user: User & {
+            profile?: {
+                name: string | null;
+                username: string | null;
+                avatars: string[];
+            } | null;
+        },
         includePhone: boolean,
     ) {
         const profile = user.profile;
@@ -865,4 +906,3 @@ export class ChatService {
         }
     }
 }
-

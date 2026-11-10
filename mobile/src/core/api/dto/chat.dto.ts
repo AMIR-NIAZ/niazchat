@@ -24,6 +24,12 @@ export interface ChatLastMessageDto {
         originalName: string;
         mimeType: string;
         size: number;
+        kind?: 'image' | 'video' | 'voice' | 'file';
+        width?: number;
+        height?: number;
+        duration?: number;
+        hasPoster?: boolean;
+        waveform?: number[] | null;
     }>;
 }
 
@@ -37,6 +43,8 @@ export interface ChatDto {
     updatedAt: string;
     /** Private chats have no title. */
     title: string | null;
+    /** Other participant's display name on private chat-list rows. */
+    peerName?: string | null;
     avatars: string[];
     type: ChatType;
     isBan: boolean;

@@ -4,6 +4,7 @@ import {
     HttpStatus,
     Injectable,
     NotFoundException,
+    UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from '../entities/user.entity';
@@ -124,14 +125,36 @@ export class AuthService {
         return { accessToken, refreshToken };
     }
 
+    /**
+     * One stable rejection for EVERY invalid refresh token (missing header,
+     * malformed/expired JWT, or a JWT that no longer matches the stored hash):
+     * 401 `{ success: false, statusCode: 401, message: 'invalid refresh token' }`.
+     * Clients classify 401/403 as a definitive session end; there is no
+     * rotation, so a mismatch here means another login replaced the stored
+     * token.
+     */
     async refreshToken(token: string) {
-        const payload = await this.jwtService.verfiyRefreshToken(token);
+        if (typeof token !== 'string' || token.trim() === '') {
+            throw new UnauthorizedException('invalid refresh token');
+        }
+
+        let payload: JwtPayload;
+        try {
+            payload = await this.jwtService.verfiyRefreshToken(token);
+        } catch {
+            throw new UnauthorizedException('invalid refresh token');
+        }
 
         const user = await this.userRepository.findOne({
             where: { id: payload.sub },
         });
-        const isTokenValid = await Compare(token, user?.refreshToken);
-        if (!(user && isTokenValid)) throw new ForbiddenException();
+        const isTokenValid =
+            user && typeof user.refreshToken === 'string' && user.refreshToken !== ''
+                ? await Compare(token, user.refreshToken)
+                : false;
+        if (!user || !isTokenValid) {
+            throw new UnauthorizedException('invalid refresh token');
+        }
 
         const accessToken: string = await this.jwtService.generateAccessToken({
             sub: payload.sub,

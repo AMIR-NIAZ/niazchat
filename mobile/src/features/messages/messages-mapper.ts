@@ -4,7 +4,12 @@ import type {
     MessageReplyDto,
 } from '../../core/api/dto/message.dto';
 import { dayKeyOf, isPendingMessage, toNumericId } from './messages-model';
-import type { ChatMessage, ReplyPreview } from './messages-model';
+import type {
+    AttachmentKind,
+    AttachmentView,
+    ChatMessage,
+    ReplyPreview,
+} from './messages-model';
 
 /**
  * Wire → domain mapping (docs/mobile-api/messages.md):
@@ -22,7 +27,6 @@ import type { ChatMessage, ReplyPreview } from './messages-model';
  * local (not yet confirmed) messages — pending or failed — come last.
  */
 
-const virtalPendingKeyPrefix = 'pending-';
 /** Must match the backend preview truncation (ws-serializer.utils.ts). */
 const REPLY_PREVIEW_MAX_LENGTH = 200;
 
@@ -39,6 +43,62 @@ function truncateReplyContent(
 
 function senderNameOf(dto: MessageDto): string {
     return dto.sender?.name ?? '';
+}
+
+function kindOfMime(
+    mimeType: string | null | undefined,
+    kind: AttachmentKind | null | undefined,
+): AttachmentKind {
+    if (
+        kind === 'image' ||
+        kind === 'video' ||
+        kind === 'voice' ||
+        kind === 'file'
+    ) {
+        return kind;
+    }
+    const mime = (mimeType ?? '').toLowerCase();
+    if (
+        mime === 'image/jpeg' ||
+        mime === 'image/png' ||
+        mime === 'image/webp' ||
+        mime === 'image/gif'
+    ) {
+        return 'image';
+    }
+    if (
+        mime === 'video/mp4' ||
+        mime === 'video/quicktime' ||
+        mime === 'video/webm'
+    ) {
+        return 'video';
+    }
+    return 'file';
+}
+
+/** Wire attachments → attachment views (confirmed messages). */
+export function toAttachmentViews(dto: MessageDto): AttachmentView[] {
+    return (dto.attachments ?? []).map((attachment) => ({
+        key: `a-${attachment.id}`,
+        id: toNumericId(attachment.id),
+        name: attachment.originalName,
+        mimeType: attachment.mimeType,
+        size: Number(attachment.size),
+        kind: kindOfMime(attachment.mimeType, attachment.kind),
+        ...(attachment.width !== undefined && attachment.height !== undefined
+            ? { width: attachment.width, height: attachment.height }
+            : {}),
+        ...(attachment.duration !== undefined
+            ? { duration: attachment.duration }
+            : {}),
+        ...(Array.isArray(attachment.waveform)
+            ? { waveform: attachment.waveform }
+            : {}),
+        ...(attachment.hasPoster !== undefined
+            ? { hasPoster: attachment.hasPoster }
+            : {}),
+        status: 'uploaded',
+    }));
 }
 
 /** Sender id from the flat field, falling back to the nested `sender.id` (entity broadcast). */
@@ -64,6 +124,14 @@ export function replyPreviewFromDto(
         senderName: dto.senderName ?? '',
         type: dto.type ?? 'text',
         attachmentsCount: dto.attachmentsCount ?? 0,
+        attachmentDuration:
+            typeof dto.attachmentDuration === 'number'
+                ? dto.attachmentDuration
+                : null,
+        attachmentKind:
+            (dto.attachmentsCount ?? 0) > 0
+                ? kindOfMime(undefined, dto.attachmentKind ?? null)
+                : null,
         isDeleted: dto.isDeleted === true,
     };
 }
@@ -82,6 +150,8 @@ export function toReplyPreview(message: ChatMessage): ReplyPreview | null {
         senderName: message.senderName,
         type: message.type,
         attachmentsCount: message.attachmentsCount,
+        attachmentKind: message.attachments[0]?.kind ?? null,
+        attachmentDuration: message.attachments[0]?.duration ?? null,
         isDeleted: message.isDeleted,
     };
 }
@@ -101,7 +171,16 @@ export function toChatMessage(dto: MessageDto): ChatMessage {
         // Kept server-relative so the bubble can ask for a small thumbnail;
         // the absolute list above stays for the full-URL consumers.
         senderAvatarPath: dto.sender?.avatars?.[0] ?? null,
+        attachments: toAttachmentViews(dto),
         attachmentsCount: dto.attachments?.length ?? 0,
+        clientMessageId: dto.clientMessageId ?? null,
+        forwardedFrom:
+            dto.forwardedFrom === null || dto.forwardedFrom === undefined
+                ? null
+                : {
+                      userId: toNumericId(dto.forwardedFrom.userId),
+                      name: dto.forwardedFrom.name ?? '',
+                  },
         replyTo: replyPreviewFromDto(dto.replyTo),
         replyToId: toNumericId(dto.replyToId),
         status: 'sent',
@@ -114,9 +193,11 @@ export function toPendingChatMessage(
     content: string,
     senderId: number,
     replyTo: ReplyPreview | null = null,
+    attachments: AttachmentView[] = [],
+    clientMessageId: string | null = null,
 ): ChatMessage {
     return {
-        key: `${virtalPendingKeyPrefix}${key}`,
+        key,
         id: null,
         type: 'text',
         content,
@@ -127,7 +208,10 @@ export function toPendingChatMessage(
         senderName: '',
         senderAvatarUrls: [],
         senderAvatarPath: null,
-        attachmentsCount: 0,
+        attachments,
+        attachmentsCount: attachments.length,
+        clientMessageId,
+        forwardedFrom: null,
         replyTo,
         replyToId: replyTo === null ? null : replyTo.id,
         status: 'pending',
@@ -170,6 +254,7 @@ export function applyOriginalEdited(
                     : truncateReplyContent(edited.content),
                 type: edited.type,
                 attachmentsCount: edited.attachmentsCount,
+                attachmentKind: edited.attachments[0]?.kind ?? null,
                 isDeleted: edited.isDeleted,
             },
         };
@@ -205,10 +290,12 @@ export function applyOriginalDeleted(
 /**
  * Merges server-confirmed messages with locally-pending sends:
  * - De-duplicate by id: a live event never creates a second copy.
- * - A NEW confirmed message from me (the room echo — `sendMessage:list` also
- *   reaches the sender, that IS the confirmation) consumes exactly ONE local
- *   bubble with the same content: the oldest pending one, otherwise a failed
- *   one (the send timed out but actually went through).
+ * - A NEW confirmed message consumes exactly ONE local bubble:
+ *   1. first, the bubble with the SAME `clientMessageId` (any status) — the
+ *      reliable path, works for empty captions and two identical photos;
+ *   2. only when the echo carries no `clientMessageId` (older messages / other
+ *      clients), the historical sender + trimmed-content match (oldest pending
+ *      first, otherwise failed).
  * - Result is ascending: confirmed messages sorted by numeric id, then the
  *   remaining local (pending/failed) messages in creation order.
  */
@@ -245,6 +332,23 @@ export function mergeMessages(
         }
         confirmed.set(message.id, message);
 
+        // 1) Exact echo match: the app generated this id for this send.
+        if (
+            message.clientMessageId !== null &&
+            message.clientMessageId !== undefined
+        ) {
+            const byClientId = locals.find(
+                (local) =>
+                    !consumedKeys.has(local.key) &&
+                    local.clientMessageId === message.clientMessageId,
+            );
+            if (byClientId !== undefined) {
+                consumedKeys.add(byClientId.key);
+            }
+            continue;
+        }
+
+        // 2) Legacy fallback for messages without a client id.
         // senderId === -1 means the echo carried no sender at all (unknown): still
         // eligible, because only a message with identical text can consume a bubble.
         if (message.senderId === me || message.senderId === -1) {

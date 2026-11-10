@@ -13,6 +13,8 @@ import {
 } from '@nestjs/common';
 import { Server } from 'socket.io';
 import { MessageService } from '../services/message.service';
+import { MessageForwardService } from '../services/message-forward.service';
+import { ForwardMessagesDto } from '../dtos/forwardMessages.dto';
 import { ChatService } from 'src/modules/chats/services/chat.service';
 import { CreateMessageDto } from '../dtos/createMessage.dto';
 import { Message } from '../entities/message.entity';
@@ -45,6 +47,7 @@ export class MessageGateway {
 
     constructor(
         private readonly messageService: MessageService,
+        private readonly forwardService: MessageForwardService,
         private readonly chatService: ChatService,
     ) {}
 
@@ -64,11 +67,43 @@ export class MessageGateway {
         if (!client.rooms.has(chatRoom(chatId))) {
             client.emit('sendMessage:list', wireMessage);
         }
-        void this.notifyChatList(chatId, message).catch((error) =>
-            console.error('notifyChatList failed', error),
-        );
+        void this.notifyChatList(chatId, message).catch((): void => undefined);
 
         return { ok: true, data: wireMessage };
+    }
+
+    @SubscribeMessage('forwardMessages')
+    @UseGuards(wsIsMemberChat)
+    async forwardMessages(
+        @ConnectedSocket() client: SocketAuth,
+        @MessageBody() dto: ForwardMessagesDto,
+    ) {
+        const execution = await this.forwardService.forward(
+            client.data.user,
+            dto,
+        );
+
+        // Broadcast only fresh successes; an idempotent replay stored the ack
+        // result and must never create or announce the messages twice.
+        for (const target of execution.targets) {
+            for (const message of target.messages) {
+                const wireMessage = serializeMessage(message);
+                this.server
+                    .to(chatRoom(target.chatId as ChatId))
+                    .emit('sendMessage:list', wireMessage);
+                if (!client.rooms.has(chatRoom(target.chatId as ChatId))) {
+                    client.emit('sendMessage:list', wireMessage);
+                }
+            }
+            const last = target.messages[target.messages.length - 1];
+            if (last !== undefined) {
+                void this.notifyChatList(target.chatId as ChatId, last).catch(
+                    (): void => undefined,
+                );
+            }
+        }
+
+        return { ok: true, data: execution.data };
     }
 
     @SubscribeMessage('editMessage')

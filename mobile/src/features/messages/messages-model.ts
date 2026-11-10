@@ -8,6 +8,37 @@ import type { MessageTypeName } from '../../core/api/dto/message.dto';
 /** Server-confirmed messages plus one optimistic entry per in-flight send. */
 export type MessageStatus = 'pending' | 'sent' | 'failed';
 
+export type AttachmentKind = 'image' | 'video' | 'voice' | 'file';
+export type AttachmentUploadStatus = 'uploading' | 'uploaded' | 'failed';
+
+/** One attachment of a message (server metadata + local upload state). */
+export interface AttachmentView {
+    /** Stable key: `a-<id>` once uploaded, `local-<localKey>` while pending. */
+    key: string;
+    id: number | null;
+    name: string;
+    mimeType: string;
+    size: number;
+    kind: AttachmentKind;
+    width?: number;
+    height?: number;
+    /** Video duration in seconds (videos only). */
+    duration?: number;
+    /** Voice only: 64 bars, integers 0..100 (null/absent -> flat bars). */
+    waveform?: number[];
+    /** Voice only, optimistic bubble: duration/waveform recorded locally. */
+    localDuration?: number;
+    localWaveform?: number[];
+    /** Videos only: the server stored a poster (false -> placeholder tile). */
+    hasPoster?: boolean;
+    /** Local file URI for optimistic previews (pending messages only). */
+    localUri?: string;
+    status: AttachmentUploadStatus;
+    progress?: number;
+    /** Short user-facing reason when `status` is `failed`. */
+    error?: string | null;
+}
+
 /** Compact quoted-message preview rendered at the top of a reply bubble. */
 export interface ReplyPreview {
     id: number;
@@ -17,6 +48,10 @@ export interface ReplyPreview {
     senderName: string;
     type: MessageTypeName;
     attachmentsCount: number;
+    /** Kind of the first attachment (drives the "Photo"/file label). */
+    attachmentKind: AttachmentKind | null;
+    /** Duration of a voice first attachment, when known. */
+    attachmentDuration: number | null;
     isDeleted: boolean;
 }
 
@@ -40,7 +75,14 @@ export interface ChatMessage {
     senderAvatarUrls: string[];
     /** Server-relative CURRENT avatar path — the input for a thumbnail URL. */
     senderAvatarPath: string | null;
+    /** Attachments in wire order (empty for text-only messages). */
+    attachments: AttachmentView[];
+    /** Derived from `attachments`; kept for existing consumers. */
     attachmentsCount: number;
+    /** Echo-matching id of an optimistic send (null on history messages). */
+    clientMessageId: string | null;
+    /** First forward origin; null for ordinary messages. */
+    forwardedFrom: { userId: number | null; name: string } | null;
     /** Quoted preview when this message replies to another, else null. */
     replyTo: ReplyPreview | null;
     /** Wire id of the replied-to message, kept even if the preview is null. */

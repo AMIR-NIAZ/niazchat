@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { MessageGateway } from './message.gateway';
 import { MessageService } from '../services/message.service';
+import { MessageForwardService } from '../services/message-forward.service';
 import { ChatService } from 'src/modules/chats/services/chat.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { JwtAppService } from 'src/modules/auth/services/jwt.service';
@@ -14,19 +15,25 @@ import {
 
 describe('MessageGateway', () => {
     let gateway: MessageGateway;
-    let messageService: { create: jest.Mock };
+    let messageService: { create: jest.Mock; getPage: jest.Mock };
     let chatService: { getMemberIds: jest.Mock };
+    let forwardService: { forward: jest.Mock };
     let roomEmit: jest.Mock;
 
     beforeEach(async () => {
-        messageService = { create: jest.fn() };
+        messageService = { create: jest.fn(), getPage: jest.fn() };
         chatService = { getMemberIds: jest.fn().mockResolvedValue([1, 2]) };
+        forwardService = { forward: jest.fn() };
         roomEmit = jest.fn();
 
         const module: TestingModule = await Test.createTestingModule({
             providers: [
                 MessageGateway,
                 { provide: MessageService, useValue: messageService },
+                {
+                    provide: MessageForwardService,
+                    useValue: forwardService,
+                },
                 { provide: ChatService, useValue: chatService },
                 { provide: JwtAppService, useValue: {} },
                 { provide: JwtService, useValue: {} },
@@ -118,11 +125,137 @@ describe('MessageGateway', () => {
                         originalName: 'doc.pdf',
                         mimeType: 'application/pdf',
                         size: 12,
+                        kind: 'file',
                     },
                 ],
             },
         });
         expect(chatService.getMemberIds).toHaveBeenCalledWith(10);
+    });
+
+    it('serializes video metadata in sendMessage:list and the chat-list preview', async () => {
+        const createdAt = new Date('2026-01-01');
+        const message = {
+            id: 110,
+            content: '',
+            chat: { id: 10 },
+            sender: { id: 1 },
+            createdAt,
+            attachments: [
+                {
+                    id: 11,
+                    originalName: 'clip.mp4',
+                    mimeType: 'video/mp4',
+                    size: 2048,
+                    width: 1280,
+                    height: 720,
+                    duration: '12.3',
+                    posterPath: '10/abc.poster.webp',
+                    createdAt,
+                },
+            ],
+        };
+        messageService.create.mockResolvedValue(message);
+
+        await (
+            gateway as unknown as {
+                sendMessage: (
+                    client: unknown,
+                    dto: unknown,
+                ) => Promise<unknown>;
+            }
+        ).sendMessage(makeClient(), {
+            chatId: 10,
+            content: '',
+            type: 'video',
+            attachments: [11],
+        });
+        await flushBackgroundWork();
+
+        const expectedVideo = {
+            kind: 'video',
+            width: 1280,
+            height: 720,
+            duration: 12.3,
+            hasPoster: true,
+        };
+        expect(roomEmit).toHaveBeenCalledWith(
+            'sendMessage:list',
+            expect.objectContaining({
+                id: 110,
+                attachments: [
+                    expect.objectContaining({ id: 11, ...expectedVideo }),
+                ],
+            }),
+        );
+        expect(roomEmit).toHaveBeenCalledWith('chatlist:updated', {
+            chatId: 10,
+            lastMessage: expect.objectContaining({
+                id: 110,
+                attachments: [
+                    expect.objectContaining({ id: 11, ...expectedVideo }),
+                ],
+            }),
+        });
+
+        // The internal poster location is never exposed.
+        const serialized = JSON.stringify(
+            roomEmit.mock.calls.filter(
+                (call: unknown[]) => call[0] !== 'chatlist:updated',
+            ),
+        );
+        expect(serialized).not.toContain('posterPath');
+        expect(serialized).not.toContain('abc.poster');
+    });
+
+    it('carries video metadata in getMessages history pages', async () => {
+        const createdAt = new Date('2026-01-01');
+        messageService.getPage.mockResolvedValue({
+            messages: [
+                {
+                    id: 111,
+                    content: '',
+                    chat: { id: 10 },
+                    sender: { id: 1 },
+                    type: { id: 3, name: 'video' },
+                    createdAt,
+                    attachments: [
+                        {
+                            id: 12,
+                            originalName: 'clip.webm',
+                            mimeType: 'video/webm',
+                            size: 4096,
+                            width: 720,
+                            height: 1280,
+                            duration: 4.5,
+                            posterPath: null,
+                            createdAt,
+                        },
+                    ],
+                },
+            ],
+            hasMore: false,
+            nextCursor: 111,
+        });
+
+        const ack = await (
+            gateway as unknown as {
+                getMessages: (dto: unknown) => Promise<{
+                    data: { messages: Array<Record<string, unknown>> };
+                }>;
+            }
+        ).getMessages({ chatId: 10 });
+
+        expect(ack.data.messages[0]?.attachments).toEqual([
+            expect.objectContaining({
+                id: 12,
+                kind: 'video',
+                width: 720,
+                height: 1280,
+                duration: 4.5,
+                hasPoster: false,
+            }),
+        ]);
     });
 
     it('still emits chat-list updates for plain text messages', async () => {
@@ -143,10 +276,11 @@ describe('MessageGateway', () => {
                     dto: unknown,
                 ) => Promise<unknown>;
             }
-        ).sendMessage(
-            makeClient(),
-            { chatId: 10, content: 'hi', type: 'text' },
-        );
+        ).sendMessage(makeClient(), {
+            chatId: 10,
+            content: 'hi',
+            type: 'text',
+        });
         await flushBackgroundWork();
 
         expect(roomEmit).toHaveBeenCalledWith(

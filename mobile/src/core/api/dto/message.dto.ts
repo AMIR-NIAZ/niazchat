@@ -25,6 +25,10 @@ export interface MessageReplyDto {
     senderName: string;
     type: MessageTypeName;
     attachmentsCount: number;
+    /** Kind of the first attachment, when present. */
+    attachmentKind?: 'image' | 'video' | 'voice' | 'file' | null;
+    /** Duration of a voice first attachment, when known. */
+    attachmentDuration?: number | null;
     isDeleted: boolean;
 }
 
@@ -50,7 +54,11 @@ export interface MessageDto {
     replyToId: number | null;
     /** Compact preview of the replied-to message; null when this is not a reply. */
     replyTo: MessageReplyDto | null;
+    /** First forward origin; null for ordinary messages. */
+    forwardedFrom?: { userId: number | null; name: string } | null;
     attachments: MessageAttachmentDto[];
+    /** Echoed on the send ack/room event; absent in history pages. */
+    clientMessageId?: string | null;
 }
 
 /**
@@ -69,6 +77,15 @@ export interface MessageAttachmentDto {
     originalName: string;
     mimeType: string;
     size: number;
+    kind?: 'image' | 'video' | 'voice' | 'file';
+    width?: number;
+    height?: number;
+    /** Videos/voice, seconds. */
+    duration?: number;
+    /** Videos only: a poster exists. */
+    hasPoster?: boolean;
+    /** Voice only: 64 bars 0..100 (null when unavailable). */
+    waveform?: number[] | null;
     createdAt: string;
 }
 
@@ -91,6 +108,8 @@ export interface CreateMessagePayloadDto {
     reply?: number;
     /** 1..10 attachment ids; they must belong to the same chat and be unused. */
     attachments?: number[];
+    /** Client-generated echo id (A-Za-z0-9_- , max 64). */
+    clientMessageId?: string;
     /** Defaults to `text` server-side. */
     type?: MessageTypeName;
 }
@@ -107,4 +126,21 @@ export interface EditMessagePayloadDto {
 export interface DeleteMessagePayloadDto {
     messageId: number;
     chatId: number;
+}
+
+/** `forwardMessages` client → server payload. */
+export interface ForwardMessagesPayloadDto {
+    fromChatId: number;
+    messageIds: number[];
+    toChatIds: number[];
+    requestId: string;
+}
+
+/** Per-target forward result returned in the ack. */
+export type ForwardTargetResultDto =
+    | { chatId: number; ok: true; messageIds: number[] }
+    | { chatId: number; ok: false; message: string };
+
+export interface ForwardMessagesResultDto {
+    results: ForwardTargetResultDto[];
 }

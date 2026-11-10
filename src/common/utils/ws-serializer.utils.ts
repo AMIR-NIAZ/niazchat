@@ -2,6 +2,7 @@ import { Message } from 'src/modules/messages/entities/message.entity';
 import { Chat } from 'src/modules/chats/entities/chat.entity';
 import { User } from 'src/modules/auth/entities/user.entity';
 import { UserProfile } from 'src/modules/auth/entities/user_profile.entity';
+import { attachmentKindOf } from './attachment-kind.util';
 
 export const num = (value: unknown): number =>
     typeof value === 'number' ? value : Number(value);
@@ -17,6 +18,74 @@ function truncateReplyContent(content: string | null | undefined): string {
 }
 
 /**
+ * Attachment wire metadata shared by message payloads and chat-list previews.
+ * `posterPath` never leaves the server; the app only needs `hasPoster`.
+ */
+function serializeAttachmentMeta(attachment: {
+    id: unknown;
+    originalName: string;
+    mimeType: string;
+    size: unknown;
+    width?: number | null;
+    height?: number | null;
+    duration?: string | number | null;
+    posterPath?: string | null;
+    voice?: boolean | null;
+    waveform?: number[] | null;
+    createdAt?: Date;
+}) {
+    const kind = attachmentKindOf(attachment.mimeType, attachment.voice);
+    const width = attachment.width == null ? null : Number(attachment.width);
+    const height = attachment.height == null ? null : Number(attachment.height);
+    const duration =
+        attachment.duration == null ? null : Number(attachment.duration);
+    return {
+        id: num(attachment.id),
+        originalName: attachment.originalName,
+        mimeType: attachment.mimeType,
+        size: Number(attachment.size),
+        kind,
+        ...(width !== null &&
+        height !== null &&
+        Number.isFinite(width) &&
+        Number.isFinite(height)
+            ? { width, height }
+            : {}),
+        ...(kind === 'video' || kind === 'voice'
+            ? {
+                  duration:
+                      duration !== null && Number.isFinite(duration)
+                          ? duration
+                          : null,
+              }
+            : {}),
+        ...(kind === 'video'
+            ? { hasPoster: attachment.posterPath != null }
+            : {}),
+        ...(kind === 'voice'
+            ? { waveform: normalizeWaveform(attachment.waveform) }
+            : {}),
+        ...(attachment.createdAt !== undefined
+            ? { createdAt: attachment.createdAt }
+            : {}),
+    };
+}
+
+/** Wire waveform is exactly 64 integers 0..100, or null (flat bars). */
+function normalizeWaveform(
+    value: number[] | null | undefined,
+): number[] | null {
+    if (!Array.isArray(value) || value.length !== 64) {
+        return null;
+    }
+    const bars = value.map((bar) => Number(bar));
+    if (bars.some((bar) => !Number.isFinite(bar) || bar < 0 || bar > 100)) {
+        return null;
+    }
+    return bars.map((bar) => Math.round(bar));
+}
+
+/**
  * Compact quoted-message preview (never the full entity). A soft-deleted
  * original keeps its id/flag but leaks no content.
  */
@@ -25,6 +94,7 @@ export function serializeReplyPreview(reply: Message | null | undefined) {
         return null;
     }
     const isDeleted = reply.isDeleted === true;
+    const firstAttachment = reply.attachments?.[0];
     return {
         id: num(reply.id),
         content: isDeleted ? null : truncateReplyContent(reply.content),
@@ -32,6 +102,18 @@ export function serializeReplyPreview(reply: Message | null | undefined) {
         senderName: reply.sender?.profile?.name ?? '',
         type: reply.type?.name ?? 'text',
         attachmentsCount: reply.attachments?.length ?? 0,
+        attachmentKind: isDeleted
+            ? null
+            : attachmentKindOf(
+                  firstAttachment?.mimeType,
+                  firstAttachment?.voice,
+              ),
+        attachmentDuration:
+            !isDeleted &&
+            firstAttachment?.duration != null &&
+            Number.isFinite(Number(firstAttachment.duration))
+                ? Number(firstAttachment.duration)
+                : null,
         isDeleted,
     };
 }
@@ -46,12 +128,9 @@ export function serializeLastMessage(message: Message) {
         content: message.content ?? '',
         senderId: num(message.sender?.id ?? 0),
         createdAt: message.createdAt,
-        attachments: (message.attachments ?? []).map((attachment) => ({
-            id: num(attachment.id),
-            originalName: attachment.originalName,
-            mimeType: attachment.mimeType,
-            size: Number(attachment.size),
-        })),
+        attachments: (message.attachments ?? []).map((attachment) =>
+            serializeAttachmentMeta(attachment),
+        ),
     };
 }
 
@@ -62,6 +141,8 @@ export function serializeChat(chat: Chat & { unreadCount?: number }) {
         createdAt: chat.createdAt,
         updatedAt: chat.updatedAt,
         title: chat.title ?? null,
+        peerName:
+            (chat as Chat & { peerName?: string | null }).peerName ?? null,
         avatars: chat.avatars ?? [],
         type: chat.type,
         isBan: chat.isBan,
@@ -108,9 +189,7 @@ function serializeMessageSender(message: Message) {
             ? (profile.username ?? null)
             : (sender.username ?? null);
     const photos =
-        profile !== null
-            ? (profile.avatars ?? [])
-            : (sender.avatars ?? []);
+        profile !== null ? (profile.avatars ?? []) : (sender.avatars ?? []);
     const current = photos[0];
 
     return {
@@ -123,9 +202,15 @@ function serializeMessageSender(message: Message) {
 
 /**
  * Message wire shape: numeric ids, top-level `chatId`/`senderId`, the compact
- * sender, the type row and the attachments. No `chat` object.
+ * sender, the type row and the attachments. No `chat` object. Attachment paths
+ * and storage keys never leave the server.
  */
 export function serializeMessage(message: Message) {
+    // `clientMessageId` is a transient echo field (not persisted): history
+    // pages and older messages simply do not carry it.
+    const clientMessageId = (
+        message as Message & { clientMessageId?: string | null }
+    ).clientMessageId;
     return {
         id: num(message.id),
         content: message.content ?? null,
@@ -141,16 +226,26 @@ export function serializeMessage(message: Message) {
                 ? num(message.replyTo.id)
                 : null,
         replyTo: serializeReplyPreview(message.replyTo),
+        forwardedFrom:
+            message.forwardedFromUserId == null &&
+            message.forwardedFromName == null
+                ? null
+                : {
+                      userId:
+                          message.forwardedFromUserId == null
+                              ? null
+                              : num(message.forwardedFromUserId),
+                      name: message.forwardedFromName ?? '',
+                  },
         typeId: message.type?.id ? num(message.type.id) : null,
         type: message.type
             ? { id: num(message.type.id), name: message.type.name }
             : null,
-        attachments: (message.attachments ?? []).map((attachment) => ({
-            id: num(attachment.id),
-            originalName: attachment.originalName,
-            mimeType: attachment.mimeType,
-            size: Number(attachment.size),
-            createdAt: attachment.createdAt,
-        })),
+        attachments: (message.attachments ?? []).map((attachment) =>
+            serializeAttachmentMeta(attachment),
+        ),
+        ...(clientMessageId !== undefined && clientMessageId !== null
+            ? { clientMessageId }
+            : {}),
     };
 }

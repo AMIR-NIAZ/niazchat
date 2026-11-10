@@ -1,4 +1,5 @@
 import { absoluteUploadUrl } from '../../core/config/env';
+import { attachmentPreviewLabel } from '../attachments/attachment-labels';
 import type { ChatDto } from '../../core/api/dto/chat.dto';
 import type { ChatListUpdateDto } from '../../core/api/dto/message.dto';
 import type { UserDto } from '../../core/api/dto/user.dto';
@@ -17,6 +18,7 @@ export function toChatPreview(chat: ChatDto): ChatPreview {
         id: chat.id,
         type: chat.type,
         title: chat.title,
+        peerName: chat.peerName ?? null,
         isBan: chat.isBan,
         avatarUrls: chat.avatars.map(absoluteUploadUrl),
         createdAt: chat.createdAt,
@@ -49,7 +51,37 @@ export function lastMessageFromUpdate(
         senderName:
             senderDirectory?.get(update.lastMessage.senderId)?.name ?? null,
         attachmentCount: attachments.length,
+        firstAttachmentKind:
+            attachments.length === 0
+                ? null
+                : (attachments[0]?.kind ??
+                  (attachments[0]?.mimeType.startsWith('image/')
+                      ? 'image'
+                      : attachments[0]?.mimeType.startsWith('video/')
+                        ? 'video'
+                        : 'file')),
+        firstAttachmentDuration:
+            typeof attachments[0]?.duration === 'number'
+                ? attachments[0].duration
+                : null,
+        firstAttachmentName: attachments[0]?.originalName ?? null,
     };
+}
+
+/** Chat-list preview text: text, else a photo/file summary. */
+export function chatPreviewText(preview: ChatPreview['lastMessage']): string {
+    if (preview === null) {
+        return '—';
+    }
+    if (preview.content.trim() !== '') {
+        return preview.content;
+    }
+    return attachmentPreviewLabel(
+        preview.attachmentCount,
+        preview.firstAttachmentKind,
+        preview.firstAttachmentName,
+        preview.firstAttachmentDuration,
+    );
 }
 
 /**

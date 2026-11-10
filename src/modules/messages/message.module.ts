@@ -3,6 +3,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Message } from './entities/message.entity';
 import { MessageGateway } from './gateways/message.gateway';
 import { MessageService } from './services/message.service';
+import { MessageForwardService } from './services/message-forward.service';
+import { ForwardRequestStore } from './services/forward-request.store';
 import { ChatMember } from '../chats/entities/chat_members.entity';
 import { Chat } from '../chats/entities/chat.entity';
 import { User } from '../auth/entities/user.entity';
@@ -36,6 +38,8 @@ import { Attachment } from '../attachments/entities/attachment.entity';
     providers: [
         MessageGateway,
         MessageService,
+        MessageForwardService,
+        ForwardRequestStore,
         JwtAppService,
         JwtService,
         TextContentHandler,

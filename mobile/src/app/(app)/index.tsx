@@ -21,13 +21,14 @@ import { useQueryClient } from '@tanstack/react-query';
 import { palette, typography } from '../../shared/theme';
 import {
     ChatContextMenu,
+    chatPreviewText,
     filterChats,
     invalidateChats,
     sortPinnedFirst,
     useChats,
     usePinnedChatIds,
 } from '../../features/chats';
-import { useAuthStore, useCurrentUserId } from '../../features/auth';
+import { logout, useCurrentUserId } from '../../features/auth';
 
 /**
  * Chats screen — renders the WS-provided chat list.
@@ -44,7 +45,6 @@ type ChatRow = import('../../features/chats').ChatPreview;
 export default function ChatsScreen(): React.ReactElement {
     const chatsQuery = useChats();
     const queryClient = useQueryClient();
-    const clearSession = useAuthStore((state) => state.clearSession);
     const [search, setSearch] = useState('');
     const [menuChat, setMenuChat] = useState<ChatRow | null>(null);
     const currentUserId = useCurrentUserId();
@@ -80,7 +80,7 @@ export default function ChatsScreen(): React.ReactElement {
                 <Pressable
                     accessibilityRole="button"
                     onPress={(): void => {
-                        void clearSession();
+                        void logout('manual');
                     }}
                     style={styles.buttonGhost}
                 >
@@ -192,12 +192,7 @@ function ChatRowItem(props: ChatRowItemProps): React.ReactElement {
         chat.title ??
         (chat.type === 'private' ? 'Private chat' : 'Unnamed group');
     const avatar = chat.avatarUrls.length > 0 ? chat.avatarUrls[0] : undefined;
-    const previewText =
-        chat.lastMessage === null
-            ? '—'
-            : chat.lastMessage.content !== ''
-              ? chat.lastMessage.content
-              : `${chat.lastMessage.attachmentCount} attachment(s)`;
+    const previewText = chatPreviewText(chat.lastMessage);
     const time = chat.lastMessage?.createdAt ?? chat.updatedAt;
     const unread = chat.unreadCount;
     const unreadLabel = unread > 99 ? '99+' : String(unread);

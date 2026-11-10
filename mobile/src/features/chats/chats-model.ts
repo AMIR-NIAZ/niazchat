@@ -12,6 +12,11 @@ export interface ChatLastMessage {
     senderId: number;
     createdAt: string;
     attachmentCount: number;
+    /** Kind/name of the first attachment (drives the preview label). */
+    firstAttachmentKind: 'image' | 'video' | 'voice' | 'file' | null;
+    /** Duration of a voice first attachment, when the server sent one. */
+    firstAttachmentDuration: number | null;
+    firstAttachmentName: string | null;
 }
 
 /** A conversation as the UI renders it. */
@@ -20,6 +25,8 @@ export interface ChatPreview {
     type: ChatType;
     /** Null for private chats (no title server-side). */
     title: string | null;
+    /** Other participant's name for private chats (search/forward picker). */
+    peerName?: string | null;
     isBan: boolean;
     avatarUrls: string[];
     createdAt: string;

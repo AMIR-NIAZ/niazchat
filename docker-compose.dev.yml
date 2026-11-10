@@ -22,9 +22,13 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
-      UPLOAD_MAX_FILE_SIZE: ${UPLOAD_MAX_FILE_SIZE:-10485760}
-      UPLOAD_ALLOWED_EXTENSIONS: ${UPLOAD_ALLOWED_EXTENSIONS:-jpg,jpeg,png,gif,webp,pdf,mp4,mp3,txt}
+      UPLOAD_MAX_FILE_SIZE: ${UPLOAD_MAX_FILE_SIZE:-20971520}
+      UPLOAD_ALLOWED_EXTENSIONS: ${UPLOAD_ALLOWED_EXTENSIONS:-jpg,jpeg,png,webp,gif,pdf,doc,docx,xls,xlsx,ppt,pptx,txt,csv,md,rtf,zip,rar,7z,tar,gz,mp3,wav,ogg,m4a,opus,mp4,mov,webm,mkv,avi}
       STORAGE_DIR: ${STORAGE_DIR:-./storage}
+      # Orphan/deleted-message cleanup tuning (defaults: 6 h / 24 h / 30 min).
+      ATTACHMENT_ORPHAN_TTL_MS: ${ATTACHMENT_ORPHAN_TTL_MS:-21600000}
+      ATTACHMENT_DELETED_TTL_MS: ${ATTACHMENT_DELETED_TTL_MS:-86400000}
+      ATTACHMENT_CLEANUP_INTERVAL_MS: ${ATTACHMENT_CLEANUP_INTERVAL_MS:-1800000}
     # Seeds once per container start (not on every hot reload), then starts watch mode.
     # Disable with RUN_SEED=false in .env.
     command:

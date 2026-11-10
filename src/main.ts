@@ -20,6 +20,10 @@ async function bootstrap(): Promise<void> {
         credentials: true,
     });
 
-    await app.listen(process.env.PORT ?? 3000, '0.0.0.0');
+    const server = await app.listen(process.env.PORT ?? 3000, '0.0.0.0');
+    // Large video uploads need more than Node's 5-minute request default; a
+    // slow mobile connection sending 100 MB must not be cut off mid-request.
+    server.requestTimeout = 15 * 60 * 1000;
+    server.headersTimeout = 15 * 60 * 1000;
 }
 bootstrap();

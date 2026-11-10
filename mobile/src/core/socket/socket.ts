@@ -1,7 +1,12 @@
 import { io, Socket } from 'socket.io-client';
 import { env } from '../config/env';
 import { ApiError } from '../api/api-error';
-import type { ChatListUpdateDto, MessageDto } from '../api/dto/message.dto';
+import type {
+    ChatListUpdateDto,
+    ForwardMessagesPayloadDto,
+    ForwardMessagesResultDto,
+    MessageDto,
+} from '../api/dto/message.dto';
 import type { ChatDto } from '../api/dto/chat.dto';
 
 /**
@@ -101,7 +106,14 @@ export interface ClientToServerEvents {
         ack: SocketAckHandler,
     ) => void;
     markSeen: (payload: MarkSeenSocketPayload, ack: SocketAckHandler) => void;
+    forwardMessages: (
+        payload: ForwardMessagesSocketPayload,
+        ack: SocketAckHandler,
+    ) => void;
 }
+
+export type ForwardMessagesSocketPayload = ForwardMessagesPayloadDto;
+export type ForwardMessagesResult = ForwardMessagesResultDto;
 
 export interface MarkSeenSocketPayload {
     chatId: number;
@@ -114,6 +126,7 @@ export interface CreateMessageSocketPayload {
     content?: string;
     reply?: number;
     attachments?: number[];
+    clientMessageId?: string;
 }
 
 export interface EditMessageSocketPayload {
@@ -133,6 +146,37 @@ export type AppSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 const connectListeners = new Set<(socket: AppSocket) => void>();
 let firstConnectDone = false;
 
+/**
+ * Auth-failure observers (the session layer refreshes + reconnects). Socket
+ * errors are never HTTP statuses, so detection is message/status based:
+ * handshake `connect_error`, an `exception` event, or an ack with status 401.
+ */
+const authErrorListeners = new Set<() => void>();
+
+export function registerSocketAuthErrorHandler(
+    listener: () => void,
+): () => void {
+    authErrorListeners.add(listener);
+    return () => {
+        authErrorListeners.delete(listener);
+    };
+}
+
+export function notifySocketAuthError(): void {
+    authErrorListeners.forEach((listener) => listener());
+}
+
+/** Matches the backend's auth messages (guard: "token in valid, …"). */
+export function isSocketAuthErrorMessage(message: string): boolean {
+    const normalized = message.toLowerCase();
+    return (
+        normalized.includes('token in valid') ||
+        normalized.includes('jwt expired') ||
+        normalized.includes('unauthorized') ||
+        normalized.includes('invalid token')
+    );
+}
+
 export function createAppSocket(accessToken: string): AppSocket {
     const socket: AppSocket = io(env.wsUrl, {
         // Header is what the `wsPayload` guard reads at handshake and per event.
@@ -149,6 +193,21 @@ export function createAppSocket(accessToken: string): AppSocket {
             connectListeners.forEach((listener) => listener(socket));
         }
         firstConnectDone = true;
+    });
+
+    socket.on('connect_error', (error: Error) => {
+        if (isSocketAuthErrorMessage(String(error.message))) {
+            notifySocketAuthError();
+        }
+    });
+
+    socket.on('exception', (payload) => {
+        if (
+            payload.status === 401 ||
+            isSocketAuthErrorMessage(String(payload.message))
+        ) {
+            notifySocketAuthError();
+        }
     });
 
     return socket;
@@ -203,6 +262,11 @@ export function request<T>(
             if (parsed?.ok === true) {
                 settle.resolve((parsed.data as T | undefined) ?? null);
             } else {
+                // Ack-level auth failures (after the handshake) share the
+                // reconnect/refresh path with handshake failures.
+                if (parsed?.status === 401) {
+                    notifySocketAuthError();
+                }
                 settle.reject(
                     new ApiError({
                         success: false,

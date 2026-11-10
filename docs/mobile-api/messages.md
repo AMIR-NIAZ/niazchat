@@ -6,25 +6,31 @@ Sources: `src/modules/messages/gateways/message.gateway.ts`, `src/modules/messag
 
 ## Client → server events
 
-| Event | Payload (`class-validator` on WS) | Purpose |
-|---|---|---|
-| `sendMessage` | `CreateMessageDto` | Send to a group chat or start a private chat |
-| `editMessage` | `EditMessageDto` | Edit own text message |
-| `deleteMessage` | `deleteMessageDto` | Soft-delete own message |
-| `getMessages` | `GetMessagesDto`: `{ chatId, beforeId?, limit? }` | Fetch one page of a chat's history (newest first; see [History / pagination](#history--pagination)) |
+| Event             | Payload (`class-validator` on WS)                 | Purpose                                                                                             |
+| ----------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `sendMessage`     | `CreateMessageDto`                                | Send to a group chat or start a private chat                                                        |
+| `editMessage`     | `EditMessageDto`                                  | Edit own message text/caption (not voice/forwarded/attachment-only)                                 |
+| `deleteMessage`   | `deleteMessageDto`                                | Soft-delete own message                                                                             |
+| `getMessages`     | `GetMessagesDto`: `{ chatId, beforeId?, limit? }` | Fetch one page of a chat's history (newest first; see [History / pagination](#history--pagination)) |
+| `forwardMessages` | `ForwardMessagesDto`                              | Copy 1..20 messages to 1..5 chats (see [Forwarding](#forwarding))                                   |
 
 ### `CreateMessageDto` (`src/modules/messages/dtos/createMessage.dto.ts`)
 
 ```json
 {
-  "chatId": 42,            // required if group chat; optional otherwise
-  "userId": 7,             // required for PV messages (receiver user id)
-  "content": "text ≤5000", // required for text-only messages (MaxLength(5000))
-  "reply": 123,            // optional number: MessageId being replied to
-  "attachments": [12],     // optional, 1..10 attachment ids (see attachments.md)
-  "type": "text"           // optional, TypeMessageEnum — defaults to text
+    "chatId": 42, // required if group chat; optional otherwise
+    "userId": 7, // required for PV messages (receiver user id)
+    "content": "text ≤5000", // optional when attachments are present (MaxLength(5000))
+    "reply": 123, // optional number: MessageId being replied to
+    "attachments": [12], // optional, 1..10 UNIQUE positive attachment ids (see attachments.md)
+    "clientMessageId": "c_lz3k9f2", // optional 1..64 of A-Z a-z 0-9 _ -
+    "type": "text" // optional, TypeMessageEnum — defaults to text
 }
 ```
+
+A message needs text **or** at least one attachment; otherwise it is rejected
+(`message needs text or at least one attachment`). `clientMessageId` is echoed
+on the room event and the ack but is **not persisted** (history omits it).
 
 `sendChat` requires membership (`BadRequestException 'user not exit in chat'`). `sendPv` finds or creates a private Chat between the two users (`MessageService.sendPv`).
 
@@ -41,28 +47,50 @@ Sources: `src/modules/messages/gateways/message.gateway.ts`, `src/modules/messag
 
 ## Server → client events (broadcast to room)
 
-| Event | Emitted to | Payload (raw `Message` entity + populated relations) |
-|---|---|---|
-| `sendMessage:list` | room `chat:<chatId>` | full serialized Message (sender → `{ id, name, username, avatars }`, type, attachments) |
-| `editMessage:list` | room | updated message (`isEdited: true`) |
-| `deleteMessage:list` | room | **just the number** `dto.messageId` |
-| `getMessages` | ack only | `{ messages, hasMore, nextCursor }` (ack data; desc by id within the page) |
-| `chatlist:updated` | each member's `user:<id>` room | chat-list preview payload (see below) |
+| Event                | Emitted to                     | Payload (raw `Message` entity + populated relations)                                    |
+| -------------------- | ------------------------------ | --------------------------------------------------------------------------------------- |
+| `sendMessage:list`   | room `chat:<chatId>`           | full serialized Message (sender → `{ id, name, username, avatars }`, type, attachments) |
+| `editMessage:list`   | room                           | updated message (`isEdited: true`)                                                      |
+| `deleteMessage:list` | room                           | **just the number** `dto.messageId`                                                     |
+| `getMessages`        | ack only                       | `{ messages, hasMore, nextCursor }` (ack data; desc by id within the page)              |
+| `chatlist:updated`   | each member's `user:<id>` room | chat-list preview payload (see below)                                                   |
 
 ### `chatlist:updated` payload
 
 ```json
 {
-  "chatId": 42,
-  "lastMessage": {
-    "id": 999,
-    "content": "hello",
-    "senderId": 7,
-    "createdAt": "...",
-    "attachments": [{ "id": 12, "originalName": "...", "mimeType": "...", "size": 12345 }]
-  }
+    "chatId": 42,
+    "lastMessage": {
+        "id": 999,
+        "content": "hello",
+        "senderId": 7,
+        "createdAt": "...",
+        "attachments": [
+            {
+                "id": 12,
+                "originalName": "...",
+                "mimeType": "...",
+                "size": 12345,
+                "kind": "image",
+                "width": 1280,
+                "height": 960
+            }
+        ]
+    }
 }
 ```
+
+When `content` is empty the app derives the preview from the attachments:
+`📷 Photo` / `📷 3 photos` / `🎬 Video` / `🎬 2 videos` /
+`🎤 Voice message 0:23` / `📎 <file name>`.
+
+### Voice messages
+
+A voice message is exactly one attachment with `kind: "voice"` and empty text;
+the server rejects any other combination (see attachments.md). The wire
+attachment carries `duration` and `waveform` (64 integers `0..100`, or `null`).
+The app downloads the file completely to its cache and plays it locally; the
+download route serves the detected audio MIME inline.
 
 ### Actual `Message` shape (as serialized by gateway)
 
@@ -84,6 +112,10 @@ Sources: `src/modules/messages/gateways/message.gateway.ts`, `src/modules/messag
     avatars: string[]    // at most the CURRENT photo: [path] or []
   },
   replyToId: number | null,
+  forwardedFrom: {        // first forward origin; null for ordinary messages
+    userId: number | null, // null when the original user no longer exists
+    name: string           // snapshot taken at first forward time
+  } | null,
   replyTo: {              // compact quoted preview, null when not a reply
     id: number,
     content: string | null, // ~200-char truncation; null when isDeleted
@@ -91,17 +123,71 @@ Sources: `src/modules/messages/gateways/message.gateway.ts`, `src/modules/messag
     senderName: string,
     type: string,
     attachmentsCount: number,
+    attachmentKind: 'image' | 'video' | 'voice' | 'file' | null, // first attachment
+    attachmentDuration: number | null, // duration of a voice/video first attachment
     isDeleted: boolean
   } | null,
   attachments: [{
      id: number, originalName: string, mimeType: string,
-     size: number, createdAt: string, messageId: number, uploaderId: number,
-     storageKey: string, status: 'attached', chatId: number
-  }] | []
+     size: number, kind: 'image' | 'video' | 'voice' | 'file',
+     width?: number, height?: number,   // known for new images/videos
+     duration?: number,                 // videos + voice
+     hasPoster?: boolean,               // videos only
+     waveform?: number[] | null,        // voice only: 64 bars 0..100
+     createdAt: string
+  }],
+  // clientMessageId: string — ONLY on the send ack / sendMessage:list echo
 }
 ```
 
-(`getMessages`/`loadMessage` output above, from `MessageService.getPage` and `loadMessage`. `select` hides most Attachment columns except in the list — some attachments come from relations.)
+(`getMessages`/`loadMessage` output above, from `MessageService.getPage` and `loadMessage`. Storage keys, paths (including `posterPath`), uploader ids and statuses are never serialized. `hasPoster` is derived from the private poster reference.)
+
+## Forwarding
+
+`forwardMessages` accepts:
+
+```json
+{
+    "fromChatId": 42,
+    "messageIds": [100, 101, 102],
+    "toChatIds": [43, 44],
+    "requestId": "fwd_m6x1k_ab12cd34"
+}
+```
+
+- `messageIds`: 1..20 unique positive integers, sorted ascending by the server.
+- `toChatIds`: 1..5 unique positive integers; the source chat is allowed.
+- `requestId`: 8..64 chars of `A-Z a-z 0-9 _ -`.
+
+Authorization is enforced per chat: the caller must be a member, not have the
+`ban` role, and the chat must not have `isBan = true`. Source failure rejects
+the whole request; a failing target returns `{ chatId, ok: false, message }`
+without blocking other targets. The source must belong to `fromChatId` and not
+be soft-deleted; a missing/foreign/deleted id rejects the whole selection.
+
+```json
+{
+    "results": [
+        { "chatId": 43, "ok": true, "messageIds": [200, 201, 202] },
+        {
+            "chatId": 44,
+            "ok": false,
+            "message": "You have been banned from the target chat"
+        }
+    ]
+}
+```
+
+Each new message is owned by the forwarder, carries the copied text/type and
+new attachment rows/files, and never carries `replyTo`. Its `forwardedFrom` is
+the original sender snapshot; forwarding a forwarded message keeps the first
+origin. The source chat id/name is never stored on the copies.
+
+`requestId` is idempotent for 2 minutes per user: a replay returns the stored
+result and creates/emits nothing again. At most 20 forward requests per user
+per minute are allowed (`Too many forward requests. Try again in a minute.`).
+Other errors include `You are not a member of the source chat`, `The source
+chat has been banned`, and `An attachment is no longer available`.
 
 ## Reply rules
 
@@ -112,13 +198,17 @@ Sources: `src/modules/messages/gateways/message.gateway.ts`, `src/modules/messag
 
 ## Editing rules (`MessageService.edit`)
 
-- Must be the sender (`sender: { id: user.sub }`), not deleted, and message `type.name === 'text'`.
-- Otherwise `WsException('message not found')` / `'only text messages can be edited'`.
-- Sets `isEdited: true`.
+- Must be the sender, not deleted, with existing non-empty text (attachments are allowed; only the caption changes).
+- Voice messages are never editable: `WsException('voice messages cannot be edited')`.
+- Forwarded messages are never editable: `WsException('forwarded messages cannot be edited')`.
+- Attachment-only messages are rejected: `WsException('messages without text cannot be edited')`.
+- Non-owners get `WsException('you can only edit your own messages')`; empty new text gets `'message content is required'`; missing/deleted get `'message not found'`.
+- Sets `isEdited: true` and returns the full message with attachments/reply/forward fields loaded for the echo.
 
 ## Deletion rules (`MessageService.delete`)
 
-- Sender-only soft delete (sets `isDeleted: true`).
+- Sender-only soft delete (sets `isDeleted: true`) for every message kind; group owners may delete other members' messages.
+- Attachments and their files are cleaned up by the existing delayed cleanup job, while downloads of a soft-deleted message immediately return 404.
 - **Deleted messages are filtered from `getPage`** and do not appear in `getMessages`; peers learn of deletion only via the `deleteMessage:list` event.
 
 ## History / pagination

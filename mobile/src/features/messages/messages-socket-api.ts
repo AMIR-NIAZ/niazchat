@@ -4,6 +4,8 @@ import type {
     EditMessageSocketPayload,
     DeleteMessageSocketPayload,
     MarkSeenSocketPayload,
+    ForwardMessagesSocketPayload,
+    ForwardMessagesResult,
 } from '../../core/socket';
 import { socketOrThrow } from '../chats/chats-socket-api';
 import { ApiError } from '../../core/api';
@@ -40,10 +42,18 @@ export async function deliverMessage(
     chatId: number,
     content: string,
     replyToId?: number,
+    attachmentIds?: number[],
+    clientMessageId?: string,
 ): Promise<MessageDto | null> {
     const payload: CreateMessageSocketPayload = { chatId, content };
     if (replyToId !== undefined) {
         payload.reply = replyToId;
+    }
+    if (attachmentIds !== undefined && attachmentIds.length > 0) {
+        payload.attachments = attachmentIds;
+    }
+    if (clientMessageId !== undefined) {
+        payload.clientMessageId = clientMessageId;
     }
     return request<MessageDto>(connectedSocket(), 'sendMessage', payload);
 }
@@ -67,6 +77,17 @@ export async function markChatSeen(
     return request<{ lastSeenId: number }>(
         connectedSocket(),
         'markSeen',
+        payload,
+    );
+}
+
+/** WS `forwardMessages` — copies 1..20 messages to 1..5 authorized chats. */
+export async function forwardChatMessages(
+    payload: ForwardMessagesSocketPayload,
+): Promise<ForwardMessagesResult | null> {
+    return request<ForwardMessagesResult>(
+        connectedSocket(),
+        'forwardMessages',
         payload,
     );
 }

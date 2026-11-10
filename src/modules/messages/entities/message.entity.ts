@@ -39,4 +39,14 @@ export class Message extends BaseEntity {
 
     @Column({ default: false })
     isDeleted: boolean;
+
+    /**
+     * Forward origin snapshot. Both stay NULL for ordinary messages and are
+     * copied unchanged when a forwarded message is forwarded again.
+     */
+    @Column({ type: 'bigint', nullable: true })
+    forwardedFromUserId: number | null;
+
+    @Column({ type: 'varchar', length: 100, nullable: true })
+    forwardedFromName: string | null;
 }

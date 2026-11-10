@@ -4,7 +4,7 @@ import {
     NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, LessThan, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, LessThan, Repository } from 'typeorm';
 import { Message } from '../entities/message.entity';
 import { CreateMessageDto } from '../dtos/createMessage.dto';
 import { ChatMember } from 'src/modules/chats/entities/chat_members.entity';
@@ -25,6 +25,7 @@ import {
 } from 'src/common/types/brands.type';
 import { ContentResolverService } from './content-resolver.service';
 import { AttachmentService } from 'src/modules/attachments/services/attachment.service';
+import { Attachment } from 'src/modules/attachments/entities/attachment.entity';
 import { ChatAccessService } from 'src/modules/chats/services/chat-access.service';
 
 @Injectable()
@@ -55,11 +56,14 @@ export class MessageService {
         const hasText = !!dto.content?.trim();
         const textContent: string = hasText ? (dto.content as string) : '';
         if (!hasText && !hasAttachments) {
-            throw new BadRequestException('message content is required');
+            throw new BadRequestException(
+                'message needs text or at least one attachment',
+            );
         }
 
+        let message: Message;
         if (chatId) {
-            return this.sendChat(
+            message = await this.sendChat(
                 chatId,
                 user,
                 reply,
@@ -67,10 +71,8 @@ export class MessageService {
                 type,
                 hasAttachments ? dto.attachments : undefined,
             );
-        }
-
-        if (userId) {
-            return this.sendPv(
+        } else if (userId) {
+            message = await this.sendPv(
                 userId,
                 user,
                 reply,
@@ -78,9 +80,17 @@ export class MessageService {
                 type,
                 hasAttachments ? dto.attachments : undefined,
             );
+        } else {
+            throw new BadRequestException();
         }
 
-        throw new BadRequestException();
+        // Transient echo-only field: never persisted, history pages omit it.
+        if (dto.clientMessageId !== undefined) {
+            (
+                message as Message & { clientMessageId?: string }
+            ).clientMessageId = dto.clientMessageId;
+        }
+        return message;
     }
 
     private async sendChat(
@@ -202,6 +212,17 @@ export class MessageService {
         }
 
         const message = await this.dataSource.transaction(async (manager) => {
+            // Voice composition is a server rule, checked inside the same
+            // transaction as the claim: a voice id can never be combined with
+            // text or another attachment, whatever the client sends.
+            if (attachmentIds?.length) {
+                await this.assertVoiceComposition(
+                    manager,
+                    attachmentIds,
+                    content,
+                );
+            }
+
             const saved = await manager.getRepository(Message).save({
                 content,
                 sender: { id: user.sub },
@@ -221,7 +242,54 @@ export class MessageService {
             return saved;
         });
 
-        return this.loadMessage(message.id as MessageId);
+        const loaded = await this.loadMessage(message.id as MessageId);
+        // TypeORM joins attachments without a stable order. The ack/echo must
+        // present them exactly in the order the client sent the ids (photo then
+        // PDF must not come back reversed).
+        return attachmentIds?.length
+            ? this.orderAttachments(loaded, attachmentIds)
+            : loaded;
+    }
+
+    /**
+     * A voice message is exactly one voice attachment and no text. Any other
+     * combination is rejected before the message row is written.
+     */
+    private async assertVoiceComposition(
+        manager: EntityManager,
+        attachmentIds: AttachmentId[],
+        content: string,
+    ): Promise<void> {
+        const rows = await manager.getRepository(Attachment).find({
+            where: { id: In(attachmentIds) },
+            select: { id: true, voice: true },
+        });
+        if (!rows.some((row) => row.voice === true)) {
+            return;
+        }
+        if (rows.length !== 1 || attachmentIds.length !== 1) {
+            throw new BadRequestException(
+                'a voice message must have exactly one attachment',
+            );
+        }
+        if (content.trim() !== '') {
+            throw new BadRequestException('voice messages cannot include text');
+        }
+    }
+
+    private orderAttachments(
+        message: Message,
+        attachmentIds: AttachmentId[],
+    ): Message {
+        const rank = new Map(
+            attachmentIds.map((id, index) => [Number(id), index]),
+        );
+        message.attachments = [...(message.attachments ?? [])].sort(
+            (a, b) =>
+                (rank.get(Number(a.id)) ?? attachmentIds.length) -
+                (rank.get(Number(b.id)) ?? attachmentIds.length),
+        );
+        return message;
     }
 
     /**
@@ -293,6 +361,8 @@ export class MessageService {
                 updatedAt: true,
                 isEdited: true,
                 isDeleted: true,
+                forwardedFromUserId: true,
+                forwardedFromName: true,
                 chat: { id: true },
                 sender: {
                     id: true,
@@ -309,6 +379,12 @@ export class MessageService {
                     originalName: true,
                     mimeType: true,
                     size: true,
+                    width: true,
+                    height: true,
+                    duration: true,
+                    posterPath: true,
+                    voice: true,
+                    waveform: true,
                     createdAt: true,
                 },
                 replyTo: {
@@ -317,7 +393,12 @@ export class MessageService {
                     isDeleted: true,
                     sender: { id: true, profile: { id: true, name: true } },
                     type: { id: true, name: true },
-                    attachments: { id: true },
+                    attachments: {
+                        id: true,
+                        mimeType: true,
+                        duration: true,
+                        voice: true,
+                    },
                 },
             },
         });
@@ -334,20 +415,20 @@ export class MessageService {
             throw new WsException('message content is required');
         }
 
-        // One query enforces every rule server-side: the message must exist
-        // in the GIVEN chat, belong to the caller, not be soft-deleted. A
-        // miss can mean "not mine" or "another chat" — report it neutrally.
+        // The message must exist in the GIVEN chat and not be soft-deleted.
+        // Ownership is checked below so a non-owner gets a readable error
+        // instead of a generic "not found".
         const message = await this.messageRepository.findOne({
             where: {
                 id: messageId,
                 chat: { id: chatId },
-                sender: { id: user.sub },
                 isDeleted: false,
             },
             relations: {
                 type: true,
                 sender: { profile: true },
                 chat: true,
+                attachments: true,
                 replyTo: {
                     sender: { profile: true },
                     type: true,
@@ -362,6 +443,8 @@ export class MessageService {
                 updatedAt: true,
                 isEdited: true,
                 isDeleted: true,
+                forwardedFromUserId: true,
+                forwardedFromName: true,
                 chat: { id: true },
                 sender: {
                     id: true,
@@ -373,26 +456,64 @@ export class MessageService {
                     },
                 },
                 type: { id: true, name: true },
+                attachments: {
+                    id: true,
+                    originalName: true,
+                    mimeType: true,
+                    size: true,
+                    width: true,
+                    height: true,
+                    duration: true,
+                    posterPath: true,
+                    voice: true,
+                    waveform: true,
+                    createdAt: true,
+                },
                 replyTo: {
                     id: true,
                     content: true,
                     isDeleted: true,
                     sender: { id: true, profile: { id: true, name: true } },
                     type: { id: true, name: true },
-                    attachments: { id: true },
+                    attachments: {
+                        id: true,
+                        mimeType: true,
+                        duration: true,
+                        voice: true,
+                    },
                 },
             },
         });
         if (!message) throw new WsException('message not found');
 
-        if (message.type.name !== (TypeMessageEnum.TEXT as string)) {
-            throw new WsException('only text messages can be edited');
+        if (Number(message.sender?.id) !== Number(user.sub)) {
+            throw new WsException('you can only edit your own messages');
+        }
+        if (message.content === null || message.content.trim() === '') {
+            throw new WsException('messages without text cannot be edited');
+        }
+        const isVoice =
+            message.type.name === (TypeMessageEnum.VOICE as string) ||
+            (message.attachments ?? []).some(
+                (attachment) => attachment.voice === true,
+            );
+        if (isVoice) {
+            throw new WsException('voice messages cannot be edited');
+        }
+        if (
+            message.forwardedFromUserId != null ||
+            message.forwardedFromName != null
+        ) {
+            throw new WsException('forwarded messages cannot be edited');
         }
 
         message.content = newContent;
         message.isEdited = true;
+        await this.messageRepository.save(message);
 
-        return await this.messageRepository.save(message);
+        // The edit echo must carry the full attachment metadata, reply preview
+        // and forward origin, not a light row with no relations.
+        return await this.loadMessage(message.id as MessageId);
     }
 
     /**
@@ -422,10 +543,7 @@ export class MessageService {
         const isOwnMessage = Number(message.sender?.id) === Number(user.sub);
         if (!isOwnMessage) {
             const caller = await this.access.getCallerContext(chatId, user.sub);
-            if (
-                !caller.isManager ||
-                caller.chat.type !== TypeChatEnum.GRUPE
-            ) {
+            if (!caller.isManager || caller.chat.type !== TypeChatEnum.GRUPE) {
                 throw new WsException(
                     "only the group owner can delete other members' messages",
                 );
@@ -494,6 +612,8 @@ export class MessageService {
                 content: true,
                 isEdited: true,
                 isDeleted: true,
+                forwardedFromUserId: true,
+                forwardedFromName: true,
                 sender: {
                     id: true,
                     profile: {
@@ -508,6 +628,12 @@ export class MessageService {
                     originalName: true,
                     mimeType: true,
                     size: true,
+                    width: true,
+                    height: true,
+                    duration: true,
+                    posterPath: true,
+                    voice: true,
+                    waveform: true,
                     createdAt: true,
                 },
                 replyTo: {
@@ -516,7 +642,12 @@ export class MessageService {
                     isDeleted: true,
                     sender: { id: true, profile: { id: true, name: true } },
                     type: { id: true, name: true },
-                    attachments: { id: true },
+                    attachments: {
+                        id: true,
+                        mimeType: true,
+                        duration: true,
+                        voice: true,
+                    },
                 },
             },
             order: { id: 'DESC' },
@@ -533,5 +664,4 @@ export class MessageService {
             nextCursor: oldest === undefined ? null : Number(oldest.id),
         };
     }
-
 }

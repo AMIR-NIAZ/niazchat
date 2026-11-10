@@ -43,7 +43,10 @@ function message(
         senderName: `user${senderId}`,
         senderAvatarUrls: [],
         senderAvatarPath: null,
+        attachments: [],
         attachmentsCount: 0,
+        clientMessageId: null,
+        forwardedFrom: null,
         replyTo: null,
         replyToId: null,
         status,
@@ -76,7 +79,11 @@ check(
     true,
 );
 check('empty path has no thumbnail', avatarThumbUrl('', 32), null);
-check('non-image path has no thumbnail', avatarThumbUrl('uploads/x.txt', 32), null);
+check(
+    'non-image path has no thumbnail',
+    avatarThumbUrl('uploads/x.txt', 32),
+    null,
+);
 
 // ── run grouping ───────────────────────────────────────────────────────────
 const a1 = message(1, 2, day1);
@@ -110,10 +117,10 @@ check(
     [false, false, false, true],
 );
 
-const prepended = assignMessageRuns(
-    [message(7, 2, day2), a1, a2, a3],
-    { isGroup: true, currentUserId: 9 },
-);
+const prepended = assignMessageRuns([message(7, 2, day2), a1, a2, a3], {
+    isGroup: true,
+    currentUserId: 9,
+});
 check(
     'prepend: new day breaks the run',
     prepended.map((row) => ({
@@ -136,7 +143,10 @@ const divider = assignMessageRuns([a1, a2, a3], {
 });
 check(
     'unread divider splits the run (avatar closes each run)',
-    divider.map((row) => ({ name: row.showSenderName, avatar: row.showAvatar })),
+    divider.map((row) => ({
+        name: row.showSenderName,
+        avatar: row.showAvatar,
+    })),
     [
         { name: true, avatar: true },
         { name: true, avatar: false },
@@ -161,13 +171,16 @@ check(
     ],
 );
 
-const pending = assignMessageRuns(
-    [a1, message(8, 9, day1, 'pending')],
-    { isGroup: true, currentUserId: 9 },
-);
+const pending = assignMessageRuns([a1, message(8, 9, day1, 'pending')], {
+    isGroup: true,
+    currentUserId: 9,
+});
 check(
     'pending bubbles never show a name or avatar',
-    pending.map((row) => ({ name: row.showSenderName, avatar: row.showAvatar })),
+    pending.map((row) => ({
+        name: row.showSenderName,
+        avatar: row.showAvatar,
+    })),
     [
         { name: true, avatar: true },
         { name: false, avatar: false },

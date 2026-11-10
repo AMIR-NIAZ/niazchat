@@ -23,6 +23,7 @@ describe('MessageService (attachment integration)', () => {
     let messageRepository: {
         save: jest.Mock;
         findOne: jest.Mock;
+        find: jest.Mock;
         exists: jest.Mock;
         update: jest.Mock;
     };
@@ -58,6 +59,7 @@ describe('MessageService (attachment integration)', () => {
         messageRepository = {
             save: jest.fn(),
             findOne: jest.fn(),
+            find: jest.fn().mockResolvedValue([]),
             exists: jest.fn(),
             update: jest.fn(),
         };
@@ -183,8 +185,30 @@ describe('MessageService (attachment integration)', () => {
                 user as never,
                 { chatId: 10, type: 'text' } as never,
             ),
-        ).rejects.toThrow(/content is required/);
+        ).rejects.toThrow(/text or at least one attachment/);
         expect(transaction).not.toHaveBeenCalled();
+    });
+
+    it('echoes clientMessageId on the returned message without persisting it', async () => {
+        const message = await service.create(
+            user as never,
+            {
+                chatId: 10,
+                content: '',
+                type: 'file',
+                attachments: [9],
+                clientMessageId: 'c_abc-123',
+            } as never,
+        );
+
+        expect(
+            (message as unknown as { clientMessageId?: string })
+                .clientMessageId,
+        ).toBe('c_abc-123');
+        const saveCalls = messageRepository.save.mock.calls as unknown as Array<
+            [Record<string, unknown>]
+        >;
+        expect(saveCalls[0]?.[0]?.clientMessageId).toBeUndefined();
     });
 
     it('rejects attachments belonging to another user', async () => {
@@ -254,6 +278,80 @@ describe('MessageService (attachment integration)', () => {
                 } as never,
             ),
         ).rejects.toThrow(/attachment not found/);
+    });
+
+    it('accepts a voice-only message: one voice attachment, empty text', async () => {
+        messageRepository.find.mockResolvedValue([{ id: 9, voice: true }]);
+
+        await service.create(
+            user as never,
+            {
+                chatId: 10,
+                content: '',
+                type: 'file',
+                attachments: [9],
+            } as never,
+        );
+
+        expect(messageRepository.save).toHaveBeenCalledWith(
+            expect.objectContaining({ content: '' }),
+        );
+    });
+
+    it('rejects a voice attachment combined with text', async () => {
+        messageRepository.find.mockResolvedValue([{ id: 9, voice: true }]);
+
+        await expect(
+            service.create(
+                user as never,
+                {
+                    chatId: 10,
+                    content: 'listen to this',
+                    type: 'text',
+                    attachments: [9],
+                } as never,
+            ),
+        ).rejects.toThrow(/voice messages cannot include text/);
+        expect(messageRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects a voice attachment combined with another attachment', async () => {
+        messageRepository.find.mockResolvedValue([
+            { id: 9, voice: true },
+            { id: 10, voice: false },
+        ]);
+
+        await expect(
+            service.create(
+                user as never,
+                {
+                    chatId: 10,
+                    content: '',
+                    type: 'file',
+                    attachments: [9, 10],
+                } as never,
+            ),
+        ).rejects.toThrow(/exactly one attachment/);
+        expect(messageRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects two voice attachments in one message', async () => {
+        messageRepository.find.mockResolvedValue([
+            { id: 9, voice: true },
+            { id: 10, voice: true },
+        ]);
+
+        await expect(
+            service.create(
+                user as never,
+                {
+                    chatId: 10,
+                    content: '',
+                    type: 'file',
+                    attachments: [9, 10],
+                } as never,
+            ),
+        ).rejects.toThrow(/exactly one attachment/);
     });
 
     it('rejects messages whose sender is not a chat member', async () => {
@@ -399,7 +497,7 @@ describe('MessageService edit/delete rules (ownership, chat match, state)', () =
 
         expect(message.content).toBe('hello edited');
         expect(message.isEdited).toBe(true);
-        // The query itself must scope to the chat + sender + not-deleted.
+        // The query scopes to the chat + not-deleted; ownership is checked after.
         const findOneMock = messageRepository.findOne as unknown as {
             mock: { calls: Array<Array<{ where: Record<string, unknown> }>> };
         };
@@ -407,18 +505,29 @@ describe('MessageService edit/delete rules (ownership, chat match, state)', () =
         expect(editArgs[0]?.where).toEqual({
             id: 200,
             chat: { id: 10 },
-            sender: { id: 1 },
             isDeleted: false,
         });
     });
 
-    it("rejects editing someone else's message (including a mismatched chatId)", async () => {
-        messageRepository.findOne.mockResolvedValue(null);
+    it("rejects editing someone else's existing message with a clear error", async () => {
+        messageRepository.findOne.mockResolvedValue(ownTextMessage);
 
         await expect(
             service.edit(
                 { messageId: 200, chatId: 10, newContent: 'mine now' } as never,
                 otherUser as never,
+            ),
+        ).rejects.toThrow(/only edit your own messages/);
+        expect(messageRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects editing a message that is missing or in another chat', async () => {
+        messageRepository.findOne.mockResolvedValue(null);
+
+        await expect(
+            service.edit(
+                { messageId: 200, chatId: 10, newContent: 'x' } as never,
+                user as never,
             ),
         ).rejects.toThrow(/message not found/);
         expect(messageRepository.save).not.toHaveBeenCalled();
@@ -434,10 +543,11 @@ describe('MessageService edit/delete rules (ownership, chat match, state)', () =
         expect(messageRepository.findOne).not.toHaveBeenCalled();
     });
 
-    it('rejects editing a non-text message', async () => {
+    it('rejects editing a forwarded message even when it is own text', async () => {
         messageRepository.findOne.mockResolvedValue({
             ...ownTextMessage,
-            type: { id: 8, name: 'file' },
+            forwardedFromUserId: 9,
+            forwardedFromName: 'Original',
         });
 
         await expect(
@@ -445,8 +555,100 @@ describe('MessageService edit/delete rules (ownership, chat match, state)', () =
                 { messageId: 200, chatId: 10, newContent: 'x' } as never,
                 user as never,
             ),
-        ).rejects.toThrow(/only text messages can be edited/);
+        ).rejects.toThrow(/forwarded messages cannot be edited/);
         expect(messageRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('edits the caption of an own message with attachments and keeps them', async () => {
+        const attachment = {
+            id: 9,
+            originalName: 'photo.jpg',
+            mimeType: 'image/jpeg',
+            size: 12,
+            voice: false,
+        };
+        messageRepository.findOne.mockResolvedValue({
+            ...ownTextMessage,
+            content: 'old caption',
+            type: { id: 8, name: 'image' },
+            attachments: [attachment],
+        });
+
+        const message = await service.edit(
+            {
+                messageId: 200,
+                chatId: 10,
+                newContent: 'new caption',
+            } as never,
+            user as never,
+        );
+
+        expect(message.content).toBe('new caption');
+        expect(message.attachments).toEqual([attachment]);
+        expect(messageRepository.save).toHaveBeenCalled();
+    });
+
+    it('rejects editing an attachment-only message', async () => {
+        messageRepository.findOne.mockResolvedValue({
+            ...ownTextMessage,
+            content: '',
+            type: { id: 8, name: 'image' },
+            attachments: [{ id: 9, mimeType: 'image/jpeg', voice: false }],
+        });
+
+        await expect(
+            service.edit(
+                {
+                    messageId: 200,
+                    chatId: 10,
+                    newContent: 'add caption',
+                } as never,
+                user as never,
+            ),
+        ).rejects.toThrow(/messages without text cannot be edited/);
+        expect(messageRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects editing a voice message', async () => {
+        messageRepository.findOne.mockResolvedValue({
+            ...ownTextMessage,
+            type: { id: 9, name: 'voice' },
+            attachments: [
+                {
+                    id: 9,
+                    mimeType: 'audio/mp4',
+                    voice: true,
+                },
+            ],
+        });
+
+        await expect(
+            service.edit(
+                { messageId: 200, chatId: 10, newContent: 'x' } as never,
+                user as never,
+            ),
+        ).rejects.toThrow(/voice messages cannot be edited/);
+        expect(messageRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects editing a text-type message whose attachment is voice', async () => {
+        messageRepository.findOne.mockResolvedValue({
+            ...ownTextMessage,
+            attachments: [
+                {
+                    id: 9,
+                    mimeType: 'audio/mp4',
+                    voice: true,
+                },
+            ],
+        });
+
+        await expect(
+            service.edit(
+                { messageId: 200, chatId: 10, newContent: 'x' } as never,
+                user as never,
+            ),
+        ).rejects.toThrow(/voice messages cannot be edited/);
     });
 
     it('rejects editing an already-deleted message', async () => {
@@ -460,7 +662,24 @@ describe('MessageService edit/delete rules (ownership, chat match, state)', () =
         ).rejects.toThrow(/message not found/);
     });
 
-    it("soft-deletes the sender's own message", async () => {
+    it("soft-deletes the sender's own attachment message", async () => {
+        messageRepository.findOne.mockResolvedValue({
+            ...ownTextMessage,
+            type: { id: 8, name: 'file' },
+            attachments: [{ id: 9, mimeType: 'application/pdf', voice: false }],
+        });
+
+        await service.delete(
+            { chatId: 10, messageId: 200 } as never,
+            user as never,
+        );
+
+        expect(messageRepository.update).toHaveBeenCalledWith(200, {
+            isDeleted: true,
+        });
+    });
+
+    it("soft-deletes the sender's own text message", async () => {
         messageRepository.findOne.mockResolvedValue(ownTextMessage);
 
         await service.delete(

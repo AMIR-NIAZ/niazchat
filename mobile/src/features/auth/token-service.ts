@@ -1,50 +1,127 @@
-import axios, { AxiosError } from 'axios';
+import axios from 'axios';
 import { env } from '../../core/config/env';
-import { toApiError } from '../../core/api/http-client';
 import {
-  readAccessToken,
-  readRefreshToken,
-  writeAccessToken,
+    readAccessToken,
+    writeTokens,
 } from '../../core/storage/secure-token.storage';
+import { classifyRefreshStatus } from './session-refresh-model';
 
 /**
- * Token refresh round-trip.
+ * Token transport + in-memory mirror.
  *
- * Backend contract (docs/mobile-api/authentication.md):
- * `POST /auth/refresh-token` uses a raw **`token` header**, NOT Authorization.
- * The refresh token is not rotated; the response is `{ accessToken }`.
- *
- * Runs on a bare axios instance (no interceptors) to avoid recursion.
+ * The refresh call runs on a bare axios instance (never the app client) so it
+ * cannot recurse through the 401 interceptor, and it uses the backend's raw
+ * `token` header (NOT `Authorization`).
  */
 
-export function hasRefreshToken(): Promise<boolean> {
-  return readRefreshToken().then((token) => token !== null);
+/** Refresh round-trip timeout: after this the result is `unavailable`. */
+export const REFRESH_REQUEST_TIMEOUT_MS = 10_000;
+
+/**
+ * Last access token known to memory. Kept in sync with SecureStore so a burst
+ * of requests does not re-read the keychain and a just-refreshed token is used
+ * immediately by requests that started earlier.
+ */
+let cachedAccessToken: string | null = null;
+
+export function setCachedAccessToken(token: string | null): void {
+    cachedAccessToken = token;
 }
 
-export async function refreshAccessToken(): Promise<string | null> {
-  const refreshToken = await readRefreshToken();
-  if (refreshToken === null) {
-    return null;
-  }
-  try {
-    // Bare instance: never attach Authorization, never intercept 401s.
-    const response = await axios.post<{ accessToken: string }>(
-      `${env.apiUrl}/auth/refresh-token`,
-      null,
-      { headers: { token: refreshToken }, timeout: 15_000 },
-    );
-    const accessToken = response.data.accessToken;
-    if (typeof accessToken !== 'string' || accessToken === '') {
-      return null;
-    }
-    await writeAccessToken(accessToken);
-    return accessToken;
-  } catch (error) {
-    // Invalid/expired refresh JWT → 401 (or 403 rewritten to 'user not access').
-    throw toApiError(error as AxiosError);
-  }
+export function forgetCachedTokens(): void {
+    cachedAccessToken = null;
 }
 
+/** Current access token (memory first, then SecureStore). */
 export async function getAccessToken(): Promise<string | null> {
-  return readAccessToken();
+    if (cachedAccessToken !== null) {
+        return cachedAccessToken;
+    }
+    const stored = await readAccessToken();
+    cachedAccessToken = stored;
+    return stored;
+}
+
+/** Definitive rejection vs transient failure of one refresh call. */
+export type RefreshRequestFailureKind = 'rejected' | 'unavailable';
+
+export class RefreshRequestFailure extends Error {
+    readonly kind: RefreshRequestFailureKind;
+
+    constructor(kind: RefreshRequestFailureKind, message: string) {
+        super(message);
+        this.name = 'RefreshRequestFailure';
+        this.kind = kind;
+    }
+}
+
+export interface RefreshedTokens {
+    accessToken: string;
+    /** Only set when the server rotated the refresh token. */
+    newRefreshToken: string | null;
+}
+
+/**
+ * One `POST /auth/refresh-token`. Throws `RefreshRequestFailure` whose `kind`
+ * is the caller-facing classification. A 200 without an access token is
+ * treated as transient (never logs the user out).
+ */
+export async function requestRefreshedTokens(
+    refreshToken: string,
+    signal?: AbortSignal,
+): Promise<RefreshedTokens> {
+    try {
+        const response = await axios.post<unknown>(
+            `${env.apiUrl}/auth/refresh-token`,
+            null,
+            {
+                headers: { token: refreshToken },
+                timeout: REFRESH_REQUEST_TIMEOUT_MS,
+                ...(signal !== undefined ? { signal } : {}),
+            },
+        );
+        const body = response.data as
+            | { accessToken?: unknown; refreshToken?: unknown }
+            | null
+            | undefined;
+        const accessToken = body?.accessToken;
+        if (typeof accessToken !== 'string' || accessToken.trim() === '') {
+            throw new RefreshRequestFailure(
+                'unavailable',
+                'The refresh response did not contain an access token.',
+            );
+        }
+        const rotated = body?.refreshToken;
+        return {
+            accessToken,
+            newRefreshToken:
+                typeof rotated === 'string' && rotated !== '' ? rotated : null,
+        };
+    } catch (error) {
+        if (error instanceof RefreshRequestFailure) {
+            throw error;
+        }
+        if (axios.isAxiosError(error)) {
+            const status = error.response?.status ?? null;
+            throw new RefreshRequestFailure(
+                classifyRefreshStatus(status),
+                status === null
+                    ? 'Could not reach the server.'
+                    : `Refresh request failed (${status}).`,
+            );
+        }
+        throw new RefreshRequestFailure(
+            'unavailable',
+            'Refresh request failed.',
+        );
+    }
+}
+
+/** Persists a refreshed pair and updates the in-memory access token. */
+export async function storeRefreshedTokens(
+    accessToken: string,
+    refreshToken: string,
+): Promise<void> {
+    await writeTokens(accessToken, refreshToken);
+    cachedAccessToken = accessToken;
 }

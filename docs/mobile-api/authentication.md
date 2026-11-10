@@ -81,7 +81,13 @@ token: <refreshToken>
 { "accessToken": "<new jwt 1h>" }
 ```
 
-- **Errors:** 401 `UnauthorizedException` (invalid/expired refresh JWT) or 403 `ForbiddenException` (token does not match the stored hash in `users.refreshToken`). The bypass filter rewrites 403 message to `user not access`.
+- **Errors:** **401 for every rejection**, with one stable body:
+
+```json
+{ "success": false, "statusCode": 401, "message": "invalid refresh token" }
+```
+
+This covers a missing/blank `token` header, a malformed or expired refresh JWT, and a JWT that no longer matches the stored hash in `users.refreshToken` (e.g. another login replaced it). Any 401/403 from this route means the client must sign in again.
 
 ### Token semantics (`src/modules/auth/services/jwt.service.ts`)
 
@@ -90,7 +96,8 @@ token: <refreshToken>
 | accessToken | `ACCESS_TOKEN_SECRET` | 1 h | `{ sub: number (user id), role: string }` |
 | refreshToken | `REFRESH_TOKEN_SECRET` | 30 d | same |
 
-- Refresh tokens are stored **hashed** on the user row (`AuthService.generateTokens`) and rotated is NOT performed — refresh returns only a new access token and does not reissue the refresh token.
+- Refresh tokens are stored **hashed** on the user row (`AuthService.generateTokens`) and rotation is NOT performed — refresh returns only a new access token and does not reissue the refresh token. Because the refresh token never changes, a refresh response lost in transit cannot strand the client; there is no need for a rotation grace window.
+- Lifetimes are hardcoded in `jwt.service.ts` (access **1 h**, refresh **30 d**); there is no env override today. For device testing lower `expiresIn` there temporarily and revert it.
 
 ## Request authentication
 
@@ -133,4 +140,10 @@ All in `AuthController` (`src/common/services/.../permission.service.ts`):
 
 - Store `accessToken` in secure storage; refresh on any 401 using the `token` **header** (easy to get wrong — it is not `Authorization`).
 - Once the access token expires (1 h) the only signal is the 401 from `PayloadGuard`; refresh and retry.
+- **Refresh strategy (app):** one single-flight `refreshSession()` shared by cold start, foreground, the HTTP 401 handler, WebSocket auth errors and one proactive timer.
+  - Cold start ALWAYS refreshes before rendering protected screens or opening the socket.
+  - Foreground refreshes when the app was backgrounded > 20 s or the token expires within 60 s (JS timers do not run in the background).
+  - Proactive timer fires 60 s before `exp` (access token decoded WITHOUT verification).
+  - Result classification: 401/403 (or no refresh token) = `rejected` → clear tokens and go to login; network/timeout/5xx/429/abort = `unavailable` → keep the session and retry with backoff.
+  - The socket must reconnect after every successful refresh: the WS guard validates the **handshake header** on every event, so a stale header fails even while connected. Reconnecting re-runs the existing `joinChat`/refetch hooks.
 - If you log out, no backend endpoint invalidates tokens (`AuthService` has no logout) — client-side only.

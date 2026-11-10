@@ -1,82 +1,133 @@
-import { MutableRefObject, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { AppText, Screen } from '../shared/components';
-import { palette, spacing, typography } from '../shared/theme';
-import { registerAuthTokenProvider, useAuthStore } from '../features/auth';
+import { StyleSheet, View } from 'react-native';
+import {
+    AppText,
+    FormButton,
+    Screen,
+    palette,
+    spacing,
+    typography,
+} from '../shared/components';
+import {
+    registerAuthTokenProvider,
+    startSessionLifecycle,
+    useAuthStore,
+} from '../features/auth';
+import { appQueryClient } from '../core/query/query-client';
 import { I18nManager } from 'react-native';
 
 I18nManager.allowRTL(false);
 I18nManager.forceRTL(false);
 /**
  * Root layout:
- * 1. Registers the auth token provider (HTTP client ↔ SecureStore wiring).
- * 2. Restores any stored session (refreshing an expired access token).
- * 3. Provides TanStack Query to the whole app.
+ * 1. Registers the auth token provider (HTTP client ↔ session layer wiring).
+ * 2. Starts the session lifecycle (foreground / proactive refresh).
+ * 3. Restores the stored session, refreshing BEFORE any protected screen,
+ *    socket connection or query.
+ * 4. Provides TanStack Query to the whole app.
  *
  * Auth gating lives in the route groups: `(app)` is protected, `(auth)` is
- * guest-only (via `useAuthScreenGuard`).
+ * guest-only (via `useAuthScreenGuard`). An `unreachable` cold start shows a
+ * retry screen instead of redirecting to login.
  */
 
 export default function RootLayout(): React.ReactElement {
-  const queryClientRef: MutableRefObject<QueryClient | undefined> = useRef(undefined);
-  if (queryClientRef.current === undefined) {
-    queryClientRef.current = new QueryClient({
-      defaultOptions: {
-        queries: {
-          retry: 1,
-          staleTime: 30_000,
-          refetchOnWindowFocus: false,
-        },
-      },
-    });
-  }
+    const [providersReady, setProvidersReady] = useState(false);
+    const status = useAuthStore((state) => state.status);
 
-  const [providersReady, setProvidersReady] = useState(false);
-  const restoreSession = useAuthStore((state) => state.restoreSession);
+    useEffect(() => {
+        let cancelled = false;
+        registerAuthTokenProvider();
+        const stopLifecycle = startSessionLifecycle();
+        const bootstrap = async (): Promise<void> => {
+            await useAuthStore.getState().restoreSession();
+            if (!cancelled) {
+                setProvidersReady(true);
+            }
+        };
+        void bootstrap();
+        return () => {
+            cancelled = true;
+            stopLifecycle();
+        };
+    }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    const bootstrap = async (): Promise<void> => {
-      registerAuthTokenProvider();
-      await restoreSession();
-      if (!cancelled) {
-        setProvidersReady(true);
-      }
-    };
-    void bootstrap();
-    return () => {
-      cancelled = true;
-    };
-  }, [restoreSession]);
+    if (!providersReady || status === 'restoring') {
+        return <BootstrapPlaceholder />;
+    }
 
-  if (!providersReady || queryClientRef.current === undefined) {
-    return <BootstrapPlaceholder />;
-  }
+    if (status === 'unreachable') {
+        return (
+            <QueryClientProvider client={appQueryClient}>
+                <SafeAreaProvider>
+                    <StatusBar style="dark" />
+                    <ServerUnreachableScreen
+                        onRetry={(): void => {
+                            void useAuthStore.getState().retryRestore();
+                        }}
+                    />
+                </SafeAreaProvider>
+            </QueryClientProvider>
+        );
+    }
 
-  return (
-    <QueryClientProvider client={queryClientRef.current}>
-      <SafeAreaProvider>
-        <StatusBar style="dark" />
-        <Stack screenOptions={{ headerShown: false }} />
-      </SafeAreaProvider>
-    </QueryClientProvider>
-  );
+    return (
+        <QueryClientProvider client={appQueryClient}>
+            <SafeAreaProvider>
+                <StatusBar style="dark" />
+                <Stack screenOptions={{ headerShown: false }} />
+            </SafeAreaProvider>
+        </QueryClientProvider>
+    );
 }
 
 function BootstrapPlaceholder(): React.ReactElement {
-  return (
-    <Screen
-      style={{
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: palette.neutral[0],
-      }}
-    >
-      <AppText style={[typography.title, { marginBottom: spacing.xs }]}>NiazChat</AppText>
-      <AppText variant="caption">Loading…</AppText>
-    </Screen>
-  );
+    return (
+        <Screen
+            style={{
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: palette.neutral[0],
+            }}
+        >
+            <AppText style={[typography.title, { marginBottom: spacing.xs }]}>
+                NiazChat
+            </AppText>
+            <AppText variant="caption">Loading…</AppText>
+        </Screen>
+    );
 }
+
+/** Cold start where the refresh could not run and the stored token is unusable. */
+function ServerUnreachableScreen({
+    onRetry,
+}: {
+    onRetry: () => void;
+}): React.ReactElement {
+    return (
+        <Screen style={styles.unreachableScreen}>
+            <View style={styles.unreachableBody}>
+                <AppText variant="title">Can&apos;t reach the server</AppText>
+                <AppText style={styles.unreachableText}>
+                    Check your connection. We&apos;ll keep trying automatically.
+                </AppText>
+            </View>
+            <FormButton label="Retry" onPress={onRetry} />
+        </Screen>
+    );
+}
+
+const styles = StyleSheet.create({
+    unreachableScreen: {
+        justifyContent: 'center',
+        gap: spacing.md,
+        paddingHorizontal: spacing.lg,
+        backgroundColor: palette.neutral[0],
+    },
+    unreachableBody: { gap: spacing.xs },
+    unreachableText: { color: palette.neutral[500], textAlign: 'center' },
+});

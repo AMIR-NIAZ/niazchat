@@ -4,6 +4,7 @@ import {
     ActivityIndicator,
     Alert,
     AppState,
+    BackHandler,
     FlatList,
     Keyboard,
     KeyboardAvoidingView,
@@ -31,6 +32,7 @@ import { ApiError } from '../../../core/api';
 import { useAndroidKeyboardInset } from '../../../shared/hooks/use-android-keyboard-inset';
 import {
     DateSeparator,
+    ForwardPicker,
     MessageBubble,
     MessageComposer,
     ScrollToBottomButton,
@@ -43,10 +45,24 @@ import {
     useTypingUsers,
     assignMessageRuns,
     formatDaySeparator,
+    NO_MESSAGE_ACTIONS,
+    getMessageActions,
+    isForwardable,
     isOwnMessage,
+    pruneForwardSelection,
+    selectedMessageIds,
     toReplyPreview,
+    toggleForwardSelection,
 } from '../../../features/messages';
-import type { ChatMessage } from '../../../features/messages';
+import type { ChatMessage, MessageActions } from '../../../features/messages';
+import type { LocalAttachment } from '../../../features/attachments';
+import {
+    AttachmentViewer,
+    deleteCachedAttachment,
+    downloadAttachment,
+    mimeForFileName,
+    shareLocalFile,
+} from '../../../features/attachments';
 import {
     isGroupOwner,
     purgeChatFromCaches,
@@ -60,6 +76,12 @@ import {
 } from '../../../features/chats';
 import type { ChatMemberRow, ChatRole } from '../../../features/chats';
 import { useCurrentUserId } from '../../../features/auth';
+import {
+    deleteVoiceFile,
+    getVoicePlayback,
+    stopVoice,
+    voiceCachePath,
+} from '../../../features/voice';
 import { openUserProfile } from '../../../features/users';
 
 /**
@@ -126,6 +148,13 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     const [actionDraft, setActionDraft] = useState('');
     const [actionError, setActionError] = useState<string | null>(null);
     const [replyTarget, setReplyTarget] = useState<ChatMessage | null>(null);
+    const [selecting, setSelecting] = useState(false);
+    const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+    const [forwardOpen, setForwardOpen] = useState(false);
+    const [viewer, setViewer] = useState<{
+        message: ChatMessage;
+        index: number;
+    } | null>(null);
     const [unreadDividerId, setUnreadDividerId] = useState<number | null>(null);
     const dividerInitRef = useRef(false);
     const [screenFocused, setScreenFocused] = useState(false);
@@ -148,6 +177,17 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     const myRole: ChatRole | null = info?.myRole ?? null;
     /** `manager` only — chat `admin` is NOT the owner. */
     const isOwner = isGroupOwner(myRole);
+
+    const sheetActions = useMemo(
+        () =>
+            sheetTarget === null
+                ? NO_MESSAGE_ACTIONS
+                : getMessageActions(sheetTarget, {
+                      currentUserId,
+                      canDeleteOthers: isGroup && isOwner,
+                  }),
+        [sheetTarget, currentUserId, isGroup, isOwner],
+    );
 
     /**
      * Ascending list with day separators and a one-shot unread divider before
@@ -233,13 +273,39 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         },
     });
 
-    // A new chat starts with no reply, no divider and no initial-scroll state.
+    // A new chat starts with no reply, no divider, no selection and no
+    // initial-scroll state.
     useEffect((): void => {
         setReplyTarget(null);
         setUnreadDividerId(null);
+        setSelecting(false);
+        setSelectedIds(new Set());
+        setForwardOpen(false);
         dividerInitRef.current = false;
         initialScrollDoneRef.current = false;
     }, [chatId]);
+
+    // Live arrival/deletion never invalidates the id-based selection: only ids
+    // that were actually deleted disappear from it.
+    useEffect((): void => {
+        setSelectedIds((current) => {
+            const next = pruneForwardSelection(current, messages);
+            return next.size === current.size ? current : next;
+        });
+    }, [messages]);
+
+    useEffect((): (() => void) | undefined => {
+        if (!selecting) return undefined;
+        const subscription = BackHandler.addEventListener(
+            'hardwareBackPress',
+            (): boolean => {
+                setSelecting(false);
+                setSelectedIds(new Set());
+                return true;
+            },
+        );
+        return (): void => subscription.remove();
+    }, [selecting]);
 
     // Focus/foreground drive "actually looking at this chat" for markSeen.
     useFocusEffect(
@@ -286,6 +352,7 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     useEffect((): (() => void) => {
         return (): void => {
             jumpAbortRef.current?.abort();
+            stopVoice();
             if (highlightTimerRef.current !== null) {
                 clearTimeout(highlightTimerRef.current);
             }
@@ -307,6 +374,15 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
             setReplyTarget(null);
         }
     }, [messages, replyTarget]);
+
+    // A viewer showing a message deleted by anyone closes with it, so video
+    // playback never continues for a message that no longer exists.
+    useEffect((): void => {
+        if (viewer === null || viewer.message.id === null) return;
+        if (!messages.some((message) => message.id === viewer.message.id)) {
+            setViewer(null);
+        }
+    }, [messages, viewer]);
 
     const newestKey =
         messages.length > 0
@@ -500,15 +576,65 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
             });
     };
 
-    const handleSend = (content: string): void => {
+    const handleSend = (
+        content: string,
+        attachments: LocalAttachment[] = [],
+    ): void => {
         typing.stopTyping();
-        if (replyPreview !== null) {
-            conversation.send(content, replyPreview);
-        } else {
-            conversation.send(content);
-        }
+        conversation.send(content, { replyTo: replyPreview, attachments });
         setReplyTarget(null);
         scrollToBottom();
+    };
+
+    const exitSelection = (): void => {
+        setSelecting(false);
+        setSelectedIds(new Set());
+        setForwardOpen(false);
+    };
+
+    const beginSelection = (message: ChatMessage): void => {
+        if (!isForwardable(message) || message.id === null) return;
+        setSheetTarget(null);
+        setSelecting(true);
+        setSelectedIds(new Set([message.id]));
+    };
+
+    const handleToggleSelection = (message: ChatMessage): void => {
+        const result = toggleForwardSelection(selectedIds, message);
+        if (result.limitReached) {
+            showJumpNotice('You can forward up to 20 messages at once');
+            return;
+        }
+        setSelectedIds(result.selected);
+    };
+
+    const handleOpenForward = (message: ChatMessage | null): void => {
+        if (message === null || message.id === null) return;
+        setSheetTarget(null);
+        setSelecting(true);
+        setSelectedIds(new Set([message.id]));
+        setForwardOpen(true);
+    };
+
+    const handleForwardFinished = (
+        successCount: number,
+        targetChatIds: number[],
+    ): void => {
+        exitSelection();
+        if (targetChatIds.length === 1) {
+            const target = targetChatIds[0];
+            if (target !== undefined && target !== chatId) {
+                router.push(`/(app)/chat/${target}`);
+                return;
+            }
+        }
+        if (successCount > 0) {
+            showJumpNotice(
+                successCount === 1
+                    ? 'Forwarded to 1 chat'
+                    : `Forwarded to ${successCount} chats`,
+            );
+        }
     };
 
     const handleListScroll = (
@@ -634,45 +760,80 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
             withTopInset={true}
             withBottomInset={false}
         >
-            <View style={styles.header}>
-                <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Go back"
-                    style={styles.backButton}
-                    onPress={(): void => router.back()}
-                >
-                    <Text style={styles.backText}>‹</Text>
-                </Pressable>
-                {peerUserId !== null ? (
+            {selecting ? (
+                <View style={styles.selectionBar}>
                     <Pressable
                         accessibilityRole="button"
-                        accessibilityLabel={`Open profile of ${name}`}
-                        onPress={(): void => {
-                            openUserProfile({
-                                userId: peerUserId,
-                                name,
-                                avatar: avatarPath,
-                            });
-                        }}
-                        style={({ pressed }) => [
-                            styles.headerIdentity,
-                            pressed && styles.pressed,
-                        ]}
+                        accessibilityLabel="Cancel selection"
+                        style={styles.selectionAction}
+                        onPress={exitSelection}
                     >
-                        {headerIdentity}
+                        <Text style={styles.selectionCancel}>Cancel</Text>
                     </Pressable>
-                ) : (
-                    headerIdentity
-                )}
-                <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Open chat admin panel"
-                    style={styles.pillButton}
-                    onPress={(): void => setAdminPanelOpen(true)}
-                >
-                    <Text style={styles.pillText}>Admin</Text>
-                </Pressable>
-            </View>
+                    <Text
+                        style={styles.selectionCount}
+                        accessibilityLabel={`${selectedIds.size} selected`}
+                    >
+                        {selectedIds.size} selected
+                    </Text>
+                    <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Forward selected messages"
+                        accessibilityState={{
+                            disabled: selectedIds.size === 0,
+                        }}
+                        disabled={selectedIds.size === 0}
+                        style={[
+                            styles.selectionForward,
+                            selectedIds.size === 0 &&
+                                styles.selectionForwardDisabled,
+                        ]}
+                        onPress={(): void => setForwardOpen(true)}
+                    >
+                        <Text style={styles.selectionForwardText}>Forward</Text>
+                    </Pressable>
+                </View>
+            ) : (
+                <View style={styles.header}>
+                    <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Go back"
+                        style={styles.backButton}
+                        onPress={(): void => router.back()}
+                    >
+                        <Text style={styles.backText}>‹</Text>
+                    </Pressable>
+                    {peerUserId !== null ? (
+                        <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Open profile of ${name}`}
+                            onPress={(): void => {
+                                openUserProfile({
+                                    userId: peerUserId,
+                                    name,
+                                    avatar: avatarPath,
+                                });
+                            }}
+                            style={({ pressed }) => [
+                                styles.headerIdentity,
+                                pressed && styles.pressed,
+                            ]}
+                        >
+                            {headerIdentity}
+                        </Pressable>
+                    ) : (
+                        headerIdentity
+                    )}
+                    <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Open chat admin panel"
+                        style={styles.pillButton}
+                        onPress={(): void => setAdminPanelOpen(true)}
+                    >
+                        <Text style={styles.pillText}>Admin</Text>
+                    </Pressable>
+                </View>
+            )}
 
             {messages.length === 0 ? (
                 <View style={styles.emptyState}>
@@ -757,6 +918,7 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                             ) : undefined
                         }
                         data={reversedListData}
+                        extraData={`${selecting}:${[...selectedIds].join(',')}`}
                         renderItem={({ item }): React.ReactElement => {
                             if (item.kind === 'unread') {
                                 return (
@@ -787,13 +949,36 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                                     currentUserId={currentUserId}
                                     showSenderName={item.showSenderName}
                                     showAvatar={item.showAvatar}
-                                    onOpenProfile={(sender): void => {
+                                    onOpenProfile={
+                                        selecting
+                                            ? undefined
+                                            : (sender): void => {
+                                                  openUserProfile({
+                                                      userId: sender.senderId,
+                                                      name: sender.senderName,
+                                                      avatar: sender.senderAvatarPath,
+                                                  });
+                                              }
+                                    }
+                                    onForwardedProfilePress={(
+                                        userId,
+                                        forwardedName,
+                                    ): void => {
                                         openUserProfile({
-                                            userId: sender.senderId,
-                                            name: sender.senderName,
-                                            avatar: sender.senderAvatarPath,
+                                            userId,
+                                            name: forwardedName,
+                                            isSelf: isOwnMessage(
+                                                currentUserId,
+                                                userId,
+                                            ),
                                         });
                                     }}
+                                    selectionMode={selecting}
+                                    selected={
+                                        message.id !== null &&
+                                        selectedIds.has(message.id)
+                                    }
+                                    onToggleSelect={handleToggleSelection}
                                     highlighted={highlightedKey === message.key}
                                     othersLastSeenId={
                                         detail?.othersLastSeenId ?? null
@@ -801,15 +986,56 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                                     // Any confirmed message can be replied to;
                                     // pending/failed bubbles cannot.
                                     onLongPress={
+                                        !selecting &&
                                         message.status === 'sent' &&
                                         message.id !== null
                                             ? (): void =>
                                                   setSheetTarget(message)
                                             : undefined
                                     }
-                                    onReplyPress={handleReplyPress}
-                                    onRetryFailed={(failed): void =>
-                                        conversation.retrySend(failed.key)
+                                    onReplyPress={
+                                        selecting ? undefined : handleReplyPress
+                                    }
+                                    onRetryFailed={
+                                        selecting
+                                            ? undefined
+                                            : (failed): void =>
+                                                  conversation.retrySend(
+                                                      failed.key,
+                                                  )
+                                    }
+                                    onRetryPending={
+                                        selecting
+                                            ? undefined
+                                            : (pending): void =>
+                                                  conversation.retrySend(
+                                                      pending.key,
+                                                  )
+                                    }
+                                    onCancelPending={
+                                        selecting
+                                            ? undefined
+                                            : (pending): void =>
+                                                  conversation.cancelSend(
+                                                      pending.key,
+                                                  )
+                                    }
+                                    onRemovePending={
+                                        selecting
+                                            ? undefined
+                                            : (pending): void =>
+                                                  conversation.cancelSend(
+                                                      pending.key,
+                                                  )
+                                    }
+                                    onOpenMedia={
+                                        selecting
+                                            ? undefined
+                                            : (source, mediaIndex): void =>
+                                                  setViewer({
+                                                      message: source,
+                                                      index: mediaIndex,
+                                                  })
                                     }
                                 />
                             );
@@ -843,6 +1069,7 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
             )}
 
             <MessageComposer
+                chatId={chatId}
                 disabled={conversation.sending !== null}
                 onSend={handleSend}
                 replyTo={replyPreview}
@@ -854,26 +1081,12 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
 
             <MessageActionSheet
                 target={sheetTarget}
-                canEdit={
-                    sheetTarget !== null &&
-                    sheetTarget.status === 'sent' &&
-                    isOwnMessage(currentUserId, sheetTarget.senderId) &&
-                    sheetTarget.type === 'text' &&
-                    sheetTarget.content !== null
-                }
-                canDelete={
-                    sheetTarget !== null &&
-                    sheetTarget.status === 'sent' &&
-                    isOwnMessage(currentUserId, sheetTarget.senderId) &&
-                    sheetTarget.id !== null
-                }
-                canDeleteOthers={
-                    isOwner &&
-                    sheetTarget !== null &&
-                    sheetTarget.status === 'sent' &&
-                    sheetTarget.id !== null &&
-                    !isOwnMessage(currentUserId, sheetTarget.senderId)
-                }
+                actions={sheetActions}
+                onForward={(): void => handleOpenForward(sheetTarget)}
+                onSelect={(): void => {
+                    const target = sheetTarget;
+                    if (target !== null) beginSelection(target);
+                }}
                 onReply={(): void => {
                     const target = sheetTarget;
                     setSheetTarget(null);
@@ -890,6 +1103,43 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                     onActionPress(sheetTarget);
                     setSheetTarget(null);
                 }}
+                onShare={(): void => {
+                    const target = sheetTarget;
+                    setSheetTarget(null);
+                    if (target === null) return;
+                    const document = target.attachments.find(
+                        (attachment) =>
+                            attachment.kind === 'file' &&
+                            attachment.id !== null,
+                    );
+                    if (document === undefined || document.id === null) return;
+                    void downloadAttachment(
+                        {
+                            id: document.id,
+                            name: document.name,
+                            mimeType: document.mimeType,
+                        },
+                        undefined,
+                    )
+                        .then((path) =>
+                            shareLocalFile(
+                                path,
+                                mimeForFileName(
+                                    document.name,
+                                    document.mimeType,
+                                ),
+                                document.name,
+                            ),
+                        )
+                        .catch((error: unknown) =>
+                            Alert.alert(
+                                'Could not share file',
+                                error instanceof Error
+                                    ? error.message
+                                    : 'Share failed.',
+                            ),
+                        );
+                }}
                 onDelete={(): void => {
                     const target = sheetTarget;
                     setSheetTarget(null);
@@ -904,13 +1154,22 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                         currentUserId,
                         target.senderId,
                     );
+                    const hasVoice = target.attachments.some(
+                        (attachment) => attachment.kind === 'voice',
+                    );
+                    const hasAttachments = target.attachments.length > 0;
+                    const explanation = deletingOtherMember
+                        ? 'This message belongs to another member and will be removed for everyone in the group.'
+                        : hasVoice
+                          ? 'This voice message will be removed for everyone.'
+                          : hasAttachments
+                            ? 'This message and its attachments will be removed for everyone.'
+                            : 'This message will be removed for everyone.';
                     Alert.alert(
                         deletingOtherMember
                             ? 'Delete for everyone?'
                             : 'Delete message?',
-                        deletingOtherMember
-                            ? 'This message belongs to another member and will be removed for everyone in the group.'
-                            : 'This message will be removed for everyone.',
+                        explanation,
                         [
                             { text: 'Cancel', style: 'cancel' },
                             {
@@ -921,8 +1180,45 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                                     if (messageId === null) {
                                         return;
                                     }
+                                    if (viewer?.message.id === messageId) {
+                                        setViewer(null);
+                                    }
+                                    if (
+                                        target.attachments.some(
+                                            (attachment) =>
+                                                attachment.id !== null &&
+                                                attachment.id ===
+                                                    getVoicePlayback()
+                                                        .attachmentId,
+                                        )
+                                    ) {
+                                        stopVoice();
+                                    }
                                     void conversation
                                         .remove(messageId)
+                                        .then((): void => {
+                                            for (const attachment of target.attachments) {
+                                                if (attachment.id === null) {
+                                                    continue;
+                                                }
+                                                void deleteCachedAttachment(
+                                                    attachment.id,
+                                                );
+                                                if (
+                                                    attachment.kind === 'voice'
+                                                ) {
+                                                    const path = voiceCachePath(
+                                                        attachment.id,
+                                                        attachment.mimeType,
+                                                    );
+                                                    if (path !== null) {
+                                                        void deleteVoiceFile(
+                                                            path,
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        })
                                         .catch((error: unknown) =>
                                             Alert.alert(
                                                 'Could not delete message',
@@ -973,6 +1269,29 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                 }}
             />
 
+            <ForwardPicker
+                visible={forwardOpen}
+                sourceChatId={chatId}
+                messageIds={selectedMessageIds(selectedIds)}
+                onClose={(): void => setForwardOpen(false)}
+                onFinished={handleForwardFinished}
+            />
+
+            <AttachmentViewer
+                visible={viewer !== null}
+                media={
+                    viewer === null
+                        ? []
+                        : viewer.message.attachments.filter(
+                              (attachment) =>
+                                  attachment.kind === 'image' ||
+                                  attachment.kind === 'video',
+                          )
+                }
+                initialIndex={viewer?.index ?? 0}
+                onClose={(): void => setViewer(null)}
+            />
+
             <AdminPanel
                 visible={adminPanelOpen}
                 chatId={chatId}
@@ -1002,15 +1321,13 @@ type List = ListChunk;
 
 interface MessageActionSheetProps {
     target: ChatMessage | null;
-    /** Edit is offered only for own text messages with content. */
-    canEdit: boolean;
-    /** Delete is offered only for own confirmed messages. */
-    canDelete: boolean;
-    /** Group owner may delete another member's confirmed message. */
-    canDeleteOthers: boolean;
+    actions: MessageActions;
     onReply: () => void;
     onEdit: () => void;
     onDelete: () => void;
+    onForward: () => void;
+    onShare: () => void;
+    onSelect: () => void;
     onDismiss: () => void;
 }
 
@@ -1029,25 +1346,61 @@ function MessageActionSheet(
         >
             <Pressable style={styles.sheetBackdrop} onPress={props.onDismiss}>
                 <Pressable style={styles.sheetCard}>
-                    <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Reply to message"
-                        style={styles.sheetButton}
-                        onPress={props.onReply}
-                    >
-                        <Text style={styles.sheetActionText}>Reply</Text>
-                    </Pressable>
-                    {props.canEdit && (
+                    {props.actions.reply && (
                         <Pressable
                             accessibilityRole="button"
-                            accessibilityLabel="Edit message"
+                            accessibilityLabel="Reply to message"
+                            style={styles.sheetButton}
+                            onPress={props.onReply}
+                        >
+                            <Text style={styles.sheetActionText}>Reply</Text>
+                        </Pressable>
+                    )}
+                    {props.actions.forward && (
+                        <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel="Forward"
+                            style={styles.sheetButton}
+                            onPress={props.onForward}
+                        >
+                            <Text style={styles.sheetActionText}>Forward</Text>
+                        </Pressable>
+                    )}
+                    {props.actions.select && (
+                        <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel="Select messages"
+                            style={styles.sheetButton}
+                            onPress={props.onSelect}
+                        >
+                            <Text style={styles.sheetActionText}>Select</Text>
+                        </Pressable>
+                    )}
+                    {props.actions.share && (
+                        <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel="Share file"
+                            style={styles.sheetButton}
+                            onPress={props.onShare}
+                        >
+                            <Text style={styles.sheetActionText}>Share</Text>
+                        </Pressable>
+                    )}
+                    {props.actions.edit && (
+                        <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={
+                                props.actions.editLabel ?? 'Edit'
+                            }
                             style={styles.sheetButton}
                             onPress={props.onEdit}
                         >
-                            <Text style={styles.sheetActionText}>Edit</Text>
+                            <Text style={styles.sheetActionText}>
+                                {props.actions.editLabel ?? 'Edit'}
+                            </Text>
                         </Pressable>
                     )}
-                    {props.canDelete && (
+                    {props.actions.delete && !props.actions.deleteOthers && (
                         <Pressable
                             accessibilityRole="button"
                             accessibilityLabel="Delete message"
@@ -1057,7 +1410,7 @@ function MessageActionSheet(
                             <Text style={styles.sheetDeleteText}>Delete</Text>
                         </Pressable>
                     )}
-                    {props.canDeleteOthers && (
+                    {props.actions.deleteOthers && (
                         <Pressable
                             accessibilityRole="button"
                             accessibilityLabel="Delete message for everyone"
@@ -1120,7 +1473,11 @@ function MessageActionModal(
                     pointerEvents="box-none"
                 >
                     <Pressable style={styles.modalCard}>
-                        <AppText variant="title">Edit message</AppText>
+                        <AppText variant="title">
+                            {props.target.attachments.length > 0
+                                ? 'Edit caption'
+                                : 'Edit message'}
+                        </AppText>
                         <TextInput
                             style={styles.modalInput}
                             value={props.draft}
@@ -1575,6 +1932,41 @@ const styles = StyleSheet.create({
     screen: { gap: spacing.xs, paddingHorizontal: spacing.sm },
     center: { alignItems: 'center', justifyContent: 'center' },
     header: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+    selectionBar: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: spacing.sm,
+        paddingVertical: spacing.xs,
+        paddingHorizontal: spacing.xs,
+        borderRadius: radii.sm,
+        backgroundColor: palette.primary[100],
+    },
+    selectionAction: { paddingHorizontal: spacing.xs, paddingVertical: 4 },
+    selectionCancel: {
+        color: palette.primary[700],
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    selectionCount: {
+        flex: 1,
+        textAlign: 'center',
+        color: palette.neutral[900],
+        fontSize: 14,
+        fontWeight: '700',
+    },
+    selectionForward: {
+        paddingHorizontal: spacing.sm,
+        paddingVertical: 6,
+        borderRadius: radii.sm,
+        backgroundColor: palette.primary[500],
+    },
+    selectionForwardDisabled: { backgroundColor: palette.neutral[300] },
+    selectionForwardText: {
+        color: palette.neutral[0],
+        fontSize: 13,
+        fontWeight: '700',
+    },
     headerIdentity: {
         flex: 1,
         flexDirection: 'row',
