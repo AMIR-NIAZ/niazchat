@@ -5,6 +5,7 @@ import type { ChatDto } from '../../core/api';
 import type { ChatRole } from '../../core/api/dto/chat.dto';
 import { absoluteUploadUrl } from '../../core/config/env';
 import { CHATS_QUERY_KEY } from './use-chats';
+import { clearChatRoom } from './active-room';
 import * as groupsService from './groups-service';
 import { joinChat } from './chats-socket-api';
 import { toChatPeer } from './chats-mapper';
@@ -187,16 +188,22 @@ function parseChatInfo(raw: ChatDto): ChatInfo {
 }
 
 /**
- * Leaves the chat room on unmount (server triggers `typing:stop` + `seen`).
- * The chat id travels with the request so a late unmount cleanup from a
- * previously open screen cannot remove the user from the chat they just joined
- * (the backend ignores a leave whose chat id is not the current one).
+ * Leaves the chat room when the screen unmounts (server triggers `typing:stop`
+ * + `online` bookkeeping). Only the screen that currently OWNS the socket's
+ * room may leave it: `clearChatRoom` returns false for a stale unmount of an
+ * underlying screen whose chat is no longer the active one, so popping a
+ * duplicate route can never kick the visible chat out of its room. The chat id
+ * also travels with the request (the backend ignores a leave for another
+ * chat).
  */
 export function useLeaveChatRoomOnUnmount(chatId: number): void {
     useEffect(() => {
         return () => {
+            if (chatId <= 0 || !clearChatRoom(chatId)) {
+                return;
+            }
             const socket = getSocket();
-            if (socket === null || chatId <= 0) {
+            if (socket === null || !socket.connected) {
                 return;
             }
             socket.emit('leaveChat', { chatId }, () => {});

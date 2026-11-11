@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useSocket } from '../../core/socket';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSocket, useSocketEvent } from '../../core/socket';
 import type { MessageDto } from '../../core/api';
 
 /**
@@ -63,24 +63,22 @@ export function useTypingUsers(
         setEntries(new Map());
     }, [chatId, socket]);
 
-    useEffect((): (() => void) | undefined => {
-        if (!enabled || socket === null) {
-            return undefined;
-        }
-        const myId = currentUserId ?? -1;
+    const myId = currentUserId ?? -1;
 
-        const removeUser = (userId: number): void => {
-            setEntries((previous) => {
-                if (!previous.has(userId)) {
-                    return previous;
-                }
-                const next = new Map(previous);
-                next.delete(userId);
-                return next;
-            });
-        };
+    const removeUser = useCallback((userId: number): void => {
+        setEntries((previous) => {
+            if (!previous.has(userId)) {
+                return previous;
+            }
+            const next = new Map(previous);
+            next.delete(userId);
+            return next;
+        });
+    }, []);
 
-        const onStart = (payload: unknown): void => {
+    const onStart = useCallback(
+        (payload: unknown): void => {
+            if (!enabled) return;
             const event = readEvent(payload);
             if (event === null || event.chatId !== chatId) {
                 return;
@@ -102,17 +100,25 @@ export function useTypingUsers(
                 });
                 return next;
             });
-        };
+        },
+        [enabled, chatId, myId],
+    );
 
-        const onStop = (payload: unknown): void => {
+    const onStop = useCallback(
+        (payload: unknown): void => {
+            if (!enabled) return;
             const event = readEvent(payload);
             if (event === null || event.chatId !== chatId) {
                 return;
             }
             removeUser(event.userId);
-        };
+        },
+        [enabled, chatId, removeUser],
+    );
 
-        const onMessage = (message: MessageDto): void => {
+    const onMessage = useCallback(
+        (message: MessageDto): void => {
+            if (!enabled) return;
             if (Number(message.chatId) !== chatId) {
                 return;
             }
@@ -120,18 +126,24 @@ export function useTypingUsers(
             if (Number.isFinite(senderId)) {
                 removeUser(senderId);
             }
-        };
+        },
+        [enabled, chatId, removeUser],
+    );
 
-        // A reconnect loses room membership and any in-flight indicators.
-        const clearAll = (): void => setEntries(new Map());
+    // A reconnect loses room membership and any in-flight indicators.
+    const clearAll = useCallback((): void => setEntries(new Map()), []);
 
-        socket.on('typing:start', onStart);
-        socket.on('typing:stop', onStop);
-        socket.on('sendMessage:list', onMessage);
-        socket.on('disconnect', clearAll);
-        socket.on('connect', clearAll);
+    useSocketEvent('typing:start', onStart);
+    useSocketEvent('typing:stop', onStop);
+    useSocketEvent('sendMessage:list', onMessage);
+    useSocketEvent('disconnect', clearAll);
+    useSocketEvent('connect', clearAll);
 
-        // Single sweeper for every entry (not one timer per user).
+    // Single sweeper for every entry (not one timer per user).
+    useEffect((): (() => void) | undefined => {
+        if (!enabled) {
+            return undefined;
+        }
         const sweeper = setInterval((): void => {
             const now = Date.now();
             setEntries((previous) => {
@@ -146,16 +158,8 @@ export function useTypingUsers(
                 return changed ? next : previous;
             });
         }, EXPIRY_SWEEP_MS);
-
-        return (): void => {
-            clearInterval(sweeper);
-            socket.off('typing:start', onStart);
-            socket.off('typing:stop', onStop);
-            socket.off('sendMessage:list', onMessage);
-            socket.off('disconnect', clearAll);
-            socket.off('connect', clearAll);
-        };
-    }, [socket, chatId, enabled, currentUserId]);
+        return (): void => clearInterval(sweeper);
+    }, [enabled]);
 
     return useMemo(
         () =>

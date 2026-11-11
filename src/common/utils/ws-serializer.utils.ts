@@ -152,9 +152,12 @@ export function serializeChat(
         createdAt: chat.createdAt,
         updatedAt: chat.updatedAt,
         title: chat.type === TypeChatEnum.PRIVATE ? null : (chat.title ?? null),
+        description: chat.description ?? null,
         peerName: chat.peerName ?? null,
         peer: chat.peer ?? null,
-        avatars: chat.avatars ?? [],
+        // Chat lists/headers render the CURRENT photo only. The full gallery
+        // is exposed by `GET /chats/:chatId/group` and `group:updated`.
+        avatars: (chat.avatars ?? []).slice(0, 1),
         type: chat.type,
         isBan: chat.isBan,
         // Authoritative only on `getAllChats`; live list updates increment

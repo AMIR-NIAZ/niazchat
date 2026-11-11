@@ -56,6 +56,8 @@ interface AvatarGalleryProps {
     pendingFileName?: string | null;
     /** All actions disabled (mutation in flight / picking). */
     disabled?: boolean;
+    /** Noun used in accessibility labels, e.g. "Group photo". */
+    subject?: string;
     onPressAvatar: (index: number) => void;
     onLongPressAvatar?: (index: number) => void;
     onPressAdd?: () => void;
@@ -68,6 +70,7 @@ export function AvatarGallery({
     uploading = false,
     pendingFileName = null,
     disabled = false,
+    subject = 'Photo',
     onPressAvatar,
     onLongPressAvatar,
     onPressAdd,
@@ -80,9 +83,7 @@ export function AvatarGallery({
             horizontal={true}
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.galleryRow}
-            accessibilityLabel={
-                readOnly ? 'Profile photos' : 'Profile photo gallery'
-            }
+            accessibilityLabel={readOnly ? `${subject}s` : `${subject} gallery`}
         >
             {avatars.map((avatar, index) => {
                 const pending = pendingFileName === avatar.fileName;
@@ -92,8 +93,8 @@ export function AvatarGallery({
                         accessibilityRole="button"
                         accessibilityLabel={
                             index === 0
-                                ? `Avatar ${index + 1}, current`
-                                : `Avatar ${index + 1}`
+                                ? `${subject} ${index + 1}, current`
+                                : `${subject} ${index + 1}`
                         }
                         accessibilityState={{ disabled: disabled || pending }}
                         disabled={disabled || pending}
@@ -162,7 +163,7 @@ export function AvatarGallery({
                 onPressAdd !== undefined && (
                     <Pressable
                         accessibilityRole="button"
-                        accessibilityLabel="Add photo"
+                        accessibilityLabel={`Add ${subject.toLowerCase()}`}
                         accessibilityState={{ disabled }}
                         disabled={disabled}
                         onPress={onPressAdd}
@@ -179,7 +180,7 @@ export function AvatarGallery({
             {!readOnly && atLimit && (
                 <View
                     accessible={true}
-                    accessibilityLabel={`${maxAvatars} of ${maxAvatars} photos used`}
+                    accessibilityLabel={`${maxAvatars} of ${maxAvatars} ${subject.toLowerCase()}s used`}
                     style={[styles.tile, styles.limitTile]}
                 >
                     <Text style={styles.limitText}>
@@ -203,6 +204,12 @@ interface AvatarViewerProps {
     readOnly?: boolean;
     busy?: boolean;
     pendingFileName?: string | null;
+    /** Noun used in labels and announcements, e.g. "Group photo". */
+    subject?: string;
+    setMainLabel?: string;
+    deleteLabel?: string;
+    deleteConfirmTitle?: string;
+    deleteConfirmMessage?: string;
     onClose: () => void;
     /** Resolves true only when the backend promoted the photo. */
     onSetMain?: (fileName: string) => Promise<boolean>;
@@ -216,6 +223,11 @@ export function AvatarViewer({
     readOnly = false,
     busy = false,
     pendingFileName = null,
+    subject = 'Photo',
+    setMainLabel = 'Set as profile photo',
+    deleteLabel = 'Delete',
+    deleteConfirmTitle = 'Delete this photo?',
+    deleteConfirmMessage = 'It will be removed from your profile for everyone.',
     onClose,
     onSetMain,
     onDelete,
@@ -275,9 +287,9 @@ export function AvatarViewer({
             return;
         }
         AccessibilityInfo.announceForAccessibility(
-            `Photo ${index + 1} of ${avatars.length}`,
+            `${subject} ${index + 1} of ${avatars.length}`,
         );
-    }, [visible, index, avatars.length]);
+    }, [visible, index, avatars.length, subject]);
 
     // Swipe down to dismiss (horizontal swipes still page the list).
     const panResponder = useRef(
@@ -302,22 +314,18 @@ export function AvatarViewer({
             return;
         }
         const fileName = current.fileName;
-        Alert.alert(
-            'Delete this photo?',
-            'It will be removed from your profile for everyone.',
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Delete',
-                    style: 'destructive',
-                    onPress: (): void => {
-                        if (onDelete !== undefined) {
-                            void onDelete(fileName);
-                        }
-                    },
+        Alert.alert(deleteConfirmTitle, deleteConfirmMessage, [
+            { text: 'Cancel', style: 'cancel' },
+            {
+                text: 'Delete',
+                style: 'destructive',
+                onPress: (): void => {
+                    if (onDelete !== undefined) {
+                        void onDelete(fileName);
+                    }
                 },
-            ],
-        );
+            },
+        ]);
     };
 
     const renderItem = ({
@@ -330,7 +338,7 @@ export function AvatarViewer({
             style={[styles.viewerPage, { width, height }]}
         >
             <Image
-                accessibilityLabel="Full size profile photo"
+                accessibilityLabel={`Full size ${subject.toLowerCase()}`}
                 resizeMode="contain"
                 style={styles.viewerImage}
                 source={{ uri: item.url }}
@@ -396,7 +404,7 @@ export function AvatarViewer({
                     <Text
                         style={styles.viewerCounter}
                         accessibilityLiveRegion="polite"
-                        accessibilityLabel={`Photo ${index + 1} of ${avatars.length}`}
+                        accessibilityLabel={`${subject} ${index + 1} of ${avatars.length}`}
                     >
                         {index + 1} of {avatars.length}
                     </Text>
@@ -412,7 +420,7 @@ export function AvatarViewer({
                                 {!isCurrent && onSetMain !== undefined && (
                                     <Pressable
                                         accessibilityRole="button"
-                                        accessibilityLabel="Set as profile photo"
+                                        accessibilityLabel={setMainLabel}
                                         onPress={(): void => {
                                             if (
                                                 current === undefined ||
@@ -441,14 +449,14 @@ export function AvatarViewer({
                                         ]}
                                     >
                                         <Text style={styles.viewerButtonText}>
-                                            Set as profile photo
+                                            {setMainLabel}
                                         </Text>
                                     </Pressable>
                                 )}
                                 {onDelete !== undefined && (
                                     <Pressable
                                         accessibilityRole="button"
-                                        accessibilityLabel="Delete photo"
+                                        accessibilityLabel={deleteLabel}
                                         onPress={confirmDelete}
                                         style={[
                                             styles.viewerButton,
@@ -461,7 +469,7 @@ export function AvatarViewer({
                                                 styles.viewerDangerText,
                                             ]}
                                         >
-                                            Delete
+                                            {deleteLabel}
                                         </Text>
                                     </Pressable>
                                 )}

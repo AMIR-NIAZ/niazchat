@@ -23,6 +23,15 @@ import { ChatAccessService } from './services/chat-access.service';
 import { GroupRealtimeService } from './services/group-realtime.service';
 import { PrivateChatService } from './services/private-chat.service';
 import { RateLimitService } from 'src/common/services/rate-limit.service';
+import { ChatPermissionService } from './services/chat-permission.service';
+import { GroupMembersService } from './services/group-members.service';
+import { GroupController } from './controllers/group.controller';
+import { GroupInfoService } from './services/group-info.service';
+import { GroupAvatarUploadInterceptor } from './interceptors/group-avatar-upload.interceptor';
+import { GroupAvatarLimitGuard } from './guards/group-avatar-limit.guard';
+import { GroupInviteLinksService } from './services/group-invite-links.service';
+import { GroupInviteLinksController } from './controllers/group-invite-links.controller';
+import { InviteController } from './controllers/invite.controller';
 
 @Module({
     imports: [
@@ -46,13 +55,25 @@ import { RateLimitService } from 'src/common/services/rate-limit.service';
         ChatAccessService,
         GroupRealtimeService,
         PrivateChatService,
+        ChatPermissionService,
+        GroupMembersService,
+        GroupInfoService,
+        GroupInviteLinksService,
+        GroupAvatarUploadInterceptor,
+        GroupAvatarLimitGuard,
         RateLimitService,
         ChatGateway,
         UserService,
         JwtAppService,
         JwtService,
     ],
-    controllers: [ChatsController, ManageChatsController],
+    controllers: [
+        ChatsController,
+        ManageChatsController,
+        GroupController,
+        GroupInviteLinksController,
+        InviteController,
+    ],
     exports: [
         ChatService,
         GroupRealtimeService,

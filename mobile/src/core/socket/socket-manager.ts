@@ -18,9 +18,59 @@ let socketAccessToken: string | null = null;
 type SocketListener = (socket: AppSocket | null) => void;
 const socketListeners = new Set<SocketListener>();
 
+/** Transport state for the "Reconnecting…" banner. */
+export type SocketConnectionState = 'connected' | 'connecting' | 'disconnected';
+
+let connectionState: SocketConnectionState = 'disconnected';
+const connectionListeners = new Set<() => void>();
+/** Instances already wired to the state store (a socket is reused on refresh). */
+const trackedSockets = new WeakSet<AppSocket>();
+
+function setConnectionState(next: SocketConnectionState): void {
+    if (connectionState === next) return;
+    connectionState = next;
+    connectionListeners.forEach((listener) => listener());
+}
+
+/**
+ * Track one instance's transport state. Registered once per instance; the
+ * socket itself handles reconnection, so this only reports it.
+ */
+function trackConnection(next: AppSocket): void {
+    if (trackedSockets.has(next)) return;
+    trackedSockets.add(next);
+    next.on('connect', () => setConnectionState('connected'));
+    next.on('disconnect', () => setConnectionState('disconnected'));
+    next.on('connect_error', () => setConnectionState('disconnected'));
+    const manager = next.io as unknown as {
+        on?: (event: string, listener: () => void) => void;
+    };
+    manager.on?.('reconnect_attempt', () => setConnectionState('connecting'));
+    manager.on?.('reconnect_error', () => setConnectionState('disconnected'));
+}
+
 function setSocket(next: AppSocket | null): void {
     socket = next;
+    if (next !== null) {
+        trackConnection(next);
+        setConnectionState(next.connected ? 'connected' : 'connecting');
+    } else {
+        setConnectionState('disconnected');
+    }
     socketListeners.forEach((listener) => listener(next));
+}
+
+/** Current transport state; safe to read outside React. */
+export function getSocketConnectionState(): SocketConnectionState {
+    return connectionState;
+}
+
+/** Subscribe signature for `useSyncExternalStore`. */
+export function subscribeSocketConnection(listener: () => void): () => void {
+    connectionListeners.add(listener);
+    return () => {
+        connectionListeners.delete(listener);
+    };
 }
 
 /**
@@ -36,6 +86,7 @@ export function reconnectSocket(newAccessToken: string): AppSocket {
         return created;
     }
     socketAccessToken = newAccessToken;
+    setConnectionState('connecting');
     const ioOptions = socket.io as unknown as {
         opts: { extraHeaders?: Record<string, string> };
     };

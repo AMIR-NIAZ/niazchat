@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
     AccessibilityInfo,
     Animated,
@@ -16,6 +16,7 @@ import { attachmentPreviewLabel } from '../attachments/attachment-labels';
 import { AttachmentGrid } from '../attachments/attachment-grid';
 import { AttachmentFileRow } from '../attachments/attachment-file-row';
 import { VoiceBubble } from '../voice/voice-bubble';
+import { splitLinkifiedText } from '../groups/invite-links-model';
 /**
  * A single message bubble. Mine → primary, right-aligned; others → white,
  * left-aligned with the sender name shown in group chats. Pending/failed
@@ -43,6 +44,8 @@ interface MessageBubbleProps {
      * messages; the bubble body itself never navigates.
      */
     onOpenProfile?: ((message: ChatMessage) => void) | undefined;
+    /** Opens a tappable link inside the message body (invite links, URLs). */
+    onOpenLink?: ((url: string) => void) | undefined;
     /** Opens the full-screen viewer at an image/video of this message. */
     onOpenMedia?:
         | ((message: ChatMessage, mediaIndex: number) => void)
@@ -100,6 +103,7 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
         showSenderName = true,
         showAvatar = false,
         onOpenProfile,
+        onOpenLink,
         onOpenMedia,
         onCancelPending,
         onRetryPending,
@@ -121,6 +125,14 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
         othersLastSeenId !== null &&
         message.id <= othersLastSeenId;
 
+    // Split once per content change; plain text is the single-segment case.
+    const contentSegments = useMemo(
+        () =>
+            message.content === null
+                ? []
+                : splitLinkifiedText(message.content),
+        [message.content],
+    );
     const reply = message.replyTo;
     const replyId = reply?.id ?? message.replyToId;
     const hasReply = reply !== null || replyId !== null;
@@ -366,7 +378,28 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                         message.attachments.length > 0 && styles.caption,
                     ]}
                 >
-                    {message.content}
+                    {contentSegments.map((segment, index) =>
+                        segment.type === 'text' ? (
+                            <Text key={index}>{segment.text}</Text>
+                        ) : (
+                            <Text
+                                key={index}
+                                accessibilityRole="link"
+                                accessibilityLabel={segment.url}
+                                style={[
+                                    styles.link,
+                                    mine && styles.linkMine,
+                                ]}
+                                onPress={
+                                    onOpenLink === undefined
+                                        ? undefined
+                                        : (): void => onOpenLink(segment.url)
+                                }
+                            >
+                                {segment.text}
+                            </Text>
+                        ),
+                    )}
                 </Text>
             )}
             {message.reactions.length > 0 && (
@@ -793,6 +826,14 @@ const styles = StyleSheet.create({
     quoteDeleted: { fontStyle: 'italic' },
     content: { color: palette.neutral[900], fontSize: 15 },
     contentMine: { color: palette.neutral[0] },
+    link: {
+        color: palette.primary[700],
+        textDecorationLine: 'underline',
+    },
+    linkMine: {
+        color: palette.neutral[0],
+        textDecorationLine: 'underline',
+    },
     caption: { marginTop: spacing.xxs },
     reactionRow: {
         flexDirection: 'row',

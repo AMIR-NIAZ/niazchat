@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ChatsController } from './chats.controller';
 import { ChatService } from '../services/chat.service';
-import { InviteLinkService } from '../services/inviteLink.service';
+import { GroupInviteLinksService } from '../services/group-invite-links.service';
 import { GroupRealtimeService } from '../services/group-realtime.service';
 import { PrivateChatService } from '../services/private-chat.service';
 
@@ -13,7 +13,7 @@ describe('ChatsController', () => {
             controllers: [ChatsController],
             providers: [
                 { provide: ChatService, useValue: {} },
-                { provide: InviteLinkService, useValue: {} },
+                { provide: GroupInviteLinksService, useValue: {} },
                 { provide: GroupRealtimeService, useValue: {} },
                 { provide: PrivateChatService, useValue: {} },
             ],

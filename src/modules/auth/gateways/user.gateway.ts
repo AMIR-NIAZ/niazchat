@@ -11,6 +11,11 @@ import { UserService } from '../services/user.service';
 import { SocketAuth } from 'src/common/types/SocketAuth.type';
 import { userRoom } from 'src/common/utils/roomCreator.utils';
 
+/** Announce `auth:expired` this long before the handshake token expires. */
+const TOKEN_EXPIRY_WARNING_MS = 5_000;
+/** Grace period after the warning before the socket is dropped. */
+const AUTH_EXPIRY_GRACE_MS = 5_000;
+
 /**
  * Joins every authenticated socket to its personal `user:<id>` room so
  * personal events (`chatlist:updated`, sticky presence) reach the client even
@@ -26,6 +31,12 @@ export class UserGateway
 {
     @WebSocketServer()
     private server: Server;
+
+    /** Per-socket timers that announce an expiring handshake token. */
+    private readonly tokenExpiryTimers = new Map<
+        string,
+        ReturnType<typeof setTimeout>
+    >();
 
     constructor(
         private readonly jwtService: JwtAppService,
@@ -58,9 +69,12 @@ export class UserGateway
 
         const sockets = await this.server.in(userRoom(user.sub)).fetchSockets();
         if (sockets.length === 1) await this.userService.onlineUser(user);
+
+        this.scheduleTokenExpiry(client);
     }
 
     async handleDisconnect(client: SocketAuth) {
+        this.clearTokenExpiry(client.id);
         const user = client.data.user;
         if (!user) return;
 
@@ -68,6 +82,39 @@ export class UserGateway
             .in(userRoom(user.sub))
             .fetchSockets();
         if (remaining.length === 0) await this.userService.offlineUser(user);
+    }
+
+    /**
+     * The handshake header validates every guarded event. Once that token
+     * expires the socket stays connected but every event fails with
+     * `jwt expired`, and live updates silently stop. Warn just before `exp`
+     * so the client refreshes + reconnects, and drop the socket after a short
+     * grace period if it did not.
+     */
+    private scheduleTokenExpiry(client: SocketAuth): void {
+        this.clearTokenExpiry(client.id);
+        const exp = client.data.user?.exp;
+        if (typeof exp !== 'number' || !Number.isFinite(exp)) return;
+
+        const delay = exp * 1000 - Date.now() - TOKEN_EXPIRY_WARNING_MS;
+        if (delay <= 0) return;
+
+        const warnTimer = setTimeout((): void => {
+            client.emit('auth:expired', { graceMs: AUTH_EXPIRY_GRACE_MS });
+            const closeTimer = setTimeout((): void => {
+                this.tokenExpiryTimers.delete(client.id);
+                client.disconnect(true);
+            }, AUTH_EXPIRY_GRACE_MS);
+            this.tokenExpiryTimers.set(client.id, closeTimer);
+        }, delay);
+        this.tokenExpiryTimers.set(client.id, warnTimer);
+    }
+
+    private clearTokenExpiry(socketId: string): void {
+        const timer = this.tokenExpiryTimers.get(socketId);
+        if (timer === undefined) return;
+        clearTimeout(timer);
+        this.tokenExpiryTimers.delete(socketId);
     }
 
     private getToken(client: SocketAuth): string {

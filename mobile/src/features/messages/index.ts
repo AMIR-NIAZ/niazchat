@@ -1,4 +1,5 @@
 export * from './messages-model';
+export * from './read-receipt';
 export * from './forward-helpers';
 export * from './forward-picker';
 export * from './messages-mapper';

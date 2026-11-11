@@ -13,6 +13,7 @@ export * from './chats-mapper';
 export * from './chats-socket-api';
 export * from './chats-cache';
 export * from './active-chat';
+export * from './active-room';
 export * from './local-chat-prefs';
 export * from './chat-context-menu';
 export * from './use-chats';

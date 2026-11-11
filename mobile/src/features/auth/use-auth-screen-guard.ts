@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { useEffect } from 'react';
 import { useAuthStore } from './auth-store';
+import { takePendingInviteCode } from '../groups/pending-invite';
 
 /**
  * Route-guard hook for screen layouts.
@@ -12,24 +13,28 @@ import { useAuthStore } from './auth-store';
 export type AuthGuard = 'protected' | 'guest-only';
 
 export function useAuthScreenGuard(guard: AuthGuard): boolean {
-  const status = useAuthStore((state) => state.status);
+    const status = useAuthStore((state) => state.status);
 
-  useEffect(() => {
-    if (status === 'restoring') {
-      return;
-    }
-    if (guard === 'protected' && status === 'guest') {
-      router.replace('/(auth)/login');
-    }
-    if (guard === 'guest-only' && status === 'authenticated') {
-      router.replace('/(app)');
-    }
-  }, [guard, status]);
+    useEffect(() => {
+        if (status === 'restoring') {
+            return;
+        }
+        if (guard === 'protected' && status === 'guest') {
+            router.replace('/(auth)/login');
+        }
+        if (guard === 'guest-only' && status === 'authenticated') {
+            // A link opened while logged out continues on the join screen.
+            const pendingInvite = takePendingInviteCode();
+            router.replace(
+                pendingInvite === null ? '/(app)' : `/join/${pendingInvite}`,
+            );
+        }
+    }, [guard, status]);
 
-  return status === 'authenticated';
+    return status === 'authenticated';
 }
 
 /** True while the very first session restoration is still in flight. */
 export function useIsRestoringSession(): boolean {
-  return useAuthStore((state) => state.status) === 'restoring';
+    return useAuthStore((state) => state.status) === 'restoring';
 }

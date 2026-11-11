@@ -79,7 +79,9 @@ export default function RootLayout(): React.ReactElement {
         <QueryClientProvider client={appQueryClient}>
             <SafeAreaProvider>
                 <StatusBar style="dark" />
-                <Stack screenOptions={{ headerShown: false }} />
+                <Stack screenOptions={{ headerShown: false }}>
+                    <Stack.Screen name="join/[code]" />
+                </Stack>
             </SafeAreaProvider>
         </QueryClientProvider>
     );

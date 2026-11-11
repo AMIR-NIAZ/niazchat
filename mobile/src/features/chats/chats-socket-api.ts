@@ -1,6 +1,7 @@
 import { getSocket, request, type AppSocket } from '../../core/socket';
 import { ApiError } from '../../core/api';
 import type { ChatDto, MessageDto, MessagePageDto } from '../../core/api';
+import { markChatRoomJoined } from './active-room';
 
 /**
  * WebSocket-based API for chats (docs/mobile-api/websocket-contract.md).
@@ -73,6 +74,9 @@ export async function joinChat(
     const info = await request<ChatDto>(socketOrThrow(), 'joinChat', {
         chatId,
     });
+    // The server has left the previous room and joined this one. Record it so
+    // focus/blur handling knows which room the socket currently owns.
+    markChatRoomJoined(chatId);
     const page = await fetchChatMessages(chatId);
     return {
         info,

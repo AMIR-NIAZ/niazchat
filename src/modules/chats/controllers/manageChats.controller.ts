@@ -28,7 +28,16 @@ import { RoleChatEnum } from 'src/common/enums/roleChat.enum';
 import { PermissionChatDto } from '../dtos/permissionChat.dto';
 import { PermissionChatService } from '../services/permissionChat.service';
 import { createLinkDto } from '../dtos/createLink.dto';
-import { InviteLinkService } from '../services/inviteLink.service';
+import {
+    GroupInviteLinksService,
+    InviteLinkItem,
+    InviteLinkRevokeResponse,
+    InviteLinksResponse,
+} from '../services/group-invite-links.service';
+import {
+    INVITE_EXPIRY_OPTIONS,
+    INVITE_MAX_USES_OPTIONS,
+} from '../utils/invite-link.util';
 import { ChatId } from 'src/common/types/brands.type';
 import { RequestAuth } from 'src/common/types/RequestAuth.type';
 
@@ -44,7 +53,7 @@ export class ManageChatsController {
     constructor(
         private readonly chatService: ChatService,
         private readonly permissionChatService: PermissionChatService,
-        private readonly linkService: InviteLinkService,
+        private readonly inviteLinks: GroupInviteLinksService,
     ) {}
 
     // ── members ────────────────────────────────────────────────────────────
@@ -275,35 +284,76 @@ export class ManageChatsController {
 
     // ── invite links (any admin) ───────────────────────────────────────────
 
+    /**
+     * Legacy create route, kept for existing clients/scripts. Delegates to the
+     * clean service; the legacy `usageLimit`/`expiresAt` body fields are mapped
+     * onto the new allowlists (anything else is still a 400).
+     */
     @Post('/:chatId/link')
     @Role([RoleEnum.ALL])
     @ChatAccess({ minRole: RoleChatEnum.ADMIN })
     async createLink(
+        @Req() request: RequestAuth,
         @Param('chatId', ParseIntPipe) chatId: ChatId,
         @Body() dto: createLinkDto,
-    ) {
+    ): Promise<InviteLinkItem> {
         if (Number(dto.chatId) !== chatId) {
             throw new BadRequestException(
                 'body chatId must match the URL chatId',
             );
         }
-        return await this.linkService.createInviteLink(dto);
+
+        const requestedMaxUses = Number(dto.usageLimit ?? 0);
+        const maxUses =
+            requestedMaxUses <= 0 ? null : requestedMaxUses;
+        if (
+            maxUses !== null &&
+            !(INVITE_MAX_USES_OPTIONS as readonly number[]).includes(maxUses)
+        ) {
+            throw new BadRequestException('invalid usage limit');
+        }
+
+        let expiresInSeconds: number | null = null;
+        if (dto.expiresAt !== undefined) {
+            const seconds = Math.round(
+                (new Date(dto.expiresAt).getTime() - Date.now()) / 1000,
+            );
+            if (
+                !(INVITE_EXPIRY_OPTIONS as readonly number[]).includes(seconds)
+            ) {
+                throw new BadRequestException('invalid expiry');
+            }
+            expiresInSeconds = seconds;
+        }
+
+        return await this.inviteLinks.createLink(chatId, request.user.sub, {
+            expiresInSeconds,
+            maxUses,
+        });
     }
 
     @Get('/:chatId/link')
     @Role([RoleEnum.ALL])
     @ChatAccess({ minRole: RoleChatEnum.ADMIN })
-    async getLinkChats(@Param('chatId', ParseIntPipe) chatId: ChatId) {
-        return await this.linkService.getChatInviteLinks(chatId);
+    async getLinkChats(
+        @Req() request: RequestAuth,
+        @Param('chatId', ParseIntPipe) chatId: ChatId,
+    ): Promise<InviteLinksResponse> {
+        return await this.inviteLinks.listLinks(chatId, request.user.sub);
     }
 
     @Delete('/:chatId/link/:linkId')
     @Role([RoleEnum.ALL])
     @ChatAccess({ minRole: RoleChatEnum.ADMIN })
     async deleteLink(
+        @Req() request: RequestAuth,
         @Param('chatId', ParseIntPipe) chatId: ChatId,
         @Param('linkId', ParseIntPipe) linkId: number,
-    ) {
-        return await this.linkService.notActiveInviteLink(linkId, chatId);
+    ): Promise<InviteLinkRevokeResponse> {
+        return await this.inviteLinks.revokeLink(
+            chatId,
+            linkId,
+            request.user.sub,
+        );
     }
 }

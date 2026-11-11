@@ -52,7 +52,38 @@ export interface ServerToClientEvents {
     'chat:read': (payload: { chatId: number; unreadCount: number }) => void;
     /** Live non-banned member count after a membership change. */
     'chat:members': (payload: { chatId: number; membersCount: number }) => void;
+    /** Role change / removal committed in a group the caller belongs to. */
+    'group:changed': (payload: {
+        chatId: number;
+        reason:
+            | 'role_changed'
+            | 'member_removed'
+            | 'permissions_changed'
+            | 'info_changed'
+            | 'invite_links_changed'
+            | 'member_joined';
+        userId?: number;
+    }) => void;
+    /** The caller was added to a group (invite link join). */
+    'group:added': (payload: { chatId: number }) => void;
+    /** Group title/photo changed; delivered to every member's personal room. */
+    'group:updated': (payload: {
+        chatId: number;
+        title: string;
+        avatars: string[];
+    }) => void;
+    /** The caller was removed (kicked) from a group. */
+    'group:removed': (payload: { chatId: number; reason: 'kicked' }) => void;
     countUsersOnline: (count: number) => void;
+    /**
+     * The handshake access token is about to expire. The server keeps the
+     * socket for a short grace period; the app refreshes and reconnects with a
+     * fresh handshake before then (see `session-lifecycle.ts`).
+     */
+    'auth:expired': (payload?: { graceMs?: number }) => void;
+    /** Socket.IO lifecycle (client-side, never emitted by the server). */
+    connect: () => void;
+    disconnect: (reason: string) => void;
     'typing:start': (payload: {
         chatId: number;
         userId: number;
@@ -172,7 +203,21 @@ export type AppSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
 /** Connect-time listeners: every (re)connect of any fresh socket fires these. */
 const connectListeners = new Set<(socket: AppSocket) => void>();
+/** Disconnect listeners: server-side room memberships are gone after this. */
+const disconnectListeners = new Set<() => void>();
 let firstConnectDone = false;
+
+/**
+ * Runs on every socket disconnect (transport loss, server restart, token
+ * reconnect). Room membership is per-connection, so anything that caches "the
+ * server still has me in room X" must be invalidated here.
+ */
+export function onSocketDisconnect(listener: () => void): () => void {
+    disconnectListeners.add(listener);
+    return () => {
+        disconnectListeners.delete(listener);
+    };
+}
 
 /**
  * Auth-failure observers (the session layer refreshes + reconnects). Socket
@@ -214,6 +259,13 @@ export function createAppSocket(accessToken: string): AppSocket {
         auth: { token: accessToken },
         transports: ['websocket'],
         autoConnect: true,
+        // Detect half-dead connections and reconnect with backoff + jitter
+        // (the server pings every 10 s and expects a reply within 8 s).
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        randomizationFactor: 0.5,
+        timeout: 10_000,
     });
 
     socket.on('connect', () => {
@@ -221,6 +273,10 @@ export function createAppSocket(accessToken: string): AppSocket {
             connectListeners.forEach((listener) => listener(socket));
         }
         firstConnectDone = true;
+    });
+
+    socket.on('disconnect', () => {
+        disconnectListeners.forEach((listener) => listener());
     });
 
     socket.on('connect_error', (error: Error) => {
@@ -236,6 +292,13 @@ export function createAppSocket(accessToken: string): AppSocket {
         ) {
             notifySocketAuthError();
         }
+    });
+
+    // The handshake header is what every guarded event validates, so an
+    // expiring token means every later event would fail with `jwt expired`.
+    // Share the refresh/reconnect path with handshake and ack 401s.
+    socket.on('auth:expired', () => {
+        notifySocketAuthError();
     });
 
     return socket;

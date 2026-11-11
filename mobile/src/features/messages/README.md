@@ -22,8 +22,18 @@ Messaging is **WebSocket-only** (docs/mobile-api/messages.md), implemented in th
 - `getMessages` — one page (`limit` 30, `beforeId` cursor), newest first within the page;
   reversed to ascending here. `loadOlder()` merges older pages into the ascending cache.
 - `seen` — another member advanced their read position → cache `othersLastSeenId` (my ticks).
-- `markSeen` — `use-mark-seen.ts` sends the newest confirmed id only while focused +
-  app active + near the bottom (300 ms debounce, monotonic); clears the chat-list badge.
+- `markSeen` — `use-mark-seen.ts` sends the read target only while focused + app active
+  (300 ms debounce, monotonic); clears the chat-list badge. The target is the newest
+  confirmed id at the bottom, otherwise the highest id among currently visible rows, so
+  opening on the unread divider and reading older history both advance the receipt.
+  `ReadReceiptRunner` owns the dedupe/retry state: one request in flight, transient
+  failures retried twice (1.5 s/3 s), an unacknowledged position re-armed on
+  focus/foreground/reconnect, and server rejections never retried.
+- The chat room follows FOCUS (`active-room.ts`): blur leaves `chat:<id>`, focus re-joins
+  it with one fresh page + `othersLastSeenId` (`useChatMessages.ensureActive`). This is what
+  keeps `seen`/message events alive when a chat is pushed over another (profile, forwarded
+  target, the same chat opened again) and the backend's one-room-per-socket rule kicks the
+  hidden screen out.
 
 ## Read state
 - `ChatMessage` stores no read flag. Ticks derive from `ConversationDetail.othersLastSeenId`:

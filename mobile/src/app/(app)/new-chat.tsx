@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     FlatList,
+    Modal,
     Pressable,
     StyleSheet,
     Text,
     TextInput,
     View,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -28,6 +30,7 @@ import {
 import { searchUsers } from '../../features/users/users-service';
 import type { UserSearchItemDto } from '../../core/api/dto/user.dto';
 import { ApiError } from '../../core/api';
+import { parseInviteInput } from '../../features/groups/invite-links-model';
 
 /**
  * New private chat: search a username, tap a result, open the conversation.
@@ -66,6 +69,9 @@ export default function NewChatScreen(): React.ReactElement {
     const [error, setError] = useState<string | null>(null);
     const [openingId, setOpeningId] = useState<number | null>(null);
     const [openError, setOpenError] = useState<string | null>(null);
+    const [joinOpen, setJoinOpen] = useState(false);
+    const [joinText, setJoinText] = useState('');
+    const [joinError, setJoinError] = useState<string | null>(null);
     const requestIdRef = useRef(0);
 
     useEffect((): (() => void) => {
@@ -127,6 +133,32 @@ export default function NewChatScreen(): React.ReactElement {
         }
     };
 
+    const pasteJoin = async (): Promise<void> => {
+        try {
+            const text = await Clipboard.getStringAsync();
+            setJoinText(text);
+            setJoinError(
+                parseInviteInput(text) === null
+                    ? "That doesn't look like an invite link."
+                    : null,
+            );
+        } catch {
+            setJoinError('Could not read the clipboard.');
+        }
+    };
+
+    const continueJoin = (): void => {
+        const code = parseInviteInput(joinText);
+        if (code === null) {
+            setJoinError("That doesn't look like an invite link.");
+            return;
+        }
+        setJoinOpen(false);
+        setJoinText('');
+        setJoinError(null);
+        router.push({ pathname: '/join/[code]', params: { code } });
+    };
+
     return (
         <Screen style={styles.screen} withTopInset={true}>
             <View style={styles.header}>
@@ -143,6 +175,29 @@ export default function NewChatScreen(): React.ReactElement {
                 </AppText>
                 <View style={styles.backButton} />
             </View>
+
+            <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Join a group with a link"
+                onPress={(): void => {
+                    setJoinError(null);
+                    setJoinOpen(true);
+                }}
+                style={({ pressed }) => [
+                    styles.joinRow,
+                    pressed && styles.rowPressed,
+                ]}
+            >
+                <View style={styles.joinRowBody}>
+                    <Text style={styles.joinRowTitle}>
+                        Join a group with a link
+                    </Text>
+                    <Text style={styles.joinRowHint}>
+                        Paste an invite link or code
+                    </Text>
+                </View>
+                <Text style={styles.joinRowChevron}>›</Text>
+            </Pressable>
 
             <TextInput
                 style={styles.search}
@@ -234,6 +289,62 @@ export default function NewChatScreen(): React.ReactElement {
             {openError !== null && (
                 <Text style={styles.error}>{openError}</Text>
             )}
+
+            <Modal
+                visible={joinOpen}
+                transparent={true}
+                animationType="slide"
+                onRequestClose={(): void => setJoinOpen(false)}
+            >
+                <View style={styles.modalBackdrop}>
+                    <View style={styles.modalSheet}>
+                        <Text style={styles.modalTitle}>Join a group</Text>
+                        <Text style={styles.modalHint}>
+                            Paste the invite link or the 22-character code.
+                        </Text>
+                        <TextInput
+                            style={styles.search}
+                            placeholder="Invite link or code"
+                            placeholderTextColor={palette.neutral[300]}
+                            value={joinText}
+                            onChangeText={(text): void => {
+                                setJoinText(text);
+                                setJoinError(null);
+                            }}
+                            autoCapitalize="none"
+                            autoCorrect={false}
+                            accessibilityLabel="Invite link or code"
+                        />
+                        {joinError !== null && (
+                            <Text style={styles.error}>{joinError}</Text>
+                        )}
+                        <View style={styles.modalActions}>
+                            <Pressable
+                                accessibilityRole="button"
+                                accessibilityLabel="Paste invite link"
+                                onPress={(): void => {
+                                    void pasteJoin();
+                                }}
+                                style={styles.ghostButton}
+                            >
+                                <Text style={styles.ghostButtonText}>
+                                    Paste
+                                </Text>
+                            </Pressable>
+                            <Pressable
+                                accessibilityRole="button"
+                                accessibilityLabel="Continue to join group"
+                                onPress={continueJoin}
+                                style={styles.primaryButton}
+                            >
+                                <Text style={styles.primaryButtonText}>
+                                    Continue
+                                </Text>
+                            </Pressable>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
         </Screen>
     );
 }
@@ -270,6 +381,78 @@ const styles = StyleSheet.create({
     },
     detail: { textAlign: 'center', color: palette.neutral[500] },
     list: { paddingBottom: spacing.md },
+    joinRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.sm,
+        paddingHorizontal: spacing.sm,
+        paddingVertical: spacing.xs,
+        borderRadius: radii.sm,
+        backgroundColor: palette.primary[100],
+    },
+    joinRowBody: { flex: 1, gap: 2 },
+    joinRowTitle: {
+        color: palette.primary[700],
+        fontSize: 14,
+        fontWeight: '700',
+    },
+    joinRowHint: {
+        color: palette.neutral[500],
+        fontSize: 12,
+    },
+    joinRowChevron: {
+        color: palette.primary[700],
+        fontSize: 22,
+    },
+    modalBackdrop: {
+        flex: 1,
+        justifyContent: 'flex-end',
+        backgroundColor: 'rgba(0,0,0,0.35)',
+    },
+    modalSheet: {
+        backgroundColor: palette.neutral[0],
+        borderTopLeftRadius: radii.md,
+        borderTopRightRadius: radii.md,
+        padding: spacing.md,
+        paddingBottom: spacing.lg,
+        gap: spacing.xs,
+    },
+    modalTitle: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: palette.neutral[900],
+    },
+    modalHint: {
+        color: palette.neutral[500],
+        fontSize: 13,
+    },
+    modalActions: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        alignItems: 'center',
+        gap: spacing.sm,
+        marginTop: spacing.xs,
+    },
+    ghostButton: {
+        paddingHorizontal: spacing.md,
+        paddingVertical: spacing.xs,
+    },
+    ghostButtonText: {
+        color: palette.primary[700],
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    primaryButton: {
+        borderRadius: radii.sm,
+        paddingHorizontal: spacing.md,
+        paddingVertical: spacing.xs,
+        backgroundColor: palette.primary[500],
+    },
+    primaryButtonText: {
+        color: palette.neutral[0],
+        fontSize: 14,
+        fontWeight: '600',
+    },
     row: {
         flexDirection: 'row',
         alignItems: 'center',

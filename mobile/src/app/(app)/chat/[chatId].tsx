@@ -48,6 +48,9 @@ import {
     useTypingUsers,
     assignMessageRuns,
     formatDaySeparator,
+    firstUnreadMessageId,
+    highestVisibleMessageId,
+    pickReadTarget,
     NO_MESSAGE_ACTIONS,
     getMessageActions,
     isForwardable,
@@ -81,6 +84,13 @@ import {
 } from '../../../features/chats';
 import type { ChatMemberRow, ChatRole } from '../../../features/chats';
 import { useCurrentUserId } from '../../../features/auth';
+import {
+    canOpenGroupSettings,
+    openMessageLink,
+    useGroupInfo,
+    useGroupRemovedEvent,
+    useGroupUpdatedEvents,
+} from '../../../features/groups';
 import {
     deleteVoiceFile,
     getVoicePlayback,
@@ -170,7 +180,6 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         index: number;
     } | null>(null);
     const [unreadDividerId, setUnreadDividerId] = useState<number | null>(null);
-    const dividerInitRef = useRef(false);
     const [screenFocused, setScreenFocused] = useState(false);
     const [appActive, setAppActive] = useState(
         AppState.currentState === 'active',
@@ -182,6 +191,12 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     // Server `type` is the single source of truth; unknown/missing = group.
     const isPrivate = info !== null && isPrivateChat(info);
     const isGroup = !isPrivate;
+    // The gear is rendered only after the server says the caller is owner or
+    // admin (group info is fetched once per group chat, hidden while unknown).
+    const groupInfoQuery = useGroupInfo(isGroup ? chatId : 0);
+    useGroupUpdatedEvents();
+    const settingsVisible =
+        isGroup && canOpenGroupSettings(groupInfoQuery.data?.myRole ?? null);
     const typing = useTypingEmitter(chatId, info !== null);
     const typingUsers = useTypingUsers(chatId, info !== null, currentUserId);
     /** Peer target for the header tap (private chats only). */
@@ -280,6 +295,11 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     );
     const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [atBottom, setAtBottom] = useState(true);
+    const [highestVisibleId, setHighestVisibleId] = useState<number | null>(
+        null,
+    );
+    const [readTrackingReady, setReadTrackingReady] = useState(false);
+    const readTrackingReadyRef = useRef(false);
     const [newMessageCount, setNewMessageCount] = useState(0);
     const newMessageCountRef = useRef(0);
     const lastNewestIdRef = useRef<number | null>(null);
@@ -293,6 +313,31 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     }, [listData]);
     const reversedListDataRef = useRef<List[]>(reversedListData);
     reversedListDataRef.current = reversedListData;
+
+    // Only rows the user can actually see may advance the read position. The
+    // callback identity must stay stable across renders (FlatList requirement).
+    const viewabilityConfig = useRef({
+        itemVisiblePercentThreshold: 40,
+    }).current;
+    const onViewableItemsChanged = useRef(
+        (info: { viewableItems: ChatViewToken[] }): void => {
+            if (!readTrackingReadyRef.current) {
+                return;
+            }
+            const rows: List[] = [];
+            for (const token of info.viewableItems) {
+                if (token.item !== undefined) {
+                    rows.push(token.item);
+                }
+            }
+            const id = highestVisibleMessageId(rows);
+            if (id !== null) {
+                setHighestVisibleId((current) =>
+                    current === id ? current : id,
+                );
+            }
+        },
+    ).current;
 
     // Floating "scroll to latest" button. The list is inverted, so the newest
     // message sits at offset 0; the hook owns the show/hide hysteresis.
@@ -313,7 +358,13 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         setSelecting(false);
         setSelectedIds(new Set());
         setForwardOpen(false);
-        dividerInitRef.current = false;
+        setHighestVisibleId(null);
+        setReadTrackingReady(false);
+        readTrackingReadyRef.current = false;
+        // A newly opened chat starts at its newest item until the divider
+        // effect says otherwise.
+        atBottomRef.current = true;
+        setAtBottom(true);
         initialScrollDoneRef.current = false;
     }, [chatId]);
 
@@ -340,10 +391,24 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     }, [selecting]);
 
     // Focus/foreground drive "actually looking at this chat" for markSeen.
+    //
+    // Focus also owns the single socket chat room: React Navigation keeps a
+    // chat screen mounted when another screen is pushed on top, while the
+    // backend only allows one active chat room per socket. Leaving on blur and
+    // re-joining on focus keeps room membership, live `seen`/message events and
+    // therefore read receipts aligned with what is actually on screen.
+    const ensureActiveRef = useRef(conversation.ensureActive);
+    ensureActiveRef.current = conversation.ensureActive;
+    const releaseActiveRef = useRef(conversation.releaseActive);
+    releaseActiveRef.current = conversation.releaseActive;
     useFocusEffect(
         useCallback((): (() => void) => {
             setScreenFocused(true);
-            return (): void => setScreenFocused(false);
+            ensureActiveRef.current();
+            return (): void => {
+                setScreenFocused(false);
+                releaseActiveRef.current();
+            };
         }, []),
     );
     useEffect((): (() => void) => {
@@ -354,32 +419,75 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         return (): void => subscription.remove();
     }, []);
 
-    // Snapshot where the unread block starts, once per opening. Later
-    // markSeen calls advance the read position but must not hide the divider.
+    // First load: snapshot the unread block, position the list on its first
+    // message, and only then enable read tracking.
+    //
+    // This is deliberately ONE effect. The snapshot and the initial
+    // positioning must be driven by the same `detail`/`messages` pass: when
+    // the snapshot was set by a separate effect, this effect ran with a stale
+    // `unreadDividerId` (still null in the commit that set it), enabled read
+    // tracking with no target, and never scrolled to the divider. The
+    // viewability callback had already fired before tracking was enabled, so
+    // `highestVisibleId` stayed null and no read receipt was sent until the
+    // list changed again (e.g. the user sent a message).
+    //
+    // Later markSeen calls advance the read position but must not hide the
+    // one-shot divider anchor.
     useEffect((): void => {
         if (
-            dividerInitRef.current ||
+            initialScrollDoneRef.current ||
             detail === null ||
             messages.length === 0
         ) {
             return;
         }
-        dividerInitRef.current = true;
-        const myId = currentUserId ?? -1;
-        const firstUnread = messages.find(
-            (message) =>
-                message.id !== null &&
-                message.senderId !== myId &&
-                (detail.myLastSeenId === null ||
-                    message.id > detail.myLastSeenId),
-        );
-        if (firstUnread?.id !== undefined && firstUnread?.id !== null) {
-            setUnreadDividerId(firstUnread.id);
-            // Opening on the divider is not "at the bottom": no markSeen yet.
-            atBottomRef.current = false;
-            setAtBottom(false);
+        initialScrollDoneRef.current = true;
+
+        const dividerId = firstUnreadMessageId({
+            messages,
+            myLastSeenId: detail.myLastSeenId,
+            currentUserId,
+        });
+
+        if (dividerId === null) {
+            // Already at the newest message: the newest id is the read target.
+            readTrackingReadyRef.current = true;
+            setReadTrackingReady(true);
+            return;
         }
-    }, [detail, messages, currentUserId]);
+
+        setUnreadDividerId(dividerId);
+        // Opening on the divider is not "at the bottom": the read target is
+        // the divider's message, not the newest one.
+        atBottomRef.current = false;
+        setAtBottom(false);
+
+        const index = reversedListData.findIndex(
+            (item) => item.kind === 'message' && item.message.id === dividerId,
+        );
+        if (index < 0) {
+            // The divider row is not addressable (filtered or not laid out):
+            // still make its message the initial target rather than none.
+            readTrackingReadyRef.current = true;
+            setReadTrackingReady(true);
+            setHighestVisibleId((current) => current ?? dividerId);
+            return;
+        }
+        setTimeout((): void => {
+            listRef.current?.scrollToIndex({
+                index,
+                viewPosition: 0.5,
+                animated: false,
+            });
+            // Enable only after the jump so the initial bottom render cannot
+            // mark the whole unread block read before it is shown. The
+            // divider's message is visible at the centre of the jump and is
+            // the initial read target.
+            readTrackingReadyRef.current = true;
+            setReadTrackingReady(true);
+            setHighestVisibleId((current) => current ?? dividerId);
+        }, 50);
+    }, [detail, messages, currentUserId, reversedListData]);
 
     useEffect((): (() => void) => {
         return (): void => {
@@ -431,44 +539,26 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         return null;
     }, [messages]);
 
-    // Focus + foreground + newest-visible is the only state that reads.
+    // Focus + foreground + a settled initial position is what allows reads;
+    // the target is either the newest message (at the bottom) or the highest
+    // message actually visible (while reading back through history).
     const readingNow = screenFocused && appActive && atBottom;
-    useMarkSeen(chatId, newestConfirmedId, readingNow);
+    const readTargetId = pickReadTarget({
+        atBottom,
+        newestConfirmedId,
+        highestVisibleId,
+    });
+    useMarkSeen(
+        chatId,
+        readTargetId,
+        screenFocused && appActive && readTrackingReady,
+    );
     useEffect((): void => {
         setActiveChat(chatId, readingNow);
     }, [chatId, readingNow]);
     useEffect((): (() => void) => {
         return (): void => setActiveChat(null, false);
     }, [chatId]);
-
-    // First load: land on the unread divider when one exists, else keep the
-    // inverted default (newest at the bottom).
-    useEffect((): void => {
-        if (
-            initialScrollDoneRef.current ||
-            detail === null ||
-            messages.length === 0
-        ) {
-            return;
-        }
-        initialScrollDoneRef.current = true;
-        if (unreadDividerId === null) {
-            return;
-        }
-        const index = reversedListData.findIndex(
-            (item) => item.kind === 'unread',
-        );
-        if (index < 0) {
-            return;
-        }
-        setTimeout((): void => {
-            listRef.current?.scrollToIndex({
-                index,
-                viewPosition: 0.5,
-                animated: false,
-            });
-        }, 50);
-    }, [detail, messages.length, unreadDividerId, reversedListData]);
 
     // Auto-scroll ONLY when already at the newest message (first load, own send,
     // or a live message while near the bottom). Reading old history is never
@@ -631,6 +721,12 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         setSelectedIds(new Set([message.id]));
     };
 
+    /** Invite links open the join screen; other URLs leave the app. */
+    const handleOpenLink = (url: string): void => {
+        if (selecting) return;
+        openMessageLink(url);
+    };
+
     const handleToggleSelection = (message: ChatMessage): void => {
         const result = toggleForwardSelection(selectedIds, message);
         if (result.limitReached) {
@@ -730,6 +826,37 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         purgeChatFromCaches(queryClient, chatId);
         setAdminPanelOpen(false);
         router.replace('/(app)');
+    };
+
+    /** Removed by an owner/admin while this chat (or the group panel) is open. */
+    const handleRemovedFromGroup = useCallback((): void => {
+        purgeChatFromCaches(queryClient, chatId);
+        setAdminPanelOpen(false);
+        Alert.alert('Removed from group', 'You were removed from this group');
+        router.replace('/(app)');
+    }, [queryClient, chatId]);
+    useGroupRemovedEvent(chatId, handleRemovedFromGroup);
+
+    /** One push for one tap; the group screen is not opened twice. */
+    const groupNavRef = useRef(false);
+    const openGroupInfo = (): void => {
+        if (groupNavRef.current) return;
+        groupNavRef.current = true;
+        router.push(`/(app)/group/${chatId}`);
+        setTimeout((): void => {
+            groupNavRef.current = false;
+        }, 700);
+    };
+
+    /** Pushing settings keeps the chat mounted (scroll position + draft). */
+    const settingsNavRef = useRef(false);
+    const openGroupSettings = (): void => {
+        if (settingsNavRef.current) return;
+        settingsNavRef.current = true;
+        router.push(`/(app)/group-settings/${chatId}`);
+        setTimeout((): void => {
+            settingsNavRef.current = false;
+        }, 700);
     };
 
     // Without a session user id nothing can be classified as mine: wait for it
@@ -869,6 +996,18 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                         >
                             {headerIdentity}
                         </Pressable>
+                    ) : isGroup ? (
+                        <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Open group info for ${name}`}
+                            onPress={openGroupInfo}
+                            style={({ pressed }) => [
+                                styles.headerIdentity,
+                                pressed && styles.pressed,
+                            ]}
+                        >
+                            {headerIdentity}
+                        </Pressable>
                     ) : (
                         headerIdentity
                     )}
@@ -880,6 +1019,19 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                             onPress={(): void => setAdminPanelOpen(true)}
                         >
                             <Text style={styles.pillText}>Admin</Text>
+                        </Pressable>
+                    )}
+                    {settingsVisible && (
+                        <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel="Group settings"
+                            style={({ pressed }) => [
+                                styles.iconButton,
+                                pressed && styles.pressed,
+                            ]}
+                            onPress={openGroupSettings}
+                        >
+                            <Text style={styles.gearGlyph}>⚙</Text>
                         </Pressable>
                     )}
                 </View>
@@ -919,6 +1071,8 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                             Keyboard.dismiss();
                         }}
                         onScroll={handleListScroll}
+                        onViewableItemsChanged={onViewableItemsChanged}
+                        viewabilityConfig={viewabilityConfig}
                         onLayout={scrollToLatestButton.onLayout}
                         onContentSizeChange={
                             scrollToLatestButton.onContentSizeChange
@@ -999,6 +1153,9 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                                     currentUserId={currentUserId}
                                     showSenderName={item.showSenderName}
                                     showAvatar={item.showAvatar}
+                                    onOpenLink={
+                                        selecting ? undefined : handleOpenLink
+                                    }
                                     onOpenProfile={
                                         selecting
                                             ? undefined
@@ -1429,6 +1586,11 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
 }
 
 type List = ListChunk;
+
+/** Minimal viewability token (RN no longer exports `ViewToken`). */
+interface ChatViewToken {
+    item?: List | undefined;
+}
 
 /// Long-press action sheet (Reply / Edit / Delete / Cancel) --------------------
 
@@ -2168,6 +2330,18 @@ const styles = StyleSheet.create({
         paddingVertical: 4,
     },
     pillText: { color: palette.primary[600], fontSize: 13, fontWeight: '600' },
+    iconButton: {
+        width: 44,
+        height: 44,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: radii.full,
+    },
+    gearGlyph: {
+        fontSize: 20,
+        lineHeight: 24,
+        color: palette.neutral[700],
+    },
     chatArea: { flex: 1 },
     list: { flex: 1 },
     listContent: { paddingHorizontal: spacing.xs, paddingBottom: spacing.xs },

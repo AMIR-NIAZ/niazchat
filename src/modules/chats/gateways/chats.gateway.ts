@@ -80,16 +80,19 @@ export class ChatGateway implements OnGatewayDisconnect, OnGatewayInit {
         const chatId = dto.chatId;
         const user = client.data.user;
         const prev = client.data.chatId;
+        // Resolve everything that can fail BEFORE mutating room/state: a
+        // rejected info query must leave this socket exactly as it was.
         // One entity load per join; typing later uses only the socket cache.
         const chat = await this.chatService.getInfoChat(chatId);
+        const info = await this.chatInfo(chatId, user.sub, chat);
+        const userName = await this.chatService.getUserDisplayName(user.sub);
 
         if (prev === chatId) {
-            // Self-healing: a socket that kept `data.chatId` but lost the room
-            // (server restart / reconnect) must be re-added before it expects
-            // room broadcasts again.
+            // Idempotent: ALWAYS re-add the room (a socket can keep
+            // `data.chatId` while its room membership was lost), then refresh
+            // the cached typing context and answer.
             await client.join(chatRoom(chatId));
-            await this.cacheChatContext(client, chat);
-            const info = await this.chatInfo(chatId, user.sub, chat);
+            this.cacheChatContext(client, chat, userName);
             // Legacy per-client event, kept for compatibility; the ack is the
             // completion signal.
             client.emit('chatInfo', info);
@@ -97,15 +100,18 @@ export class ChatGateway implements OnGatewayDisconnect, OnGatewayInit {
         }
         if (prev) await this.leaveCurrentChat(client);
 
+        // State is committed only after the membership exists, so a failure at
+        // any point leaves the socket in NO chat instead of claiming a room it
+        // is not in (private and group take the same path).
         await client.join(chatRoom(chatId));
         client.data.chatId = chatId;
-        await this.cacheChatContext(client, chat);
+        this.cacheChatContext(client, chat, userName);
 
         // Joining no longer marks everything read: the app calls `markSeen`
         // only while the chat is focused, foregrounded and near the bottom.
+        // The online count is advisory and can never fail the join.
         await this.emitOnlineCount(chatId);
 
-        const info = await this.chatInfo(chatId, user.sub, chat);
         client.emit('chatInfo', info);
 
         return { ok: true, data: info };
@@ -242,14 +248,13 @@ export class ChatGateway implements OnGatewayDisconnect, OnGatewayInit {
     }
 
     /** Cache display name/type once per join so typing never queries per event. */
-    private async cacheChatContext(
+    private cacheChatContext(
         client: SocketAuth,
         chat: Chat | null,
-    ): Promise<void> {
+        userName: string,
+    ): void {
         client.data.chatType = chat?.type;
-        client.data.userName = await this.chatService.getUserDisplayName(
-            client.data.user.sub,
-        );
+        client.data.userName = userName;
         client.data.typingAt = undefined;
         client.data.typingChatId = undefined;
     }
@@ -276,11 +281,18 @@ export class ChatGateway implements OnGatewayDisconnect, OnGatewayInit {
         await this.emitOnlineCount(chatId);
     }
 
-    private async emitOnlineCount(chatId: ChatId) {
-        const sockets = await this.server.in(chatRoom(chatId)).fetchSockets();
-        const count = new Set(
-            sockets.map((s) => (s.data as SocketAuth['data']).user.sub),
-        ).size;
-        this.server.to(chatRoom(chatId)).emit('countUsersOnline', count);
+    /** Presence count is advisory: a failure must never fail join/leave. */
+    private async emitOnlineCount(chatId: ChatId): Promise<void> {
+        try {
+            const sockets = await this.server
+                .in(chatRoom(chatId))
+                .fetchSockets();
+            const count = new Set(
+                sockets.map((s) => (s.data as SocketAuth['data']).user.sub),
+            ).size;
+            this.server.to(chatRoom(chatId)).emit('countUsersOnline', count);
+        } catch {
+            // Ignored: the next join/leave recomputes it.
+        }
     }
 }

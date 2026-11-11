@@ -7,6 +7,7 @@ import { useAuthStore } from './auth-store';
 import { createIdempotentAction } from './session-refresh-model';
 import { cancelSessionRefresh } from './session-refresh';
 import { forgetCachedTokens } from './token-service';
+import { clearPendingInviteCode } from '../groups/pending-invite';
 
 /**
  * The one logout flow (rejected session or explicit sign-out):
@@ -24,6 +25,7 @@ let pendingReason: LogoutReason = 'manual';
 
 async function performLogout(reason: LogoutReason): Promise<void> {
     cancelSessionRefresh();
+    clearPendingInviteCode();
     // Registered hooks: voice/video playback, pending uploads, lifecycle timers.
     runSessionCleanups();
     disconnectSocket();

@@ -30,6 +30,7 @@ export function purgeChatFromCaches(
     queryClient.removeQueries({ queryKey: ['chat-info', chatId] });
     queryClient.removeQueries({ queryKey: ['chats', 'bans', chatId] });
     queryClient.removeQueries({ queryKey: ['chats', 'my-role', chatId] });
+    queryClient.removeQueries({ queryKey: ['group', chatId] });
     if (getActiveChat().chatId === chatId) {
         setActiveChat(null, false);
     }

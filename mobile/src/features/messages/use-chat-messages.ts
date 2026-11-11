@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { onSocketReconnect, useSocket } from '../../core/socket';
+import {
+    getSocket,
+    onSocketReconnect,
+    useSocketEvent,
+} from '../../core/socket';
 import { registerSessionCleanup } from '../../core/session/cleanup-registry';
 import type { ChatDto, MessageDto, ReactionSnapshotDto } from '../../core/api';
 import {
@@ -8,6 +12,14 @@ import {
     fetchChatMessages,
     MESSAGES_PAGE_SIZE,
 } from '../chats/chats-socket-api';
+import {
+    clearChatRoom,
+    getActiveRoomChatId,
+    getFocusedChatId,
+    markChatBlurred,
+    markChatFocused,
+    needsChatRoomJoin,
+} from '../chats/active-room';
 import {
     toChatMessage,
     toPendingChatMessage,
@@ -108,6 +120,16 @@ export interface ChatMessagesApi {
     loadingOlder: boolean;
     loadOlderError: string | null;
     loadOlder: () => void;
+    /**
+     * Re-join the chat room when this screen regains focus after the socket's
+     * active chat moved elsewhere (another chat pushed over it, profile, a
+     * reconnect while blurred). Merges one fresh page so nothing that arrived
+     * while the room was lost is skipped. No-op on the first focus (the query's
+     * initial `joinChat` owns that join).
+     */
+    ensureActive: () => void;
+    /** Leave the room when this screen loses focus (that chat is no longer shown). */
+    releaseActive: () => void;
     /** Pages backwards until `messageId` is in the cache (bounded/cancellable). */
     ensureMessageLoaded: (
         messageId: number,
@@ -147,6 +169,13 @@ interface PendingSendState {
     sources: Map<string, LocalAttachment>;
     controller: AbortController;
 }
+
+/**
+ * If the ack succeeded but the optimistic bubble is somehow still unconfirmed
+ * after this long (a lost update, a cache reset), one fresh latest page is
+ * merged in. Rare and cheap; the pending/echo logic itself is untouched.
+ */
+export const SEND_CONFIRM_SAFETY_MS = 8000;
 
 /**
  * Pending sends live outside the hook so leaving the screen does not abort an
@@ -203,7 +232,6 @@ export function useChatMessages(
     currentUserId: number | null,
 ): ChatMessagesApi {
     const queryClient = useQueryClient();
-    const socket = useSocket();
     const [saveTimestamp, setSaveTimestamp] = useState<string | null>(null);
     const [sendError, setSendError] = useState<string | null>(null);
     const [mutating, setMutating] = useState(false);
@@ -221,6 +249,14 @@ export function useChatMessages(
     const pendingSends = useMemo(() => pendingSendsFor(chatId), [chatId]);
     const olderRequestId = useRef(0);
     const olderPagePromise = useRef<Promise<OlderPageOutcome> | null>(null);
+    /** True while the conversation query itself is performing the joining. */
+    const initialJoinPendingRef = useRef(false);
+    /** True while a focus/reconnect room sync is in flight (never stack them). */
+    const syncingRoomRef = useRef(false);
+    /** The first focus of a mounted screen is joined by the query, not by us. */
+    const firstFocusHandledRef = useRef(false);
+    /** Set on blur: the next focus must re-sync even if the marker still matches. */
+    const roomSyncNeededRef = useRef(false);
 
     const query = useQuery<ConversationDetail>({
         queryKey: messagesQueryKey(chatId),
@@ -228,7 +264,10 @@ export function useChatMessages(
         retry: false,
         queryFn: async (): Promise<ConversationDetail> => {
             // One joinChat ack (+ first page), no event chaining.
-            const joined = await joinChat(chatId);
+            initialJoinPendingRef.current = true;
+            const joined = await joinChat(chatId).finally((): void => {
+                initialJoinPendingRef.current = false;
+            });
             if (joined === null || joined.info === null) {
                 return {
                     info: joined?.info ?? null,
@@ -275,171 +314,218 @@ export function useChatMessages(
         [chatId, queryClient],
     );
 
-    // Live event listeners — one set per mounted chat, unregistered on unmount.
-    // The effect depends on `socket` so a replaced instance gets fresh listeners.
-    useEffect((): (() => void) => {
-        if (socket === null) {
-            return (): void => undefined;
+    // Live event listeners: one subscription per event, rebound only when the
+    // socket INSTANCE changes (useSocketEvent reads the handler from a ref, so
+    // an inline handler never re-subscribes and never duplicates).
+    const myId = currentUserId ?? -1;
+
+    const onNewMessage = (message: MessageDto): void => {
+        if (message.chatId !== chatId) {
+            return;
         }
-        const myId = currentUserId ?? -1;
+        applyToCache((current) =>
+            mergeMessages(current, [toChatMessage(message)], myId),
+        );
+    };
+    const onEditedMessage = (message: MessageDto): void => {
+        if (message.chatId !== chatId) {
+            return;
+        }
+        const edited = toChatMessage(message);
+        applyToCache((current) =>
+            applyOriginalEdited(replaceMessage(current, edited), edited),
+        );
+    };
+    const onReactionUpdated = (event: ReactionSnapshotDto): void => {
+        if (
+            event === null ||
+            typeof event !== 'object' ||
+            Number(event.chatId) !== chatId ||
+            !Array.isArray(event.reactions)
+        ) {
+            return;
+        }
+        applyToCache((current) =>
+            applyReactionUpdate(current, event, currentUserId),
+        );
+    };
+    const onDeletedMessage = (messageId: number): void => {
+        // The message leaves the cache; replies quoting it switch to the
+        // content-less "Message deleted" preview without a refetch.
+        applyToCache((current) =>
+            applyOriginalDeleted(
+                removeMessageById(current, messageId),
+                messageId,
+            ),
+        );
+    };
+    const onSeen = (payload: {
+        chatId: number;
+        userId: number;
+        lastSeenId: number | null;
+    }): void => {
+        if (Number(payload.chatId) !== chatId) {
+            return;
+        }
+        // Own echoes come from this device or another one; only other
+        // members advance the tick line.
+        if (Number(payload.userId) === myId) {
+            return;
+        }
+        const seenId = toNumericId(payload.lastSeenId);
+        if (seenId === null) {
+            return;
+        }
+        queryClient.setQueryData<ConversationDetail>(
+            messagesQueryKey(chatId),
+            (current) =>
+                current === undefined
+                    ? current
+                    : {
+                          ...current,
+                          othersLastSeenId: Math.max(
+                              current.othersLastSeenId ?? 0,
+                              seenId,
+                          ),
+                      },
+        );
+    };
 
-        const onNewMessage = (message: MessageDto): void => {
-            if (message.chatId !== chatId) {
+    const onMembersCount = (payload: {
+        chatId: number;
+        membersCount: number;
+    }): void => {
+        if (Number(payload.chatId) !== chatId) {
+            return;
+        }
+        const membersCount = Number(payload.membersCount);
+        if (!Number.isFinite(membersCount)) {
+            return;
+        }
+        queryClient.setQueryData<ConversationDetail>(
+            messagesQueryKey(chatId),
+            (current) =>
+                current === undefined || current.info === null
+                    ? current
+                    : {
+                          ...current,
+                          info: { ...current.info, membersCount },
+                      },
+        );
+    };
+
+    useSocketEvent('sendMessage:list', onNewMessage);
+    useSocketEvent('editMessage:list', onEditedMessage);
+    useSocketEvent('deleteMessage:list', onDeletedMessage);
+    useSocketEvent('reaction:updated', onReactionUpdated);
+    useSocketEvent('seen', onSeen);
+    useSocketEvent('chat:members', onMembersCount);
+
+    // (Re)join the chat room and merge the latest page into the cache. Used by
+    // the reconnect path and by a focus re-join after the socket's active chat
+    // moved elsewhere. `mergeMessages` keeps pending/failed bubbles and older
+    // pages, and dedupes by id; `applyToCache` keeps hasMore/nextCursor
+    // untouched. Re-joining is idempotent server-side.
+    const rejoin = useCallback(async (): Promise<void> => {
+        try {
+            const joined = await joinChat(chatId);
+            if (joined === null) {
                 return;
             }
+            const history = joined.messages
+                .filter((message: MessageDto): boolean => !message.isDeleted)
+                .reverse()
+                .map(toChatMessage);
             applyToCache((current) =>
-                mergeMessages(current, [toChatMessage(message)], myId),
+                mergeMessages(current, history, currentUserId ?? -1),
             );
-        };
-        const onEditedMessage = (message: MessageDto): void => {
-            if (message.chatId !== chatId) {
-                return;
-            }
-            const edited = toChatMessage(message);
-            applyToCache((current) =>
-                applyOriginalEdited(replaceMessage(current, edited), edited),
-            );
-        };
-        const onReactionUpdated = (event: ReactionSnapshotDto): void => {
-            if (
-                event === null ||
-                typeof event !== 'object' ||
-                Number(event.chatId) !== chatId ||
-                !Array.isArray(event.reactions)
-            ) {
-                return;
-            }
-            applyToCache((current) =>
-                applyReactionUpdate(current, event, currentUserId),
-            );
-        };
-        const onDeletedMessage = (messageId: number): void => {
-            // The message leaves the cache; replies quoting it switch to the
-            // content-less "Message deleted" preview without a refetch.
-            applyToCache((current) =>
-                applyOriginalDeleted(
-                    removeMessageById(current, messageId),
-                    messageId,
-                ),
-            );
-        };
-        const onSeen = (payload: {
-            chatId: number;
-            userId: number;
-            lastSeenId: number | null;
-        }): void => {
-            if (Number(payload.chatId) !== chatId) {
-                return;
-            }
-            // Own echoes come from this device or another one; only other
-            // members advance the tick line.
-            if (Number(payload.userId) === myId) {
-                return;
-            }
-            const seenId = toNumericId(payload.lastSeenId);
-            if (seenId === null) {
-                return;
-            }
-            queryClient.setQueryData<ConversationDetail>(
-                messagesQueryKey(chatId),
-                (current) =>
-                    current === undefined
-                        ? current
-                        : {
-                              ...current,
-                              othersLastSeenId: Math.max(
-                                  current.othersLastSeenId ?? 0,
-                                  seenId,
-                              ),
-                          },
-            );
-        };
-
-        const onMembersCount = (payload: {
-            chatId: number;
-            membersCount: number;
-        }): void => {
-            if (Number(payload.chatId) !== chatId) {
-                return;
-            }
-            const membersCount = Number(payload.membersCount);
-            if (!Number.isFinite(membersCount)) {
-                return;
-            }
-            queryClient.setQueryData<ConversationDetail>(
-                messagesQueryKey(chatId),
-                (current) =>
-                    current === undefined || current.info === null
-                        ? current
-                        : {
-                              ...current,
-                              info: { ...current.info, membersCount },
-                          },
-            );
-        };
-
-        socket.on('sendMessage:list', onNewMessage);
-        socket.on('editMessage:list', onEditedMessage);
-        socket.on('deleteMessage:list', onDeletedMessage);
-        socket.on('reaction:updated', onReactionUpdated);
-        socket.on('seen', onSeen);
-        socket.on('chat:members', onMembersCount);
-
-        return (): void => {
-            socket.off('sendMessage:list', onNewMessage);
-            socket.off('editMessage:list', onEditedMessage);
-            socket.off('deleteMessage:list', onDeletedMessage);
-            socket.off('reaction:updated', onReactionUpdated);
-            socket.off('seen', onSeen);
-            socket.off('chat:members', onMembersCount);
-        };
-    }, [socket, chatId, currentUserId, applyToCache, queryClient]);
-
-    // Reconnect (same instance after an auto-reconnect, or a replacement
-    // instance): rooms are server-side and lost with the connection, so re-join
-    // and merge the latest page into the cache. `mergeMessages` keeps pending/
-    // failed bubbles and older pages, and dedupes by id; `applyToCache` keeps
-    // hasMore/nextCursor untouched.
-    const rejoin = useCallback((): void => {
-        void (async (): Promise<void> => {
-            try {
-                const joined = await joinChat(chatId);
-                if (joined === null) {
-                    return;
-                }
-                const history = joined.messages
-                    .filter(
-                        (message: MessageDto): boolean => !message.isDeleted,
-                    )
-                    .reverse()
-                    .map(toChatMessage);
-                applyToCache((current) =>
-                    mergeMessages(current, history, currentUserId ?? -1),
+            // Resync of the room-wide read line; never regress it.
+            const others = toNumericId(joined.info?.othersLastSeenId);
+            if (others !== null) {
+                queryClient.setQueryData<ConversationDetail>(
+                    messagesQueryKey(chatId),
+                    (current) =>
+                        current === undefined
+                            ? current
+                            : {
+                                  ...current,
+                                  othersLastSeenId: Math.max(
+                                      current.othersLastSeenId ?? 0,
+                                      others,
+                                  ),
+                              },
                 );
-                // Reconnect resync of the room-wide read line; never regress it.
-                const others = toNumericId(joined.info?.othersLastSeenId);
-                if (others !== null) {
-                    queryClient.setQueryData<ConversationDetail>(
-                        messagesQueryKey(chatId),
-                        (current) =>
-                            current === undefined
-                                ? current
-                                : {
-                                      ...current,
-                                      othersLastSeenId: Math.max(
-                                          current.othersLastSeenId ?? 0,
-                                          others,
-                                      ),
-                                  },
-                    );
-                }
-            } catch {
-                // Next reconnect (or a manual refetch) resyncs.
             }
-        })();
+        } catch {
+            // Next reconnect/focus (or a manual refetch) resyncs.
+        }
     }, [chatId, currentUserId, applyToCache, queryClient]);
 
-    useEffect((): (() => void) => onSocketReconnect(rejoin), [rejoin]);
+    /**
+     * Called by the chat screen on every focus. The first focus is a no-op (the
+     * conversation query's `joinChat` is the initial join). Later focuses
+     * happen after the screen was blurred, which released the room, or after
+     * the socket's active chat moved to another screen that was pushed on top
+     * — both must re-join before live events are trusted again.
+     */
+    const ensureActive = useCallback((): void => {
+        markChatFocused(chatId);
+        const firstFocus = !firstFocusHandledRef.current;
+        firstFocusHandledRef.current = true;
+        const syncRequired = roomSyncNeededRef.current;
+        roomSyncNeededRef.current = false;
+        if (
+            !needsChatRoomJoin({
+                chatId,
+                activeRoomChatId: getActiveRoomChatId(),
+                initialJoinPending: initialJoinPendingRef.current,
+                loading: query.isPending,
+                syncing: syncingRoomRef.current,
+                syncRequired,
+            })
+        ) {
+            return;
+        }
+        if (firstFocus) {
+            // The conversation query has not claimed the room yet; it will.
+            return;
+        }
+        syncingRoomRef.current = true;
+        void rejoin().finally((): void => {
+            syncingRoomRef.current = false;
+        });
+    }, [chatId, query.isPending, rejoin]);
+
+    /**
+     * Called when the chat screen loses focus: that chat is no longer on
+     * screen, so this screen stops owning the single active room. Only the
+     * screen that currently owns it may leave it (a stale blur of an
+     * underlying chat must not remove the chat on top).
+     */
+    const releaseActive = useCallback((): void => {
+        roomSyncNeededRef.current = true;
+        markChatBlurred(chatId);
+        if (!clearChatRoom(chatId)) {
+            return;
+        }
+        const live = getSocket();
+        if (live !== null && live.connected) {
+            live.emit('leaveChat', { chatId }, () => {});
+        }
+    }, [chatId]);
+
+    // Reconnect: rooms are server-side and lost with the connection. Only the
+    // chat that currently has focus may claim the (single) active room again;
+    // a blurred screen re-joins when it is focused next.
+    useEffect(
+        (): (() => void) =>
+            onSocketReconnect((): void => {
+                if (getFocusedChatId() === chatId) {
+                    void rejoin();
+                }
+            }),
+        [chatId, rejoin],
+    );
 
     // Invalidates an in-flight `loadOlder` when the screen unmounts or the chat
     // changes while the request is still running (stale-response guard).
@@ -454,6 +540,10 @@ export function useChatMessages(
             olderRequestId.current += 1;
             loadingOlderRef.current = false;
             olderPagePromise.current = null;
+            initialJoinPendingRef.current = false;
+            syncingRoomRef.current = false;
+            firstFocusHandledRef.current = false;
+            roomSyncNeededRef.current = false;
         };
     }, [chatId]);
 
@@ -659,6 +749,46 @@ export function useChatMessages(
         [applyToCache],
     );
 
+    /** Merge one fresh latest page without joining the room or touching
+     * pagination state (older pages, pending/failed bubbles are preserved). */
+    const mergeLatestPage = useCallback(async (): Promise<void> => {
+        try {
+            const page = await fetchChatMessages(chatId);
+            if (page === null) return;
+            const history = page.messages
+                .filter((message: MessageDto): boolean => !message.isDeleted)
+                .reverse()
+                .map(toChatMessage);
+            applyToCache((current) =>
+                mergeMessages(current, history, currentUserId ?? -1),
+            );
+        } catch {
+            // The next focus/reconnect (or a manual retry) resyncs.
+        }
+    }, [chatId, currentUserId, applyToCache]);
+
+    /**
+     * Safety net for a confirmed send whose bubble somehow never left the
+     * pending state: merge the latest page once, eight seconds later.
+     */
+    const scheduleSendConfirmation = useCallback(
+        (state: PendingSendState): void => {
+            setTimeout((): void => {
+                const current = queryClient.getQueryData<ConversationDetail>(
+                    messagesQueryKey(chatId),
+                );
+                const stillPending =
+                    current?.messages.some(
+                        (message) =>
+                            message.clientMessageId === state.clientMessageId &&
+                            message.status !== 'sent',
+                    ) ?? false;
+                if (stillPending) void mergeLatestPage();
+            }, SEND_CONFIRM_SAFETY_MS);
+        },
+        [chatId, queryClient, mergeLatestPage],
+    );
+
     /**
      * Uploads the missing files (bounded concurrency), then sends the message
      * over the socket with the ids. Per-file failures mark only those files;
@@ -795,6 +925,7 @@ export function useChatMessages(
                             currentUserId ?? -1,
                         ),
                     );
+                    scheduleSendConfirmation(state);
                 }
                 pendingSends.delete(state.key);
                 void deleteVoiceTempFiles(state);
@@ -810,6 +941,7 @@ export function useChatMessages(
             applyToCache,
             patchAttachment,
             setMessageStatus,
+            scheduleSendConfirmation,
         ],
     );
 
@@ -1095,6 +1227,8 @@ export function useChatMessages(
             loadingOlder,
             loadOlderError,
             loadOlder,
+            ensureActive,
+            releaseActive,
             ensureMessageLoaded,
             sending: saveTimestamp,
             sendError,
@@ -1115,6 +1249,8 @@ export function useChatMessages(
             loadingOlder,
             loadOlderError,
             loadOlder,
+            ensureActive,
+            releaseActive,
             ensureMessageLoaded,
             saveTimestamp,
             sendError,

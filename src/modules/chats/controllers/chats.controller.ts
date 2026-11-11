@@ -11,7 +11,7 @@ import { RoleEnum } from 'src/common/enums/role.enum';
 import { ChatService } from '../services/chat.service';
 import { createChatDto } from '../dtos/createChat.dto';
 import { RequestAuth } from 'src/common/types/RequestAuth.type';
-import { InviteLinkService } from '../services/inviteLink.service';
+import { GroupInviteLinksService } from '../services/group-invite-links.service';
 import { ChatId } from 'src/common/types/brands.type';
 import { GroupRealtimeService } from '../services/group-realtime.service';
 import { PrivateChatService } from '../services/private-chat.service';
@@ -21,7 +21,7 @@ import { CreatePrivateChatDto } from '../dtos/createPrivateChat.dto';
 export class ChatsController {
     constructor(
         private readonly chatService: ChatService,
-        private readonly linkService: InviteLinkService,
+        private readonly inviteLinks: GroupInviteLinksService,
         private readonly groupRealtime: GroupRealtimeService,
         private readonly privateChatService: PrivateChatService,
     ) {}
@@ -52,16 +52,14 @@ export class ChatsController {
         return await this.chatService.banChat(chatId);
     }
 
+    /**
+     * Legacy join: delegates to the new service so the banned-rejoin and
+     * duplicate-membership defects of the old implementation are unreachable.
+     */
     @Post('/join/:code')
     @Role([RoleEnum.ALL])
     async joinToChat(@Param('code') code: string, @Req() req: RequestAuth) {
-        const chat = await this.linkService.joinByInviteCode(
-            code,
-            req.user.sub,
-        );
-        this.groupRealtime.groupAdded(chat.id, req.user.sub);
-        this.groupRealtime.groupChanged(chat.id, 'member_joined');
-        await this.chatService.notifyMembersCount(chat.id);
-        return { chatId: chat.id, title: chat.title };
+        const result = await this.inviteLinks.joinByCode(code, req.user.sub);
+        return { chatId: result.chatId, title: result.title };
     }
 }

@@ -13,6 +13,10 @@ export class Chat extends BaseEntity {
     @Column({ nullable: true })
     title?: string;
 
+    /** Group description (nullable; groups only, cleared to NULL). */
+    @Column({ type: 'varchar', length: 255, nullable: true })
+    description?: string | null;
+
     @Column('text', { array: true, default: '{}' })
     avatars: string[];
 

@@ -4,7 +4,8 @@
 - `chats-socket-api.ts`: `fetchChats()` (`getAllChats`), `joinChat()` (`joinChat` → `chatInfo` + `getMessages`).
 - `use-chats.ts`: TanStack Query over `getAllChats`, live-merged with `chatlist:updated` events; `unreadCount` is authoritative from the fetch and incremented locally by live messages (never for own messages or the chat being read). `chat:read`/successful `markSeen` reset it; focus/reconnect refetch.
 - `active-chat.ts`: module-level record of the open chat + whether the user is reading at the bottom.
-- `use-groups.ts`: query/mutation hooks (`createGroup`, `addMemberByPhone`, `leaveGroup`, `myChatRole`, `listBannedMembers`, avatar upload, `chatInfo`, leave-room-on-unmount).
+- `active-room.ts`: which `chat:<id>` room the single socket owns and which chat screen is focused. The backend allows one active room per socket, so the room follows focus: blur leaves it, focus re-joins it (with a one-page resync) — this is what keeps read receipts/live events working after a chat is pushed over another and popped back. The marker is cleared on socket disconnect.
+- `use-groups.ts`: query/mutation hooks (`createGroup`, `addMemberByPhone`, `leaveGroup`, `myChatRole`, `listBannedMembers`, avatar upload, `chatInfo`, leave-room-on-unmount — only for the screen that currently owns the room).
 - `chat-context-menu.tsx`: long-press bottom sheet (pin/unpin, mark as read, leave group with the owner rule).
 - Owner moderation (chat role `manager`, never `admin`): the chat panel lists active members and bans them via `POST /chats/manage/ban/:memberId`; the message sheet offers "Delete for everyone" on other members' messages.
 - `local-chat-prefs.ts`: pinned chat ids persisted per user in SecureStore (`usePinnedChatIds`).
