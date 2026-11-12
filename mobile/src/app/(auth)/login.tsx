@@ -6,10 +6,10 @@ import {
     AppText,
     FormButton,
     FormField,
+    GlassCard,
     Screen,
-    spacing,
-    typography,
     palette,
+    spacing,
 } from '../../shared/components';
 import { useAuthFlow, useAuthStore } from '../../features/auth';
 import {
@@ -47,68 +47,102 @@ export default function LoginScreen(): React.ReactElement {
 
     return (
         <Screen style={styles.screen}>
-            {sessionNotice !== null && (
-                <AppText style={styles.notice}>{sessionNotice}</AppText>
-            )}
-            <AppText variant="title">Sign in to NiazChat</AppText>
-            <AppText style={styles.hint}>
-                Enter your Iranian mobile number. We&apos;ll send a one-time
-                code by SMS.
-            </AppText>
-
-            <Controller
-                control={control}
-                name="phone"
-                render={({
-                    field: { onChange, onBlur, value },
-                }): React.ReactElement => (
-                    <FormField
-                        label="Phone number"
-                        error={errors.phone?.message ?? null}
-                        value={value}
-                        keyboardType="phone-pad"
-                        autoComplete="tel"
-                        onChangeText={onChange}
-                        onBlur={onBlur}
-                    />
-                )}
-            />
-
-            {submitError !== null && (
-                <AppText style={styles.error}>{submitError}</AppText>
-            )}
-
-            <View style={styles.actions}>
-                {requesting ? (
-                    <ActivityIndicator size="small" />
-                ) : (
-                    <FormButton
-                        onPress={(): void => {
-                            void onSubmit();
-                        }}
-                        label="Send code"
-                    />
-                )}
+            <View style={styles.brand}>
+                <View style={styles.logo}>
+                    <AppText variant="title" style={styles.logoText}>
+                        N
+                    </AppText>
+                </View>
+                <AppText variant="display">NiazChat</AppText>
+                <AppText variant="caption" style={styles.tagline}>
+                    Private conversations, beautifully quiet.
+                </AppText>
             </View>
+
+            <GlassCard padding={spacing.lg} radius={28} floating={true}>
+                {sessionNotice !== null && (
+                    <AppText variant="caption" style={styles.notice}>
+                        {sessionNotice}
+                    </AppText>
+                )}
+                <AppText variant="heading">Sign in</AppText>
+                <AppText variant="caption" style={styles.hint}>
+                    Enter your Iranian mobile number. We&apos;ll send a one-time
+                    code by SMS.
+                </AppText>
+
+                <Controller
+                    control={control}
+                    name="phone"
+                    render={({
+                        field: { onChange, onBlur, value },
+                    }): React.ReactElement => (
+                        <FormField
+                            label="Phone number"
+                            error={errors.phone?.message ?? null}
+                            value={value}
+                            keyboardType="phone-pad"
+                            autoComplete="tel"
+                            onChangeText={onChange}
+                            onBlur={onBlur}
+                        />
+                    )}
+                />
+
+                {submitError !== null && (
+                    <AppText variant="caption" style={styles.error}>
+                        {submitError}
+                    </AppText>
+                )}
+
+                <View style={styles.actions}>
+                    {requesting ? (
+                        <ActivityIndicator
+                            size="small"
+                            color={palette.primary[300]}
+                        />
+                    ) : (
+                        <FormButton
+                            onPress={(): void => {
+                                void onSubmit();
+                            }}
+                            label="Send code"
+                        />
+                    )}
+                </View>
+            </GlassCard>
         </Screen>
     );
 }
 
 const styles = StyleSheet.create({
     screen: {
-        gap: spacing.md,
+        gap: spacing.lg,
         paddingHorizontal: spacing.lg,
         justifyContent: 'center',
     },
-    hint: { color: palette.neutral[500] },
+    brand: { alignItems: 'center', gap: spacing.xxs },
+    logo: {
+        width: 64,
+        height: 64,
+        borderRadius: 22,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: palette.glass.accent,
+        borderWidth: 1,
+        borderColor: palette.border.accent,
+        marginBottom: spacing.sm,
+    },
+    logoText: { color: palette.highlight, fontSize: 28 },
+    tagline: { color: palette.text.muted, textAlign: 'center' },
+    hint: { color: palette.text.secondary, lineHeight: 18 },
     notice: {
-        ...typography.caption,
         color: palette.primary[700],
-        backgroundColor: palette.primary[100],
+        backgroundColor: palette.glass.accent,
         borderRadius: 8,
         paddingHorizontal: spacing.sm,
         paddingVertical: spacing.xxs,
     },
-    error: { ...typography.caption, color: palette.semantic.danger },
-    actions: { marginTop: spacing.sm },
+    error: { color: palette.semantic.danger },
+    actions: { marginTop: spacing.xs },
 });

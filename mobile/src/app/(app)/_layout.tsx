@@ -2,7 +2,8 @@ import { StyleSheet, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { ReconnectingBanner } from '../../core/socket/connection-banner';
 import { useAuthScreenGuard, useIsRestoringSession } from '../../features/auth';
-import { GatePlaceholder } from '../../shared/components';
+import { GatePlaceholder, palette } from '../../shared/components';
+import { useReducedMotion } from '../../shared/hooks/use-reduced-motion';
 
 /**
  * Protected zone. Guests are redirected to the signIn screens; the guard also
@@ -16,6 +17,7 @@ import { GatePlaceholder } from '../../shared/components';
 
 export default function ProtectedLayout(): React.ReactElement {
     const isRestoring = useIsRestoringSession();
+    const reduceMotion = useReducedMotion();
     // Runs the guard effect: guests get redirected to /(auth)/login.
     useAuthScreenGuard('protected');
 
@@ -25,7 +27,13 @@ export default function ProtectedLayout(): React.ReactElement {
 
     return (
         <View style={styles.root}>
-            <Stack screenOptions={{ headerShown: false }}>
+            <Stack
+                screenOptions={{
+                    headerShown: false,
+                    animation: reduceMotion ? 'none' : 'slide_from_right',
+                    contentStyle: { backgroundColor: palette.background },
+                }}
+            >
                 <Stack.Screen name="index" />
                 <Stack.Screen name="chat/[chatId]" />
                 <Stack.Screen name="create-group" />
@@ -45,5 +53,5 @@ export default function ProtectedLayout(): React.ReactElement {
 }
 
 const styles = StyleSheet.create({
-    root: { flex: 1 },
+    root: { flex: 1, backgroundColor: palette.background },
 });

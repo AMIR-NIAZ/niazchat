@@ -621,7 +621,7 @@ function CreateInviteLinkSheet(props: {
                             {props.busy ? (
                                 <ActivityIndicator
                                     size="small"
-                                    color={palette.neutral[0]}
+                                    color={palette.text.onAccent}
                                 />
                             ) : (
                                 <Text style={styles.primaryButtonText}>
@@ -691,7 +691,7 @@ function LoadingSkeleton(): React.ReactElement {
 const styles = StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: palette.neutral[50],
+        backgroundColor: palette.background,
     },
     topBar: {
         flexDirection: 'row',
@@ -700,7 +700,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.xs,
         borderBottomWidth: StyleSheet.hairlineWidth,
         borderBottomColor: palette.neutral[100],
-        backgroundColor: palette.neutral[0],
+        backgroundColor: palette.elevated,
     },
     backButton: {
         width: 44,
@@ -775,9 +775,9 @@ const styles = StyleSheet.create({
         marginBottom: spacing.sm,
         padding: spacing.md,
         borderRadius: radii.md,
-        backgroundColor: palette.neutral[0],
+        backgroundColor: palette.elevated,
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.neutral[100],
+        borderColor: palette.border.subtle,
         gap: spacing.xxs,
     },
     cardHighlighted: {
@@ -805,7 +805,7 @@ const styles = StyleSheet.create({
         color: palette.neutral[500],
     },
     statusTextActive: {
-        color: palette.neutral[0],
+        color: palette.text.onAccent,
     },
     usesText: {
         color: palette.neutral[500],
@@ -877,7 +877,7 @@ const styles = StyleSheet.create({
     primaryButtonPressed: { opacity: 0.85 },
     primaryButtonDisabled: { opacity: 0.45 },
     primaryButtonText: {
-        color: palette.neutral[0],
+        color: palette.text.onAccent,
         fontSize: 14,
         fontWeight: '600',
     },
@@ -897,7 +897,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         gap: spacing.xs,
         padding: spacing.lg,
-        backgroundColor: palette.neutral[50],
+        backgroundColor: palette.background,
     },
     sheetBackdrop: {
         flex: 1,
@@ -905,7 +905,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0,0,0,0.35)',
     },
     sheet: {
-        backgroundColor: palette.neutral[0],
+        backgroundColor: palette.elevated,
         borderTopLeftRadius: radii.md,
         borderTopRightRadius: radii.md,
         padding: spacing.md,
@@ -948,7 +948,7 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     chipTextSelected: {
-        color: palette.neutral[0],
+        color: palette.text.onAccent,
     },
     sheetActions: {
         flexDirection: 'row',
@@ -967,7 +967,7 @@ const styles = StyleSheet.create({
     },
     skeletonCard: {
         borderRadius: radii.md,
-        backgroundColor: palette.neutral[0],
+        backgroundColor: palette.elevated,
         padding: spacing.md,
         gap: spacing.xs,
     },

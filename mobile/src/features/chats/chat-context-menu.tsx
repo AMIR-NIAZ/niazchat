@@ -324,7 +324,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.sm,
         borderTopLeftRadius: radii.lg,
         borderTopRightRadius: radii.lg,
-        backgroundColor: palette.neutral[0],
+        backgroundColor: palette.elevated,
     },
     header: {
         flexDirection: 'row',

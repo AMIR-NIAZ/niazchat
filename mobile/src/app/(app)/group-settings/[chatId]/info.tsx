@@ -597,7 +597,7 @@ function EditorTopBar({ onBack }: { onBack: () => void }): React.ReactElement {
 }
 
 const styles = StyleSheet.create({
-    root: { flex: 1, backgroundColor: palette.neutral[50] },
+    root: { flex: 1, backgroundColor: palette.background },
     flex1: { flex: 1 },
     topBar: {
         flexDirection: 'row',
@@ -606,7 +606,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.xs,
         borderBottomWidth: StyleSheet.hairlineWidth,
         borderBottomColor: palette.neutral[100],
-        backgroundColor: palette.neutral[0],
+        backgroundColor: palette.elevated,
     },
     backButton: {
         width: 44,
@@ -633,7 +633,7 @@ const styles = StyleSheet.create({
         gap: spacing.sm,
         padding: spacing.md,
         borderRadius: radii.md,
-        backgroundColor: palette.neutral[0],
+        backgroundColor: palette.elevated,
     },
     photoSpinner: {
         position: 'absolute',
@@ -680,7 +680,7 @@ const styles = StyleSheet.create({
         gap: spacing.xxs,
         padding: spacing.md,
         borderRadius: radii.md,
-        backgroundColor: palette.neutral[0],
+        backgroundColor: palette.elevated,
     },
     label: {
         ...typography.caption,
@@ -689,13 +689,13 @@ const styles = StyleSheet.create({
     },
     input: {
         borderWidth: 1,
-        borderColor: palette.neutral[300],
+        borderColor: palette.border.subtle,
         borderRadius: radii.sm,
         paddingHorizontal: spacing.sm,
         paddingVertical: spacing.xs + 2,
         fontSize: 16,
         color: palette.neutral[900],
-        backgroundColor: palette.neutral[0],
+        backgroundColor: palette.elevated,
     },
     inputInvalid: { borderColor: palette.semantic.danger },
     multiline: { minHeight: 110 },
@@ -717,7 +717,7 @@ const styles = StyleSheet.create({
         backgroundColor: palette.primary[500],
     },
     saveButtonText: {
-        color: palette.neutral[0],
+        color: palette.text.onAccent,
         fontSize: 16,
         fontWeight: '600',
     },
@@ -750,5 +750,9 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.xs,
         backgroundColor: palette.primary[500],
     },
-    retryText: { color: palette.neutral[0], fontSize: 14, fontWeight: '600' },
+    retryText: {
+        color: palette.text.onAccent,
+        fontSize: 14,
+        fontWeight: '600',
+    },
 });

@@ -128,9 +128,7 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
     // Split once per content change; plain text is the single-segment case.
     const contentSegments = useMemo(
         () =>
-            message.content === null
-                ? []
-                : splitLinkifiedText(message.content),
+            message.content === null ? [] : splitLinkifiedText(message.content),
         [message.content],
     );
     const reply = message.replyTo;
@@ -386,10 +384,7 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                                 key={index}
                                 accessibilityRole="link"
                                 accessibilityLabel={segment.url}
-                                style={[
-                                    styles.link,
-                                    mine && styles.linkMine,
-                                ]}
+                                style={[styles.link, mine && styles.linkMine]}
                                 onPress={
                                     onOpenLink === undefined
                                         ? undefined
@@ -735,16 +730,16 @@ const styles = StyleSheet.create({
     avatarSlot: { width: AVATAR_SIZE },
     bubbleSlot: { flexShrink: 1 },
     bubble: {
-        borderRadius: radii.md,
+        borderRadius: radii.lg,
         paddingHorizontal: spacing.sm,
         paddingVertical: spacing.xs,
-        backgroundColor: palette.neutral[0],
-        borderColor: palette.neutral[100],
+        backgroundColor: palette.elevated,
+        borderColor: palette.border.subtle,
         borderWidth: 1,
     },
     mine: {
         backgroundColor: palette.primary[500],
-        borderColor: palette.primary[600],
+        borderColor: palette.border.accent,
         borderBottomRightRadius: 4,
     },
     theirs: { borderBottomLeftRadius: 4 },
@@ -764,7 +759,7 @@ const styles = StyleSheet.create({
         fontSize: 11,
         fontWeight: '700',
     },
-    forwardTextMine: { color: palette.primary[100] },
+    forwardTextMine: { color: 'rgba(255,255,255,0.85)' },
     selectionRow: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -777,17 +772,17 @@ const styles = StyleSheet.create({
         height: 24,
         borderRadius: 12,
         borderWidth: 1.5,
-        borderColor: palette.neutral[300],
+        borderColor: palette.border.strong,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: palette.neutral[0],
+        backgroundColor: palette.glass.elevated,
     },
     selectionOn: {
         backgroundColor: palette.primary[500],
         borderColor: palette.primary[500],
     },
     selectionMark: {
-        color: palette.neutral[0],
+        color: palette.text.onAccent,
         fontSize: 13,
         fontWeight: '700',
     },
@@ -806,7 +801,7 @@ const styles = StyleSheet.create({
         maxWidth: '100%',
     },
     quoteTheirs: { backgroundColor: palette.neutral[50] },
-    quoteMine: { backgroundColor: 'rgba(255,255,255,0.16)' },
+    quoteMine: { backgroundColor: 'rgba(255,255,255,0.18)' },
     quoteBar: { width: 3 },
     quoteBarTheirs: { backgroundColor: palette.primary[500] },
     quoteBarMine: { backgroundColor: palette.primary[100] },
@@ -820,18 +815,18 @@ const styles = StyleSheet.create({
         fontSize: 11,
         fontWeight: '700',
     },
-    quoteNameMine: { color: palette.primary[100] },
-    quoteText: { color: palette.neutral[700], fontSize: 12 },
-    quoteTextMine: { color: palette.primary[100] },
+    quoteNameMine: { color: 'rgba(255,255,255,0.9)' },
+    quoteText: { color: palette.text.secondary, fontSize: 12 },
+    quoteTextMine: { color: 'rgba(255,255,255,0.88)' },
     quoteDeleted: { fontStyle: 'italic' },
-    content: { color: palette.neutral[900], fontSize: 15 },
-    contentMine: { color: palette.neutral[0] },
+    content: { color: palette.text.primary, fontSize: 15 },
+    contentMine: { color: palette.text.onAccent },
     link: {
         color: palette.primary[700],
         textDecorationLine: 'underline',
     },
     linkMine: {
-        color: palette.neutral[0],
+        color: palette.text.onAccent,
         textDecorationLine: 'underline',
     },
     caption: { marginTop: spacing.xxs },
@@ -866,16 +861,16 @@ const styles = StyleSheet.create({
         borderColor: palette.primary[600],
     },
     reactionText: { fontSize: 12, fontWeight: '600' },
-    reactionTextMine: { color: palette.neutral[0] },
-    reactionTextMineSelected: { color: palette.primary[700] },
-    reactionTextTheirs: { color: palette.neutral[700] },
-    reactionTextTheirsSelected: { color: palette.neutral[0] },
+    reactionTextMine: { color: palette.text.onAccent },
+    reactionTextMineSelected: { color: palette.highlight },
+    reactionTextTheirs: { color: palette.text.secondary },
+    reactionTextTheirsSelected: { color: palette.text.onAccent },
     uploadError: {
         color: palette.semantic.danger,
         fontSize: 11,
         marginTop: 2,
     },
-    uploadErrorMine: { color: palette.primary[100] },
+    uploadErrorMine: { color: 'rgba(255,255,255,0.8)' },
     attachmentsWrap: { maxWidth: 260, width: '100%' },
     filesBlock: {
         borderRadius: radii.sm,
@@ -907,23 +902,23 @@ const styles = StyleSheet.create({
         fontSize: 11,
         fontWeight: '700',
     },
-    pendingButtonTextMine: { color: palette.neutral[0] },
+    pendingButtonTextMine: { color: palette.text.onAccent },
     meta: {
         color: palette.neutral[500],
         fontSize: 10,
         textAlign: 'right',
         marginTop: 2,
     },
-    metaMine: { color: palette.primary[100] },
+    metaMine: { color: 'rgba(255,255,255,0.72)' },
     ticks: { fontSize: 10 },
-    ticksSeen: { color: palette.neutral[0], fontWeight: '700' },
+    ticksSeen: { color: palette.text.onAccent, fontWeight: '700' },
     unreadRow: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: spacing.xs,
         marginVertical: spacing.sm,
     },
-    unreadLine: { flex: 1, height: 1, backgroundColor: palette.primary[100] },
+    unreadLine: { flex: 1, height: 1, backgroundColor: palette.border.strong },
     unreadLabel: {
         color: palette.primary[600],
         fontSize: 12,

@@ -245,7 +245,7 @@ function SettingsState(props: {
 }
 
 const styles = StyleSheet.create({
-    root: { flex: 1, backgroundColor: palette.neutral[50] },
+    root: { flex: 1, backgroundColor: palette.background },
     topBar: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -253,7 +253,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.xs,
         borderBottomWidth: StyleSheet.hairlineWidth,
         borderBottomColor: palette.neutral[100],
-        backgroundColor: palette.neutral[0],
+        backgroundColor: palette.elevated,
     },
     backButton: {
         width: 44,
@@ -279,7 +279,7 @@ const styles = StyleSheet.create({
         gap: spacing.sm,
         minHeight: 64,
         paddingHorizontal: spacing.md,
-        backgroundColor: palette.neutral[0],
+        backgroundColor: palette.elevated,
         borderBottomWidth: StyleSheet.hairlineWidth,
         borderBottomColor: palette.neutral[100],
     },
@@ -312,7 +312,11 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.xs,
         backgroundColor: palette.primary[500],
     },
-    retryText: { color: palette.neutral[0], fontSize: 14, fontWeight: '600' },
+    retryText: {
+        color: palette.text.onAccent,
+        fontSize: 14,
+        fontWeight: '600',
+    },
     backLink: { padding: spacing.sm },
     backLinkText: {
         fontSize: 14,

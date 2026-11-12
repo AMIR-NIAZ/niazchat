@@ -14,8 +14,10 @@ import { router } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import {
     AppText,
+    Avatar,
+    GlassCard,
+    GlassHeader,
     Screen,
-    UserAvatar,
     palette,
     radii,
     spacing,
@@ -276,26 +278,41 @@ export default function ProfileScreen(): React.ReactElement {
                 contentContainerStyle={styles.scroll}
                 keyboardShouldPersistTaps="handled"
             >
-                <View style={styles.header}>
-                    <AppText variant="title">Profile</AppText>
-                    <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Edit profile"
-                        onPress={(): void => router.push('/(app)/profile-edit')}
-                        style={styles.editPill}
-                    >
-                        <Text style={styles.editPillText}>Edit</Text>
-                    </Pressable>
-                </View>
+                <GlassHeader
+                    trailing={
+                        <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel="Edit profile"
+                            onPress={(): void =>
+                                router.push('/(app)/profile-edit')
+                            }
+                            style={styles.editPill}
+                        >
+                            <Text style={styles.editPillText}>Edit</Text>
+                        </Pressable>
+                    }
+                >
+                    <AppText variant="heading">Profile</AppText>
+                    <AppText variant="caption">
+                        {user.username === null
+                            ? 'Your account'
+                            : `@${user.username}`}
+                    </AppText>
+                </GlassHeader>
 
-                <View style={styles.avatarSection}>
+                <GlassCard
+                    padding={spacing.lg}
+                    contentStyle={styles.avatarSection}
+                    floating={true}
+                >
                     {/* Small circle → server thumbnail; the full original is
                         only loaded by the photo viewer below. */}
-                    <UserAvatar
+                    <Avatar
                         userId={user.id}
                         name={displayName}
                         uri={currentAvatarUrl}
-                        size={120}
+                        size={116}
+                        ring={true}
                     />
 
                     <AvatarGallery
@@ -331,19 +348,23 @@ export default function ProfileScreen(): React.ReactElement {
                             {feedback.text}
                         </Text>
                     )}
-                </View>
+                </GlassCard>
 
-                <InfoRow label="Name" value={user.name} />
-                <InfoRow
-                    label="Username"
-                    value={user.username === null ? '—' : `@${user.username}`}
-                />
-                <InfoRow
-                    label="Bio"
-                    value={user.biografy ?? '—'}
-                    multiline={true}
-                />
-                <InfoRow label="Phone" value={user.phone} />
+                <GlassCard padding={spacing.md} contentStyle={styles.infoCard}>
+                    <InfoRow label="Name" value={user.name} />
+                    <InfoRow
+                        label="Username"
+                        value={
+                            user.username === null ? '—' : `@${user.username}`
+                        }
+                    />
+                    <InfoRow
+                        label="Bio"
+                        value={user.biografy ?? '—'}
+                        multiline={true}
+                    />
+                    <InfoRow label="Phone" value={user.phone} />
+                </GlassCard>
             </ScrollView>
 
             <AvatarViewer
@@ -423,17 +444,13 @@ const styles = StyleSheet.create({
     screen: { gap: spacing.sm, paddingHorizontal: spacing.lg },
     scroll: { paddingVertical: spacing.sm, gap: spacing.xs },
     center: { alignItems: 'center', justifyContent: 'center', gap: spacing.xs },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-    },
     editPill: {
         borderWidth: 1,
-        borderColor: palette.primary[500],
-        borderRadius: radii.sm,
+        borderColor: palette.border.strong,
+        borderRadius: radii.full,
         paddingHorizontal: spacing.sm,
         paddingVertical: 6,
+        backgroundColor: palette.glass.accent,
     },
     editPillText: {
         color: palette.primary[600],
@@ -443,8 +460,8 @@ const styles = StyleSheet.create({
     avatarSection: {
         alignItems: 'center',
         gap: spacing.sm,
-        paddingVertical: spacing.md,
     },
+    infoCard: { gap: 0 },
     avatar: { width: 120, height: 120, borderRadius: 60 },
     avatarFallback: {
         width: 120,
@@ -459,27 +476,31 @@ const styles = StyleSheet.create({
         fontSize: 42,
         fontWeight: '700',
     },
-    avatarHint: { color: palette.neutral[500] },
+    avatarHint: { color: palette.text.secondary },
     button: {
         backgroundColor: palette.primary[500],
-        borderRadius: radii.sm,
-        paddingHorizontal: spacing.sm,
-        paddingVertical: 6,
+        borderRadius: radii.full,
+        paddingHorizontal: spacing.md,
+        paddingVertical: 8,
     },
-    buttonText: { color: palette.neutral[0], fontSize: 13, fontWeight: '600' },
+    buttonText: {
+        color: palette.text.onAccent,
+        fontSize: 13,
+        fontWeight: '600',
+    },
     errorText: { color: palette.semantic.danger },
     okText: { color: palette.semantic.success },
     infoRow: {
         gap: spacing.xxs,
-        paddingVertical: spacing.xs,
+        paddingVertical: spacing.sm,
         borderTopWidth: 1,
-        borderTopColor: palette.neutral[100],
+        borderTopColor: palette.border.subtle,
     },
-    infoLabel: { color: palette.neutral[500] },
-    infoValue: { color: palette.neutral[900], fontSize: 15 },
+    infoLabel: { color: palette.text.muted },
+    infoValue: { color: palette.text.primary, fontSize: 15 },
     infoMultiline: { minHeight: 40 },
     feedback: {
-        color: palette.neutral[500],
+        color: palette.text.secondary,
         textAlign: 'center',
         paddingHorizontal: spacing.lg,
     },

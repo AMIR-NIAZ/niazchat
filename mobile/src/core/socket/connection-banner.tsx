@@ -55,11 +55,11 @@ const styles = StyleSheet.create({
         zIndex: 100,
         alignItems: 'center',
         paddingBottom: spacing.xxs,
-        backgroundColor: palette.semantic.warning,
+        backgroundColor: palette.primary[500],
     },
     text: {
         ...typography.caption,
-        color: palette.neutral[0],
+        color: palette.text.onAccent,
         fontWeight: '600',
     },
 });

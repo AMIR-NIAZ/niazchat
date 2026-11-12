@@ -10,7 +10,6 @@ import {
     Screen,
     palette,
     spacing,
-    typography,
 } from '../shared/components';
 import {
     registerAuthTokenProvider,
@@ -64,7 +63,7 @@ export default function RootLayout(): React.ReactElement {
         return (
             <QueryClientProvider client={appQueryClient}>
                 <SafeAreaProvider>
-                    <StatusBar style="dark" />
+                    <StatusBar style="light" />
                     <ServerUnreachableScreen
                         onRetry={(): void => {
                             void useAuthStore.getState().retryRestore();
@@ -78,8 +77,14 @@ export default function RootLayout(): React.ReactElement {
     return (
         <QueryClientProvider client={appQueryClient}>
             <SafeAreaProvider>
-                <StatusBar style="dark" />
-                <Stack screenOptions={{ headerShown: false }}>
+                <StatusBar style="light" />
+                <Stack
+                    screenOptions={{
+                        headerShown: false,
+                        animation: 'fade',
+                        contentStyle: { backgroundColor: palette.background },
+                    }}
+                >
                     <Stack.Screen name="join/[code]" />
                 </Stack>
             </SafeAreaProvider>
@@ -93,10 +98,9 @@ function BootstrapPlaceholder(): React.ReactElement {
             style={{
                 alignItems: 'center',
                 justifyContent: 'center',
-                backgroundColor: palette.neutral[0],
             }}
         >
-            <AppText style={[typography.title, { marginBottom: spacing.xs }]}>
+            <AppText variant="display" style={{ marginBottom: spacing.xs }}>
                 NiazChat
             </AppText>
             <AppText variant="caption">Loading…</AppText>
@@ -128,7 +132,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         gap: spacing.md,
         paddingHorizontal: spacing.lg,
-        backgroundColor: palette.neutral[0],
+        backgroundColor: palette.background,
     },
     unreachableBody: { gap: spacing.xs },
     unreachableText: { color: palette.neutral[500], textAlign: 'center' },

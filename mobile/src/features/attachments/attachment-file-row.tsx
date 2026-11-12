@@ -343,7 +343,7 @@ const styles = StyleSheet.create({
         flexShrink: 0,
     },
     icon: { fontSize: 24, color: palette.neutral[700] },
-    iconMine: { color: palette.neutral[0] },
+    iconMine: { color: palette.text.onAccent },
     iconProgress: {
         position: 'absolute',
         right: 2,
@@ -361,7 +361,7 @@ const styles = StyleSheet.create({
         fontSize: 11,
         fontWeight: '700',
     },
-    iconBadgeMine: { color: palette.primary[100] },
+    iconBadgeMine: { color: 'rgba(255,255,255,0.82)' },
     iconBadgeFailed: { color: palette.semantic.danger },
     meta: { flex: 1, minWidth: 0, gap: 1 },
     name: {
@@ -372,11 +372,11 @@ const styles = StyleSheet.create({
         writingDirection: 'auto',
         flexShrink: 1,
     },
-    nameMine: { color: palette.neutral[0] },
+    nameMine: { color: palette.text.onAccent },
     size: { color: palette.neutral[500], fontSize: 11 },
-    sizeMine: { color: palette.primary[100] },
+    sizeMine: { color: 'rgba(255,255,255,0.82)' },
     error: { color: palette.semantic.danger, fontSize: 10 },
-    errorMine: { color: palette.primary[100] },
+    errorMine: { color: 'rgba(255,255,255,0.82)' },
     shareButton: {
         width: 36,
         height: 36,
@@ -390,7 +390,7 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontWeight: '700',
     },
-    shareIconMine: { color: palette.neutral[0] },
+    shareIconMine: { color: palette.text.onAccent },
     track: {
         height: 3,
         borderRadius: radii.full,

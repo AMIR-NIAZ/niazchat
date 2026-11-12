@@ -262,7 +262,7 @@ export function AttachmentViewer({
                         {sharing ? (
                             <ActivityIndicator
                                 size="small"
-                                color={palette.neutral[0]}
+                                color={palette.text.onAccent}
                             />
                         ) : (
                             <Text style={styles.shareText}>Share / Save</Text>
@@ -444,7 +444,7 @@ function VideoMediaPage({
                     }}
                 />
             ) : (
-                <ActivityIndicator size="large" color={palette.neutral[0]} />
+                <ActivityIndicator size="large" color={palette.text.onAccent} />
             )}
         </View>
     );
@@ -498,7 +498,7 @@ function PlayerSurface({
                 <View style={styles.bufferingOverlay} pointerEvents="none">
                     <ActivityIndicator
                         size="large"
-                        color={palette.neutral[0]}
+                        color={palette.text.onAccent}
                     />
                 </View>
             )}
@@ -558,7 +558,11 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         backgroundColor: 'rgba(255,255,255,0.16)',
     },
-    closeText: { color: palette.neutral[0], fontSize: 18, fontWeight: '600' },
+    closeText: {
+        color: palette.text.onAccent,
+        fontSize: 18,
+        fontWeight: '600',
+    },
     footer: {
         position: 'absolute',
         left: 0,
@@ -578,5 +582,9 @@ const styles = StyleSheet.create({
         minWidth: 120,
         alignItems: 'center',
     },
-    shareText: { color: palette.neutral[0], fontSize: 14, fontWeight: '600' },
+    shareText: {
+        color: palette.text.onAccent,
+        fontSize: 14,
+        fontWeight: '600',
+    },
 });

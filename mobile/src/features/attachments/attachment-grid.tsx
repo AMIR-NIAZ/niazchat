@@ -188,7 +188,7 @@ function MediaTile({
                     {reloading ? (
                         <ActivityIndicator
                             size="small"
-                            color={palette.neutral[0]}
+                            color={palette.text.onAccent}
                         />
                     ) : (
                         <Text style={styles.retryText}>Tap to retry</Text>
@@ -263,7 +263,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         backgroundColor: 'rgba(28, 32, 36, 0.58)',
     },
-    playIcon: { color: palette.neutral[0], fontSize: 15, marginLeft: 2 },
+    playIcon: { color: palette.text.onAccent, fontSize: 15, marginLeft: 2 },
     durationBadge: {
         position: 'absolute',
         right: 4,
@@ -274,7 +274,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(28, 32, 36, 0.7)',
     },
     durationText: {
-        color: palette.neutral[0],
+        color: palette.text.onAccent,
         fontSize: 10,
         fontWeight: '600',
     },
@@ -288,7 +288,11 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         backgroundColor: 'rgba(28, 32, 36, 0.45)',
     },
-    retryText: { color: palette.neutral[0], fontSize: 11, fontWeight: '600' },
+    retryText: {
+        color: palette.text.onAccent,
+        fontSize: 11,
+        fontWeight: '600',
+    },
     uploadOverlay: {
         position: 'absolute',
         left: 0,
@@ -317,5 +321,9 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         backgroundColor: 'rgba(28, 32, 36, 0.55)',
     },
-    countText: { color: palette.neutral[0], fontSize: 20, fontWeight: '700' },
+    countText: {
+        color: palette.text.onAccent,
+        fontSize: 20,
+        fontWeight: '700',
+    },
 });

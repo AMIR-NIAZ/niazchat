@@ -6,7 +6,6 @@ import {
     Pressable,
     StyleSheet,
     Text,
-    TextInput,
     View,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
@@ -14,6 +13,8 @@ import { router } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import {
     AppText,
+    GlassHeader,
+    GlassInput,
     Screen,
     UserAvatar,
     palette,
@@ -161,20 +162,20 @@ export default function NewChatScreen(): React.ReactElement {
 
     return (
         <Screen style={styles.screen} withTopInset={true}>
-            <View style={styles.header}>
-                <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Go back"
-                    style={styles.backButton}
-                    onPress={(): void => router.back()}
-                >
-                    <Text style={styles.backText}>‹</Text>
-                </Pressable>
-                <AppText variant="title" style={styles.headerTitle}>
-                    New chat
-                </AppText>
-                <View style={styles.backButton} />
-            </View>
+            <GlassHeader
+                leading={
+                    <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Go back"
+                        style={styles.backButton}
+                        onPress={(): void => router.back()}
+                    >
+                        <Text style={styles.backText}>‹</Text>
+                    </Pressable>
+                }
+            >
+                <AppText variant="heading">New chat</AppText>
+            </GlassHeader>
 
             <Pressable
                 accessibilityRole="button"
@@ -199,16 +200,15 @@ export default function NewChatScreen(): React.ReactElement {
                 <Text style={styles.joinRowChevron}>›</Text>
             </Pressable>
 
-            <TextInput
-                style={styles.search}
+            <GlassInput
                 placeholder="Search by @username"
-                placeholderTextColor={palette.neutral[300]}
                 value={query}
                 onChangeText={setQuery}
                 autoFocus={true}
                 autoCapitalize="none"
                 autoCorrect={false}
                 accessibilityLabel="Search users"
+                leading={<Text style={styles.searchGlyph}>⌕</Text>}
             />
 
             {error !== null ? (
@@ -302,10 +302,8 @@ export default function NewChatScreen(): React.ReactElement {
                         <Text style={styles.modalHint}>
                             Paste the invite link or the 22-character code.
                         </Text>
-                        <TextInput
-                            style={styles.search}
+                        <GlassInput
                             placeholder="Invite link or code"
-                            placeholderTextColor={palette.neutral[300]}
                             value={joinText}
                             onChangeText={(text): void => {
                                 setJoinText(text);
@@ -351,11 +349,7 @@ export default function NewChatScreen(): React.ReactElement {
 
 const styles = StyleSheet.create({
     screen: { paddingHorizontal: spacing.md, gap: spacing.sm },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.xs,
-    },
+    searchGlyph: { color: palette.text.muted, fontSize: 20 },
     backButton: {
         width: 40,
         height: 40,
@@ -366,12 +360,12 @@ const styles = StyleSheet.create({
     headerTitle: { flex: 1, textAlign: 'center' },
     search: {
         borderWidth: 1,
-        borderColor: palette.neutral[300],
-        borderRadius: radii.sm,
+        borderColor: palette.border.subtle,
+        borderRadius: radii.md,
         paddingHorizontal: spacing.sm,
         paddingVertical: spacing.xs,
-        color: palette.neutral[900],
-        backgroundColor: palette.neutral[0],
+        color: palette.text.primary,
+        backgroundColor: palette.glass.elevated,
     },
     center: {
         flex: 1,
@@ -379,16 +373,18 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         gap: spacing.xxs,
     },
-    detail: { textAlign: 'center', color: palette.neutral[500] },
+    detail: { textAlign: 'center', color: palette.text.secondary },
     list: { paddingBottom: spacing.md },
     joinRow: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: spacing.sm,
-        paddingHorizontal: spacing.sm,
-        paddingVertical: spacing.xs,
-        borderRadius: radii.sm,
-        backgroundColor: palette.primary[100],
+        paddingHorizontal: spacing.md,
+        paddingVertical: spacing.sm,
+        borderRadius: radii.lg,
+        backgroundColor: palette.glass.accent,
+        borderWidth: 1,
+        borderColor: palette.border.subtle,
     },
     joinRowBody: { flex: 1, gap: 2 },
     joinRowTitle: {
@@ -410,9 +406,11 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0,0,0,0.35)',
     },
     modalSheet: {
-        backgroundColor: palette.neutral[0],
-        borderTopLeftRadius: radii.md,
-        borderTopRightRadius: radii.md,
+        backgroundColor: palette.elevated,
+        borderTopLeftRadius: radii.xl,
+        borderTopRightRadius: radii.xl,
+        borderWidth: 1,
+        borderColor: palette.border.subtle,
         padding: spacing.md,
         paddingBottom: spacing.lg,
         gap: spacing.xs,
@@ -420,10 +418,10 @@ const styles = StyleSheet.create({
     modalTitle: {
         fontSize: 18,
         fontWeight: '700',
-        color: palette.neutral[900],
+        color: palette.text.primary,
     },
     modalHint: {
-        color: palette.neutral[500],
+        color: palette.text.secondary,
         fontSize: 13,
     },
     modalActions: {
@@ -449,7 +447,7 @@ const styles = StyleSheet.create({
         backgroundColor: palette.primary[500],
     },
     primaryButtonText: {
-        color: palette.neutral[0],
+        color: palette.text.onAccent,
         fontSize: 14,
         fontWeight: '600',
     },

@@ -11,17 +11,16 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import {
     AppText,
+    Avatar,
+    GlassCard,
+    GlassHeader,
     Screen,
-    UserAvatar,
     palette,
     radii,
     spacing,
     typography,
 } from '../../../shared/components';
-import {
-    AvatarGallery,
-    AvatarViewer,
-} from '../../../features/users/avatar-gallery';
+import { AvatarViewer } from '../../../features/users/avatar-gallery';
 import { presenceLabel } from '../../../features/users/public-profile-model';
 import { useRegisterOpenUserProfile } from '../../../features/users/profile-navigation';
 import { useUserProfile } from '../../../features/users/use-user-profile';
@@ -129,29 +128,35 @@ function UserProfile({
 
     return (
         <Screen style={styles.screen} withTopInset={true}>
-            <View style={styles.header}>
-                <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Go back"
-                    style={styles.backButton}
-                    onPress={(): void => router.back()}
-                >
-                    <Text style={styles.backText}>‹</Text>
-                </Pressable>
+            <GlassHeader
+                leading={
+                    <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Go back"
+                        style={styles.backButton}
+                        onPress={(): void => router.back()}
+                    >
+                        <Text style={styles.backText}>‹</Text>
+                    </Pressable>
+                }
+            >
                 <Text
-                    style={[typography.title, styles.headerTitle]}
+                    style={[typography.heading, styles.headerTitle]}
                     numberOfLines={1}
                 >
+                    {name}
                 </Text>
-                {/* Balances the back button so the title stays centered. */}
-                <View style={styles.backButton} />
-            </View>
+            </GlassHeader>
 
             <ScrollView
                 contentContainerStyle={styles.scroll}
                 keyboardShouldPersistTaps="handled"
             >
-                <View style={styles.hero}>
+                <GlassCard
+                    padding={spacing.lg}
+                    contentStyle={styles.hero}
+                    floating={true}
+                >
                     {avatars.length > 0 ? (
                         <Pressable
                             accessibilityRole="button"
@@ -159,19 +164,21 @@ function UserProfile({
                             onPress={(): void => setViewerIndex(0)}
                             style={({ pressed }) => pressed && styles.pressed}
                         >
-                            <UserAvatar
+                            <Avatar
                                 userId={userId}
                                 name={name}
                                 uri={currentAvatarPath}
-                                size={128}
+                                size={116}
+                                ring={true}
                             />
                         </Pressable>
                     ) : (
-                        <UserAvatar
+                        <Avatar
                             userId={userId}
                             name={name}
                             uri={currentAvatarPath}
-                            size={128}
+                            size={116}
+                            ring={true}
                         />
                     )}
 
@@ -203,7 +210,7 @@ function UserProfile({
                             {messagePending ? (
                                 <ActivityIndicator
                                     size="small"
-                                    color={palette.neutral[0]}
+                                    color={palette.text.onAccent}
                                 />
                             ) : (
                                 <Text style={styles.messageButtonText}>
@@ -217,7 +224,7 @@ function UserProfile({
                             {messageError}
                         </AppText>
                     )}
-                </View>
+                </GlassCard>
 
                 {query.isLoading && (
                     <View style={styles.center}>
@@ -255,7 +262,6 @@ function UserProfile({
                         <Text style={styles.bio}>{bio}</Text>
                     </View>
                 )}
-
             </ScrollView>
 
             <AvatarViewer
@@ -296,11 +302,6 @@ function InvalidUser(): React.ReactElement {
 
 const styles = StyleSheet.create({
     screen: { paddingHorizontal: spacing.md },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.xs,
-    },
     backButton: {
         width: 40,
         height: 40,
@@ -308,14 +309,14 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     backText: { color: palette.primary[600], fontSize: 26, fontWeight: '700' },
-    headerTitle: { flex: 1, textAlign: 'center' },
+    headerTitle: { textAlign: 'center' },
     scroll: { paddingVertical: spacing.sm, gap: spacing.md },
     hero: { alignItems: 'center', gap: spacing.xxs },
     name: { marginTop: spacing.xs },
     center: { alignItems: 'center', justifyContent: 'center', flex: 1 },
     pressed: { opacity: 0.6 },
     errorBlock: { alignItems: 'center', gap: spacing.xs },
-    errorText: { color: palette.neutral[700], textAlign: 'center' },
+    errorText: { color: palette.text.secondary, textAlign: 'center' },
     retryButton: {
         borderWidth: 1,
         borderColor: palette.primary[500],
@@ -340,11 +341,11 @@ const styles = StyleSheet.create({
     },
     messageButtonBusy: { opacity: 0.6 },
     messageButtonText: {
-        color: palette.neutral[0],
+        color: palette.text.onAccent,
         fontSize: 15,
         fontWeight: '700',
     },
     section: { gap: spacing.xxs },
-    sectionLabel: { color: palette.neutral[500] },
-    bio: { color: palette.neutral[900], fontSize: 15, lineHeight: 21 },
+    sectionLabel: { color: palette.text.muted },
+    bio: { color: palette.text.primary, fontSize: 15, lineHeight: 21 },
 });

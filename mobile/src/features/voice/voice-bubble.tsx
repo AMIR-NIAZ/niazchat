@@ -282,19 +282,19 @@ const styles = StyleSheet.create({
     buttonMine: { backgroundColor: 'rgba(255,255,255,0.16)' },
     buttonTheirs: { backgroundColor: palette.primary[100] },
     buttonText: { color: palette.primary[600], fontSize: 13 },
-    buttonTextMine: { color: palette.neutral[0] },
+    buttonTextMine: { color: palette.text.onAccent },
     progressText: {
         color: palette.primary[600],
         fontSize: 9,
         fontWeight: '700',
     },
-    progressTextMine: { color: palette.neutral[0] },
+    progressTextMine: { color: palette.text.onAccent },
     errorIcon: {
         color: palette.semantic.danger,
         fontSize: 15,
         fontWeight: '700',
     },
-    errorIconMine: { color: palette.neutral[0] },
+    errorIconMine: { color: palette.text.onAccent },
     waveform: {
         flex: 1,
         minWidth: 96,
@@ -311,7 +311,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(28,32,36,0.10)',
     },
     speedText: { color: palette.primary[700], fontSize: 10, fontWeight: '700' },
-    speedTextMine: { color: palette.neutral[0] },
+    speedTextMine: { color: palette.text.onAccent },
     time: {
         color: palette.neutral[500],
         fontSize: 10,
@@ -319,7 +319,7 @@ const styles = StyleSheet.create({
         minWidth: 30,
         textAlign: 'right',
     },
-    timeMine: { color: palette.primary[100] },
+    timeMine: { color: 'rgba(255,255,255,0.82)' },
     error: { color: palette.semantic.danger, fontSize: 10 },
-    errorMine: { color: palette.primary[100] },
+    errorMine: { color: 'rgba(255,255,255,0.82)' },
 });

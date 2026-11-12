@@ -117,5 +117,5 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         backgroundColor: palette.primary[500],
     },
-    sendText: { color: palette.neutral[0], fontSize: 14 },
+    sendText: { color: palette.text.onAccent, fontSize: 14 },
 });

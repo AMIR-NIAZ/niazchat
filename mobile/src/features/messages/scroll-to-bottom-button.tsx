@@ -128,7 +128,7 @@ export function ScrollToBottomButton(
                 onPress={props.onPress}
                 style={styles.button}
                 android_ripple={{
-                    color: palette.primary[100],
+                    color: 'rgba(255,255,255,0.82)',
                     borderless: true,
                 }}
             >
@@ -192,7 +192,7 @@ const styles = StyleSheet.create({
         borderColor: palette.neutral[0],
     },
     badgeText: {
-        color: palette.neutral[0],
+        color: palette.text.onAccent,
         fontSize: 11,
         fontWeight: '700',
     },

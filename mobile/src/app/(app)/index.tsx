@@ -6,12 +6,14 @@ import {
     RefreshControl,
     StyleSheet,
     Text,
-    TextInput,
     View,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import {
     AppText,
+    GlassHeader,
+    GlassInput,
+    GlassSurface,
     Screen,
     UserAvatar,
     radii,
@@ -66,46 +68,59 @@ export default function ChatsScreen(): React.ReactElement {
 
     return (
         <Screen style={styles.screen} withTopInset={true}>
-            <View style={styles.header}>
-                <AppText variant="title">Chats</AppText>
-                <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="New chat"
-                    onPress={(): void => {
-                        router.push('/(app)/new-chat');
-                    }}
-                    style={styles.buttonGhost}
-                >
-                    <Text style={styles.buttonGhostText}>New chat</Text>
-                </Pressable>
-                <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Open profile"
-                    onPress={(): void => {
-                        router.push('/(app)/profile');
-                    }}
-                    style={styles.buttonGhost}
-                >
-                    <Text style={styles.buttonGhostText}>Profile</Text>
-                </Pressable>
-                <Pressable
-                    accessibilityRole="button"
-                    onPress={(): void => {
-                        void logout('manual');
-                    }}
-                    style={styles.buttonGhost}
-                >
-                    <Text style={styles.buttonGhostText}>Sign out</Text>
-                </Pressable>
-            </View>
+            <GlassHeader
+                leading={
+                    <View style={styles.brand}>
+                        <Text style={styles.brandText}>N</Text>
+                    </View>
+                }
+                trailing={
+                    <>
+                        <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel="New chat"
+                            onPress={(): void => {
+                                router.push('/(app)/new-chat');
+                            }}
+                            style={styles.iconButton}
+                        >
+                            <Text style={styles.iconText}>＋</Text>
+                        </Pressable>
+                        <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel="Open profile"
+                            onPress={(): void => {
+                                router.push('/(app)/profile');
+                            }}
+                            style={styles.iconButton}
+                        >
+                            <Text style={styles.iconText}>☺</Text>
+                        </Pressable>
+                        <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel="Sign out"
+                            onPress={(): void => {
+                                void logout('manual');
+                            }}
+                            style={styles.iconButton}
+                        >
+                            <Text style={styles.iconText}>⏻</Text>
+                        </Pressable>
+                    </>
+                }
+            >
+                <AppText variant="heading">Chats</AppText>
+                <AppText variant="caption" style={styles.headerCaption}>
+                    Your conversations
+                </AppText>
+            </GlassHeader>
 
-            <TextInput
-                style={styles.search}
+            <GlassInput
                 placeholder="Search chats"
-                placeholderTextColor={palette.neutral[300]}
                 value={search}
                 onChangeText={setSearch}
                 accessibilityLabel="Search chats"
+                leading={<Text style={styles.searchGlyph}>⌕</Text>}
             />
 
             {chatsQuery.isPending ? (
@@ -166,15 +181,23 @@ export default function ChatsScreen(): React.ReactElement {
                 />
             )}
 
-            <Pressable
-                accessibilityRole="button"
-                style={styles.fab}
-                onPress={(): void => {
-                    router.push('/(app)/create-group');
-                }}
+            <GlassSurface
+                tone="accent"
+                radius={radii.full}
+                floating={true}
+                style={styles.fabWrap}
             >
-                <Text style={styles.fabText}>+ Group</Text>
-            </Pressable>
+                <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Create a group"
+                    style={styles.fab}
+                    onPress={(): void => {
+                        router.push('/(app)/create-group');
+                    }}
+                >
+                    <Text style={styles.fabText}>＋ Group</Text>
+                </Pressable>
+            </GlassSurface>
 
             <ChatContextMenu
                 chat={menuChat}
@@ -238,7 +261,7 @@ function ChatRowItem(props: ChatRowItemProps): React.ReactElement {
             <View style={styles.rowBody}>
                 <View style={styles.titleRow}>
                     <Text
-                        style={[typography.title, styles.titleText]}
+                        style={[typography.heading, styles.titleText]}
                         numberOfLines={1}
                     >
                         {name}
@@ -255,7 +278,7 @@ function ChatRowItem(props: ChatRowItemProps): React.ReactElement {
                 <Text
                     style={[
                         typography.caption,
-                        { color: palette.neutral[700] },
+                        { color: palette.text.secondary },
                         unread > 0 && styles.unreadPreview,
                     ]}
                     numberOfLines={1}
@@ -313,20 +336,38 @@ function RetryButton({ onPress }: { onPress: () => void }): React.ReactElement {
 
 const styles = StyleSheet.create({
     screen: { gap: spacing.sm },
-    header: {
-        flexDirection: 'row',
+    brand: {
+        width: 40,
+        height: 40,
+        borderRadius: 14,
         alignItems: 'center',
-        justifyContent: 'space-between',
-    },
-    search: {
+        justifyContent: 'center',
+        backgroundColor: palette.glass.accent,
         borderWidth: 1,
-        borderColor: palette.neutral[300],
-        borderRadius: radii.sm,
-        paddingHorizontal: spacing.sm,
-        paddingVertical: spacing.xs,
-        color: palette.neutral[900],
-        backgroundColor: palette.neutral[0],
+        borderColor: palette.border.accent,
     },
+    brandText: {
+        color: palette.highlight,
+        fontSize: 19,
+        fontWeight: '700',
+    },
+    headerCaption: { color: palette.text.muted },
+    iconButton: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: palette.glass.highlight,
+        borderWidth: 1,
+        borderColor: palette.border.subtle,
+    },
+    iconText: {
+        color: palette.primary[700],
+        fontSize: 18,
+        fontWeight: '600',
+    },
+    searchGlyph: { color: palette.text.muted, fontSize: 20 },
     center: {
         flex: 1,
         alignItems: 'center',
@@ -342,7 +383,11 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.xxs,
         borderRadius: radii.sm,
     },
-    rowSelected: { backgroundColor: palette.primary[100] },
+    rowSelected: {
+        backgroundColor: palette.glass.elevated,
+        borderWidth: 1,
+        borderColor: palette.border.subtle,
+    },
     titleRow: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -366,7 +411,7 @@ const styles = StyleSheet.create({
     },
     rowBody: { flex: 1, gap: 2 },
     rowMeta: { alignItems: 'flex-end', gap: 2 },
-    unreadPreview: { color: palette.neutral[900], fontWeight: '700' },
+    unreadPreview: { color: palette.text.primary, fontWeight: '700' },
     unreadBadge: {
         minWidth: 18,
         paddingHorizontal: 5,
@@ -377,26 +422,33 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     unreadBadgeText: {
-        color: palette.neutral[0],
+        color: palette.text.onAccent,
         fontSize: 10,
         fontWeight: '700',
     },
     banBadge: { color: palette.semantic.danger, fontSize: 10 },
-    separator: { height: 1, backgroundColor: palette.neutral[100] },
-    fab: {
-        alignSelf: 'flex-end',
-        backgroundColor: palette.primary[500],
-        borderRadius: radii.md,
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.xs,
+    separator: { height: 1, backgroundColor: palette.border.subtle },
+    fabWrap: {
+        position: 'absolute',
+        end: spacing.lg,
+        bottom: spacing.lg,
     },
-    fabText: { color: palette.neutral[0], fontWeight: '600' },
+    fab: {
+        paddingHorizontal: spacing.md,
+        paddingVertical: spacing.sm,
+    },
+    fabText: {
+        color: palette.text.onAccent,
+        fontWeight: '700',
+        fontSize: 14,
+    },
     buttonGhost: {
         borderWidth: 1,
-        borderColor: palette.primary[500],
-        borderRadius: radii.sm,
+        borderColor: palette.border.strong,
+        borderRadius: radii.full,
         paddingHorizontal: spacing.sm,
-        paddingVertical: 4,
+        paddingVertical: 6,
+        backgroundColor: palette.glass.elevated,
     },
     buttonGhostText: {
         color: palette.primary[600],

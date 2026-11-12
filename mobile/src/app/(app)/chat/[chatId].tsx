@@ -22,6 +22,7 @@ import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
     AppText,
+    GlassHeader,
     Screen,
     UserAvatar,
     palette,
@@ -969,7 +970,7 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                     </Pressable>
                 </View>
             ) : (
-                <View style={styles.header}>
+                <GlassHeader style={styles.headerBar} layout="row">
                     <Pressable
                         accessibilityRole="button"
                         accessibilityLabel="Go back"
@@ -1034,7 +1035,7 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                             <Text style={styles.gearGlyph}>⚙</Text>
                         </Pressable>
                     )}
-                </View>
+                </GlassHeader>
             )}
 
             {messages.length === 0 ? (
@@ -2262,16 +2263,18 @@ function InvalidChat(): React.ReactElement {
 const styles = StyleSheet.create({
     screen: { gap: spacing.xs, paddingHorizontal: spacing.sm },
     center: { alignItems: 'center', justifyContent: 'center' },
-    header: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+    headerBar: { marginBottom: spacing.xxs },
     selectionBar: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         gap: spacing.sm,
         paddingVertical: spacing.xs,
-        paddingHorizontal: spacing.xs,
-        borderRadius: radii.sm,
-        backgroundColor: palette.primary[100],
+        paddingHorizontal: spacing.sm,
+        borderRadius: radii.lg,
+        backgroundColor: palette.glass.elevated,
+        borderWidth: 1,
+        borderColor: palette.border.subtle,
     },
     selectionAction: { paddingHorizontal: spacing.xs, paddingVertical: 4 },
     selectionCancel: {
@@ -2282,7 +2285,7 @@ const styles = StyleSheet.create({
     selectionCount: {
         flex: 1,
         textAlign: 'center',
-        color: palette.neutral[900],
+        color: palette.text.primary,
         fontSize: 14,
         fontWeight: '700',
     },
@@ -2294,7 +2297,7 @@ const styles = StyleSheet.create({
     },
     selectionForwardDisabled: { backgroundColor: palette.neutral[300] },
     selectionForwardText: {
-        color: palette.neutral[0],
+        color: palette.text.onAccent,
         fontSize: 13,
         fontWeight: '700',
     },
@@ -2362,12 +2365,12 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: spacing.xs,
-        backgroundColor: palette.neutral[0],
+        backgroundColor: palette.glass.elevated,
         borderRadius: radii.full,
         paddingHorizontal: spacing.sm,
         paddingVertical: 6,
         borderWidth: 1,
-        borderColor: palette.neutral[100],
+        borderColor: palette.border.subtle,
     },
     jumpBannerText: { color: palette.neutral[700], fontSize: 12 },
     jumpNotice: {
@@ -2398,7 +2401,9 @@ const styles = StyleSheet.create({
         paddingBottom: spacing.md,
     },
     sheetCard: {
-        backgroundColor: palette.neutral[0],
+        backgroundColor: palette.elevated,
+        borderWidth: 1,
+        borderColor: palette.border.subtle,
         borderRadius: radii.md,
         overflow: 'hidden',
     },
@@ -2461,20 +2466,22 @@ const styles = StyleSheet.create({
     },
     modalCard: {
         width: '100%',
-        backgroundColor: palette.neutral[0],
+        backgroundColor: palette.elevated,
+        borderWidth: 1,
+        borderColor: palette.border.subtle,
         borderRadius: radii.md,
         padding: spacing.md,
         gap: spacing.sm,
     },
     modalInput: {
         borderWidth: 1,
-        borderColor: palette.neutral[300],
-        borderRadius: radii.sm,
+        borderColor: palette.border.subtle,
+        borderRadius: radii.md,
         paddingHorizontal: spacing.sm,
         paddingVertical: spacing.xs,
         minHeight: 60,
-        color: palette.neutral[900],
-        backgroundColor: palette.neutral[50],
+        color: palette.text.primary,
+        backgroundColor: palette.glass.elevated,
     },
     modalError: { color: palette.semantic.danger },
     modalActions: { flexDirection: 'row', gap: spacing.xs },
@@ -2489,12 +2496,12 @@ const styles = StyleSheet.create({
     sectionFlex: { flex: 1 },
     input: {
         borderWidth: 1,
-        borderColor: palette.neutral[300],
-        borderRadius: radii.sm,
+        borderColor: palette.border.subtle,
+        borderRadius: radii.md,
         paddingHorizontal: spacing.sm,
         paddingVertical: spacing.xs,
-        color: palette.neutral[900],
-        backgroundColor: palette.neutral[0],
+        color: palette.text.primary,
+        backgroundColor: palette.glass.elevated,
     },
     smallButton: {
         alignSelf: 'flex-start',
@@ -2505,7 +2512,7 @@ const styles = StyleSheet.create({
     },
     smallButtonDanger: { backgroundColor: palette.semantic.danger },
     smallButtonText: {
-        color: palette.neutral[0],
+        color: palette.text.onAccent,
         fontSize: 13,
         fontWeight: '600',
     },

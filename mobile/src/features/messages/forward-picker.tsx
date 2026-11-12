@@ -375,7 +375,7 @@ export function ForwardPicker({
                         {sending ? (
                             <ActivityIndicator
                                 size="small"
-                                color={palette.neutral[0]}
+                                color={palette.text.onAccent}
                             />
                         ) : (
                             <Text style={styles.sendText}>Send</Text>
@@ -456,7 +456,11 @@ const styles = StyleSheet.create({
         backgroundColor: palette.primary[500],
         borderColor: palette.primary[500],
     },
-    checkText: { color: palette.neutral[0], fontSize: 14, fontWeight: '700' },
+    checkText: {
+        color: palette.text.onAccent,
+        fontSize: 14,
+        fontWeight: '700',
+    },
     rowBody: { flex: 1 },
     rowTitle: { color: palette.neutral[900], fontSize: 15, fontWeight: '600' },
     rowType: { color: palette.neutral[500], fontSize: 12 },
@@ -501,7 +505,7 @@ const styles = StyleSheet.create({
     },
     sendDisabled: { backgroundColor: palette.neutral[300] },
     sendText: {
-        color: palette.neutral[0],
+        color: palette.text.onAccent,
         fontSize: 14,
         fontWeight: '700',
     },

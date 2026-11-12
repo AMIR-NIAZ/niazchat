@@ -208,7 +208,7 @@ const styles = StyleSheet.create({
     },
     card: {
         maxHeight: '72%',
-        backgroundColor: palette.neutral[0],
+        backgroundColor: palette.elevated,
         borderRadius: radii.lg,
         paddingVertical: spacing.md,
         paddingHorizontal: spacing.md,
@@ -237,7 +237,7 @@ const styles = StyleSheet.create({
         borderRadius: radii.sm,
         backgroundColor: palette.primary[500],
     },
-    retryText: { color: palette.neutral[0], fontWeight: '700' },
+    retryText: { color: palette.text.onAccent, fontWeight: '700' },
     list: { marginTop: spacing.sm },
     listContent: { gap: spacing.md, paddingBottom: spacing.sm },
     group: { gap: spacing.xxs },

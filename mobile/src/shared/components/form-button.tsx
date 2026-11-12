@@ -1,33 +1,20 @@
-import { Pressable, StyleSheet, Text } from 'react-native';
-import { palette, radii, spacing } from '../theme';
+import { PrimaryButton } from './primary-button';
 
-/** Minimal form submit/cancel button used by the auth screens. */
+/**
+ * Form submit/cancel button used by the auth and group screens. Kept as a thin
+ * adapter so existing screens inherit the animated glass button without any
+ * wiring changes.
+ */
 export function FormButton(props: {
-  onPress: () => void;
-  label: string;
-  intent?: 'primary' | 'secondary';
+    onPress: () => void;
+    label: string;
+    intent?: 'primary' | 'secondary';
 }): React.ReactElement {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={props.onPress}
-      style={[styles.button, props.intent === 'secondary' && styles.secondary]}
-    >
-      <Text style={[styles.text, props.intent === 'secondary' && styles.secondaryText]}>
-        {props.label}
-      </Text>
-    </Pressable>
-  );
+    return (
+        <PrimaryButton
+            label={props.label}
+            onPress={props.onPress}
+            variant={props.intent === 'secondary' ? 'secondary' : 'primary'}
+        />
+    );
 }
-
-const styles = StyleSheet.create({
-  button: {
-    alignItems: 'center',
-    paddingVertical: spacing.sm + 2,
-    borderRadius: radii.sm,
-    backgroundColor: palette.primary[500],
-  },
-  secondary: { backgroundColor: 'transparent' },
-  text: { color: palette.neutral[0], fontSize: 16, fontWeight: '600' },
-  secondaryText: { color: palette.primary[500] },
-});

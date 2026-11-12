@@ -715,7 +715,7 @@ function InvalidGroup(props: {
 const styles = StyleSheet.create({
     root: {
         flex: 1,
-        backgroundColor: palette.neutral[50],
+        backgroundColor: palette.background,
     },
     topBar: {
         flexDirection: 'row',
@@ -723,8 +723,8 @@ const styles = StyleSheet.create({
         minHeight: 52,
         paddingHorizontal: spacing.xs,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: palette.neutral[100],
-        backgroundColor: palette.neutral[0],
+        borderBottomColor: palette.border.subtle,
+        backgroundColor: palette.surface,
     },
     backButton: {
         width: 44,
@@ -765,13 +765,13 @@ const styles = StyleSheet.create({
         gap: spacing.xs,
         paddingVertical: spacing.lg,
         paddingHorizontal: spacing.md,
-        backgroundColor: palette.neutral[0],
+        backgroundColor: palette.surface,
     },
     galleryBlock: {
         paddingVertical: spacing.sm,
-        backgroundColor: palette.neutral[0],
+        backgroundColor: palette.surface,
         borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: palette.neutral[100],
+        borderTopColor: palette.border.subtle,
     },
     title: {
         ...typography.title,
@@ -806,9 +806,9 @@ const styles = StyleSheet.create({
         marginBottom: spacing.xs,
         minHeight: 44,
         borderRadius: radii.md,
-        backgroundColor: palette.neutral[0],
+        backgroundColor: palette.surface,
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.neutral[300],
+        borderColor: palette.border.subtle,
         paddingHorizontal: spacing.sm,
         fontSize: 15,
         color: palette.neutral[900],
@@ -825,11 +825,11 @@ const styles = StyleSheet.create({
         gap: spacing.sm,
         minHeight: 64,
         paddingHorizontal: spacing.md,
-        backgroundColor: palette.neutral[0],
+        backgroundColor: palette.surface,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: palette.neutral[100],
+        borderBottomColor: palette.border.subtle,
     },
-    rowPressed: { backgroundColor: palette.neutral[100] },
+    rowPressed: { backgroundColor: palette.glass.elevated },
     rowBody: { flex: 1, gap: 2 },
     rowName: {
         fontSize: 16,
@@ -852,7 +852,7 @@ const styles = StyleSheet.create({
         borderRadius: radii.sm,
         paddingHorizontal: spacing.xs,
         paddingVertical: 2,
-        backgroundColor: palette.neutral[100],
+        backgroundColor: palette.glass.elevated,
     },
     ownerBadge: { backgroundColor: palette.primary[100] },
     badgeText: {
@@ -895,7 +895,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         gap: spacing.xs,
         padding: spacing.lg,
-        backgroundColor: palette.neutral[50],
+        backgroundColor: palette.background,
     },
     centeredCaption: { textAlign: 'center' },
     retryButton: {
@@ -906,7 +906,7 @@ const styles = StyleSheet.create({
         backgroundColor: palette.primary[500],
     },
     retryText: {
-        color: palette.neutral[0],
+        color: palette.text.onAccent,
         fontSize: 14,
         fontWeight: '600',
     },

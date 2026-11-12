@@ -240,7 +240,7 @@ function JoinPreviewCard(props: {
                         {props.busy ? (
                             <ActivityIndicator
                                 size="small"
-                                color={palette.neutral[0]}
+                                color={palette.text.onAccent}
                             />
                         ) : (
                             <Text style={styles.primaryButtonText}>
@@ -275,7 +275,7 @@ function InvalidInvite({ message }: { message: string }): React.ReactElement {
 const styles = StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: palette.neutral[50],
+        backgroundColor: palette.background,
     },
     centered: {
         flex: 1,
@@ -291,7 +291,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.xs,
         borderBottomWidth: StyleSheet.hairlineWidth,
         borderBottomColor: palette.neutral[100],
-        backgroundColor: palette.neutral[0],
+        backgroundColor: palette.elevated,
     },
     backButton: {
         width: 44,
@@ -322,9 +322,9 @@ const styles = StyleSheet.create({
         gap: spacing.xs,
         padding: spacing.lg,
         borderRadius: radii.md,
-        backgroundColor: palette.neutral[0],
+        backgroundColor: palette.elevated,
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.neutral[100],
+        borderColor: palette.border.subtle,
     },
     groupTitle: {
         marginTop: spacing.xs,
@@ -379,7 +379,7 @@ const styles = StyleSheet.create({
     primaryButtonDisabled: { opacity: 0.45 },
     wideButton: { alignSelf: 'stretch' },
     primaryButtonText: {
-        color: palette.neutral[0],
+        color: palette.text.onAccent,
         fontSize: 15,
         fontWeight: '600',
     },

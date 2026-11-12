@@ -29,10 +29,7 @@ import {
     togglePermissionSelection,
 } from './group-model';
 import { describePermissionsError } from './group-errors';
-import {
-    useMemberPermissions,
-    useSetMemberPermissions,
-} from './use-group';
+import { useMemberPermissions, useSetMemberPermissions } from './use-group';
 
 /**
  * Owner-only permission editor for one admin. The server returns the editable
@@ -49,8 +46,7 @@ export function MemberPermissionsSheet(props: {
 }): React.ReactElement {
     const insets = useSafeAreaInsets();
     const memberId = props.member?.memberId ?? null;
-    const memberName =
-        props.member?.name || props.member?.username || 'Admin';
+    const memberName = props.member?.name || props.member?.username || 'Admin';
     const query = useMemberPermissions(
         props.chatId,
         memberId ?? 0,
@@ -149,10 +145,7 @@ export function MemberPermissionsSheet(props: {
                     style={[
                         styles.sheet,
                         {
-                            paddingBottom: Math.max(
-                                insets.bottom,
-                                spacing.md,
-                            ),
+                            paddingBottom: Math.max(insets.bottom, spacing.md),
                         },
                     ]}
                 >
@@ -237,7 +230,9 @@ export function MemberPermissionsSheet(props: {
                                                 <Text style={styles.label}>
                                                     {option.label}
                                                 </Text>
-                                                <Text style={styles.description}>
+                                                <Text
+                                                    style={styles.description}
+                                                >
                                                     {description}
                                                 </Text>
                                             </View>
@@ -253,8 +248,7 @@ export function MemberPermissionsSheet(props: {
                                                     toggle(option.key)
                                                 }
                                                 trackColor={{
-                                                    false: palette
-                                                        .neutral[300],
+                                                    false: palette.neutral[300],
                                                     true: palette.primary[500],
                                                 }}
                                                 thumbColor={palette.neutral[0]}
@@ -305,7 +299,7 @@ export function MemberPermissionsSheet(props: {
                             {saving ? (
                                 <ActivityIndicator
                                     size="small"
-                                    color={palette.neutral[0]}
+                                    color={palette.text.onAccent}
                                 />
                             ) : (
                                 <Text style={styles.saveText}>Save</Text>
@@ -330,7 +324,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.sm,
         borderTopLeftRadius: radii.lg,
         borderTopRightRadius: radii.lg,
-        backgroundColor: palette.neutral[0],
+        backgroundColor: palette.elevated,
     },
     title: {
         ...typography.title,
@@ -407,7 +401,7 @@ const styles = StyleSheet.create({
         backgroundColor: palette.primary[500],
     },
     retryText: {
-        color: palette.neutral[0],
+        color: palette.text.onAccent,
         fontSize: 14,
         fontWeight: '600',
     },
@@ -439,7 +433,7 @@ const styles = StyleSheet.create({
     },
     saveDisabled: { opacity: 0.45 },
     saveText: {
-        color: palette.neutral[0],
+        color: palette.text.onAccent,
         fontSize: 15,
         fontWeight: '700',
     },

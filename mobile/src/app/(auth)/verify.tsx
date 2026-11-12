@@ -4,19 +4,19 @@ import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useLocalSearchParams, router } from 'expo-router';
 import {
-  AppText,
-  FormButton,
-  FormField,
-  Screen,
-  palette,
-  spacing,
-  typography,
+    AppText,
+    FormButton,
+    FormField,
+    GlassCard,
+    Screen,
+    palette,
+    spacing,
 } from '../../shared/components';
 import { useAuthFlow } from '../../features/auth';
 import {
-  phoneSchema,
-  verifyOtpSchema,
-  type VerifyOtpFormValues,
+    phoneSchema,
+    verifyOtpSchema,
+    type VerifyOtpFormValues,
 } from '../../features/auth/validators';
 
 /**
@@ -29,104 +29,143 @@ import {
 type VerifyRouteParams = { phone?: string | string[] };
 
 export default function VerifyScreen(): React.ReactElement {
-  const params = useLocalSearchParams<VerifyRouteParams>();
-  const phone: string = typeof params.phone === 'string' ? params.phone : '';
-  const validPhone = phoneSchema.safeParse(phone).success;
+    const params = useLocalSearchParams<VerifyRouteParams>();
+    const phone: string = typeof params.phone === 'string' ? params.phone : '';
+    const validPhone = phoneSchema.safeParse(phone).success;
 
-  const { confirmOtp, resend, verifying } = useAuthFlow();
-  const [submitError, setSubmitError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+    const { confirmOtp, resend, verifying } = useAuthFlow();
+    const [submitError, setSubmitError] = useState<string | null>(null);
+    const [notice, setNotice] = useState<string | null>(null);
 
-  const {
-    control,
-    handleSubmit,
-    formState: { errors },
-  } = useForm<VerifyOtpFormValues>({
-    resolver: zodResolver(verifyOtpSchema),
-    mode: 'onChange',
-    defaultValues: { phone, code: '' },
-  });
+    const {
+        control,
+        handleSubmit,
+        formState: { errors },
+    } = useForm<VerifyOtpFormValues>({
+        resolver: zodResolver(verifyOtpSchema),
+        mode: 'onChange',
+        defaultValues: { phone, code: '' },
+    });
 
-  const onSubmit = handleSubmit(async (values): Promise<void> => {
-    setSubmitError(null);
-    const result = await confirmOtp({ phone: values.phone, code: values.code });
-    if (!result.success && result.message !== undefined) {
-      setSubmitError(result.message);
+    const onSubmit = handleSubmit(async (values): Promise<void> => {
+        setSubmitError(null);
+        const result = await confirmOtp({
+            phone: values.phone,
+            code: values.code,
+        });
+        if (!result.success && result.message !== undefined) {
+            setSubmitError(result.message);
+        }
+    });
+
+    const onResend = async (): Promise<void> => {
+        setNotice(null);
+        setSubmitError(null);
+        const result = await resend(phone);
+        if (result.message !== undefined) {
+            if (result.success) {
+                setNotice(result.message);
+            } else {
+                setSubmitError(result.message);
+            }
+        }
+    };
+
+    if (!validPhone) {
+        return (
+            <Screen style={styles.screen}>
+                <GlassCard padding={spacing.lg}>
+                    <AppText variant="title">Sign-in</AppText>
+                    <AppText variant="caption">
+                        This screen must be entered through the code request
+                        flow.
+                    </AppText>
+                    <FormButton
+                        intent="secondary"
+                        label="Back to sign in"
+                        onPress={(): void => {
+                            router.replace('/(auth)/login');
+                        }}
+                    />
+                </GlassCard>
+            </Screen>
+        );
     }
-  });
 
-  const onResend = async (): Promise<void> => {
-    setNotice(null);
-    setSubmitError(null);
-    const result = await resend(phone);
-    if (result.message !== undefined) {
-      if (result.success) {
-        setNotice(result.message);
-      } else {
-        setSubmitError(result.message);
-      }
-    }
-  };
-
-  if (!validPhone) {
     return (
-      <Screen style={styles.screen}>
-        <AppText variant="title">Sign-in</AppText>
-        <AppText>This screen must be entered through the code request flow.</AppText>
-        <FormButton
-          intent="secondary"
-          label="Back to sign in"
-          onPress={(): void => {
-            router.replace('/(auth)/login');
-          }}
-        />
-      </Screen>
+        <Screen style={styles.screen}>
+            <GlassCard padding={spacing.lg} radius={28} floating={true}>
+                <AppText variant="title">Enter the code</AppText>
+                <AppText variant="caption" style={styles.hint}>
+                    We sent a one-time code to {phone}. Codes expire after 60
+                    seconds.
+                </AppText>
+
+                <Controller
+                    control={control}
+                    name="code"
+                    render={({
+                        field: { onChange, onBlur, value },
+                    }): React.ReactElement => (
+                        <FormField
+                            label="Code"
+                            error={errors.code?.message ?? null}
+                            value={value}
+                            keyboardType="number-pad"
+                            onChangeText={onChange}
+                            onBlur={onBlur}
+                        />
+                    )}
+                />
+
+                {submitError !== null && (
+                    <AppText variant="caption" style={styles.error}>
+                        {submitError}
+                    </AppText>
+                )}
+                {notice !== null && (
+                    <AppText variant="caption" style={styles.notice}>
+                        {notice}
+                    </AppText>
+                )}
+
+                <View style={styles.actions}>
+                    {verifying ? (
+                        <ActivityIndicator
+                            size="small"
+                            color={palette.primary[300]}
+                        />
+                    ) : (
+                        <>
+                            <FormButton
+                                onPress={(): void => {
+                                    void onSubmit();
+                                }}
+                                label="Verify & sign in"
+                            />
+                            <FormButton
+                                intent="secondary"
+                                label="Resend code"
+                                onPress={(): void => {
+                                    void onResend();
+                                }}
+                            />
+                        </>
+                    )}
+                </View>
+            </GlassCard>
+        </Screen>
     );
-  }
-
-  return (
-    <Screen style={styles.screen}>
-      <AppText variant="title">Enter the code</AppText>
-      <AppText style={styles.hint}>
-        We sent a one-time code to {phone}. Codes expire after 60 seconds.
-      </AppText>
-
-      <Controller
-        control={control}
-        name="code"
-        render={({ field: { onChange, onBlur, value } }): React.ReactElement => (
-          <FormField
-            label="Code"
-            error={errors.code?.message ?? null}
-            value={value}
-            keyboardType="number-pad"
-            onChangeText={onChange}
-            onBlur={onBlur}
-          />
-        )}
-      />
-
-      {submitError !== null && <AppText style={styles.error}>{submitError}</AppText>}
-      {notice !== null && <AppText style={styles.notice}>{notice}</AppText>}
-
-      <View style={styles.actions}>
-        {verifying ? (
-          <ActivityIndicator size="small" />
-        ) : (
-          <>
-            <FormButton onPress={onSubmit} label="Verify & sign in" />
-            <FormButton intent="secondary" label="Resend code" onPress={onResend} />
-          </>
-        )}
-      </View>
-    </Screen>
-  );
 }
 
 const styles = StyleSheet.create({
-  screen: { gap: spacing.md, paddingHorizontal: spacing.lg, justifyContent: 'center' },
-  hint: { color: palette.neutral[500] },
-  error: { ...typography.caption, color: palette.semantic.danger },
-  notice: { ...typography.caption, color: palette.semantic.success },
-  actions: { marginTop: spacing.sm, gap: spacing.xs },
+    screen: {
+        gap: spacing.md,
+        paddingHorizontal: spacing.lg,
+        justifyContent: 'center',
+    },
+    hint: { color: palette.text.secondary, lineHeight: 18 },
+    error: { color: palette.semantic.danger },
+    notice: { color: palette.semantic.success },
+    actions: { marginTop: spacing.xs, gap: spacing.xs },
 });

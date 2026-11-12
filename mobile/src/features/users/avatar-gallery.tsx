@@ -136,7 +136,7 @@ export function AvatarGallery({
                             <View style={styles.tileBusy}>
                                 <ActivityIndicator
                                     size="small"
-                                    color={palette.neutral[0]}
+                                    color={palette.text.onAccent}
                                 />
                             </View>
                         )}
@@ -413,7 +413,7 @@ export function AvatarViewer({
                         (busy || pending ? (
                             <ActivityIndicator
                                 size="small"
-                                color={palette.neutral[0]}
+                                color={palette.text.onAccent}
                             />
                         ) : (
                             <View style={styles.viewerActions}>
@@ -588,7 +588,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     currentBadgeText: {
-        color: palette.neutral[0],
+        color: palette.text.onAccent,
         fontSize: 9,
         fontWeight: '700',
     },
@@ -651,7 +651,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(255, 255, 255, 0.16)',
     },
     viewerCloseText: {
-        color: palette.neutral[0],
+        color: palette.text.onAccent,
         fontSize: 18,
         fontWeight: '600',
     },
@@ -686,7 +686,7 @@ const styles = StyleSheet.create({
         borderColor: palette.semantic.danger,
     },
     viewerButtonText: {
-        color: palette.neutral[0],
+        color: palette.text.onAccent,
         fontSize: 14,
         fontWeight: '600',
     },

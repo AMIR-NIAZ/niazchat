@@ -16,7 +16,8 @@ import {
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
-import { palette, radii, spacing } from '../../shared/theme';
+import { blur, palette, radii, spacing } from '../../shared/theme';
+import { GlassSurface } from '../../shared/components';
 import { isOwnMessage } from './messages-model';
 import type { ReplyPreview } from './messages-model';
 import { attachmentPreviewLabel } from '../attachments/attachment-labels';
@@ -663,7 +664,12 @@ export function MessageComposer(
                 </View>
             )}
 
-            <View style={styles.composer}>
+            <GlassSurface
+                tone="elevated"
+                intensity={blur.strong}
+                radius={radii.xl}
+                style={styles.composer}
+            >
                 <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Attach photo or file"
@@ -724,7 +730,7 @@ export function MessageComposer(
                         <Text style={styles.sendText}>➤</Text>
                     </Pressable>
                 )}
-            </View>
+            </GlassSurface>
 
             <Modal
                 visible={sheetOpen}
@@ -802,8 +808,10 @@ const styles = StyleSheet.create({
         gap: spacing.xs,
         paddingVertical: spacing.xs,
         paddingHorizontal: spacing.xs,
-        backgroundColor: palette.neutral[50],
-        borderRadius: radii.sm,
+        backgroundColor: palette.glass.elevated,
+        borderRadius: radii.md,
+        borderWidth: 1,
+        borderColor: palette.border.subtle,
         marginTop: spacing.xxs,
     },
     replyDivider: {
@@ -818,7 +826,7 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontWeight: '600',
     },
-    replySnippet: { color: palette.neutral[500], fontSize: 12 },
+    replySnippet: { color: palette.text.secondary, fontSize: 12 },
     replyClose: {
         width: 28,
         height: 28,
@@ -870,12 +878,14 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    trayRemoveText: { color: palette.neutral[0], fontSize: 10 },
+    trayRemoveText: { color: palette.text.onAccent, fontSize: 10 },
     composer: {
         flexDirection: 'row',
         alignItems: 'flex-end',
         gap: spacing.xs,
+        paddingHorizontal: spacing.xs,
         paddingVertical: spacing.xs,
+        marginTop: spacing.xxs,
     },
     attach: {
         width: 40,
@@ -883,7 +893,9 @@ const styles = StyleSheet.create({
         borderRadius: 20,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: palette.neutral[100],
+        backgroundColor: palette.glass.accent,
+        borderWidth: 1,
+        borderColor: palette.border.subtle,
     },
     attachDisabled: { opacity: 0.5 },
     attachText: {
@@ -897,12 +909,12 @@ const styles = StyleSheet.create({
         minHeight: 40,
         maxHeight: 120,
         borderWidth: 1,
-        borderColor: palette.neutral[300],
+        borderColor: palette.border.subtle,
         borderRadius: radii.lg,
         paddingHorizontal: spacing.sm,
         paddingVertical: spacing.xs + 2,
-        color: palette.neutral[900],
-        backgroundColor: palette.neutral[0],
+        color: palette.text.primary,
+        backgroundColor: palette.glass.highlight,
         textAlignVertical: 'center',
     },
     send: {
@@ -915,7 +927,7 @@ const styles = StyleSheet.create({
     sendActive: { backgroundColor: palette.primary[500] },
     sendInactive: { backgroundColor: palette.neutral[300] },
     micActive: { backgroundColor: palette.primary[100] },
-    sendText: { color: palette.neutral[0], fontSize: 16 },
+    sendText: { color: palette.text.onAccent, fontSize: 16 },
     micText: { fontSize: 17 },
     draftRow: {
         flexDirection: 'row',
@@ -924,9 +936,9 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.xs,
         paddingHorizontal: spacing.xs,
         borderRadius: radii.lg,
-        backgroundColor: palette.neutral[50],
+        backgroundColor: palette.glass.elevated,
         borderWidth: 1,
-        borderColor: palette.neutral[100],
+        borderColor: palette.border.subtle,
     },
     draftPlay: {
         width: 34,
@@ -971,11 +983,13 @@ const styles = StyleSheet.create({
         justifyContent: 'flex-end',
     },
     sheetCard: {
-        backgroundColor: palette.neutral[0],
-        borderTopLeftRadius: radii.lg,
-        borderTopRightRadius: radii.lg,
+        backgroundColor: palette.elevated,
+        borderTopLeftRadius: radii.xl,
+        borderTopRightRadius: radii.xl,
         padding: spacing.md,
         gap: spacing.xxs,
+        borderWidth: 1,
+        borderColor: palette.border.subtle,
     },
     sheetTitle: {
         color: palette.neutral[500],
@@ -988,7 +1002,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.xs,
     },
     sheetAction: {
-        color: palette.neutral[900],
+        color: palette.text.primary,
         fontSize: 16,
         fontWeight: '500',
     },

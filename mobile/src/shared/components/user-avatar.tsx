@@ -14,17 +14,17 @@ import { palette } from '../theme';
  *   for a re-render, a chat reopen or an app restart.
  * - `recyclingKey` is the file name, so a recycled list row swaps the image
  *   instead of briefly showing the previous sender's face.
- * - No avatar / load failure → initial(s) on a color derived from `userId`,
- *   at the same size, so there is no gap and no layout shift.
+ * - No avatar / load failure → initial(s) on a purple accent derived from
+ *   `userId`, at the same size, so there is no gap and no layout shift.
  */
 
 const FALLBACK_COLORS = [
     palette.primary[500],
-    '#7E57C2',
-    '#26A69A',
-    '#EF6C00',
-    '#5C6BC0',
-    '#8D6E63',
+    '#5B3A8E',
+    '#8B57D6',
+    '#3D2A57',
+    '#A970F5',
+    '#4C2C73',
 ] as const;
 
 export function avatarFallbackColor(userId: number): string {
@@ -119,9 +119,11 @@ const styles = StyleSheet.create({
     fallback: {
         alignItems: 'center',
         justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: palette.border.strong,
     },
     initials: {
-        color: palette.neutral[0],
+        color: palette.text.onAccent,
         fontWeight: '700',
     },
 });
