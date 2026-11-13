@@ -11,11 +11,11 @@ import {
     Modal,
     Platform,
     Pressable,
-    ScrollView,
     StyleSheet,
     Text,
     TextInput,
     View,
+    useWindowDimensions,
 } from 'react-native';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
@@ -30,15 +30,15 @@ import {
     spacing,
     typography,
 } from '../../../shared/components';
-import { ApiError } from '../../../core/api';
 import type { ReactionUserDto } from '../../../core/api';
 import { useAndroidKeyboardInset } from '../../../shared/hooks/use-android-keyboard-inset';
 import {
     DateSeparator,
     ForwardPicker,
     MessageBubble,
+    MessageBubblePreview,
     MessageComposer,
-    MessageReactionsSheet,
+    MessageReactionsCard,
     ScrollToBottomButton,
     UnreadDivider,
     GroupChatSubtitle,
@@ -52,8 +52,10 @@ import {
     firstUnreadMessageId,
     highestVisibleMessageId,
     pickReadTarget,
-    NO_MESSAGE_ACTIONS,
+    buildMessageMenuItems,
+    getBubbleAccessibilityActions,
     getMessageActions,
+    reactionChoices,
     isForwardable,
     isOwnMessage,
     pruneForwardSelection,
@@ -61,7 +63,10 @@ import {
     toReplyPreview,
     toggleForwardSelection,
 } from '../../../features/messages';
-import type { ChatMessage, MessageActions } from '../../../features/messages';
+import type {
+    ChatMessage,
+    MessageMenuActionId,
+} from '../../../features/messages';
 import type { LocalAttachment } from '../../../features/attachments';
 import {
     AttachmentViewer,
@@ -76,14 +81,9 @@ import {
     isPrivateChat,
     purgeChatFromCaches,
     setActiveChat,
-    useAddMemberByPhone,
-    useBanChatMember,
-    useBannedMembers,
-    useChatMembers,
     useLeaveChatRoomOnUnmount,
-    useLeaveGroup,
 } from '../../../features/chats';
-import type { ChatMemberRow, ChatRole } from '../../../features/chats';
+import type { ChatRole } from '../../../features/chats';
 import { useCurrentUserId } from '../../../features/auth';
 import {
     canOpenGroupSettings,
@@ -103,7 +103,12 @@ import {
     presenceLabel,
     useUserProfile,
 } from '../../../features/users';
-import { normalizeEmoji, useReactionEmojis } from '../../../features/reactions';
+import { useReactionEmojis } from '../../../features/reactions';
+import { useContextPopup } from '../../../shared/context-popup';
+import type {
+    ContextPopupConfig,
+    PopupRect,
+} from '../../../shared/context-popup';
 
 /**
  * Conversation screen (chat list → tap → this screen).
@@ -114,8 +119,8 @@ import { normalizeEmoji, useReactionEmojis } from '../../../features/reactions';
  *   user scrolls up; the inverted list keeps the newest messages at the bottom).
  * - Live messaging over `sendMessage`/`sendMessage:list`,
  *   `editMessage`/`editMessage:list`, `deleteMessage`/`deleteMessage:list`.
- * - Member management (add-by-phone, banned list) kept from the previous
- *   screen revision, now behind the header admin toggle.
+ * - Group management lives in the group-settings screens (admin tools and
+ *   banned users), reached from the group-info header.
  *
  * Unavailable server-side (not shown): member list for normal members, roles,
  * group rename, read receipts per user, reactions (not implemented in the app).
@@ -159,15 +164,12 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     const queryClient = useQueryClient();
     const insets = useSafeAreaInsets();
     const keyboard = useAndroidKeyboardInset(insets.bottom);
+    const popup = useContextPopup();
+    const window = useWindowDimensions();
     // Session-derived (access-token `sub`), numeric, and stable across profile
     // updates: a `['me']` refetch can never change or lose it.
     const currentUserId = useCurrentUserId();
     const conversation = useChatMessages(chatId, true, currentUserId);
-    const [adminPanelOpen, setAdminPanelOpen] = useState(false);
-    const [sheetTarget, setSheetTarget] = useState<ChatMessage | null>(null);
-    const [reactionsTarget, setReactionsTarget] = useState<ChatMessage | null>(
-        null,
-    );
     const reactionEmojis = useReactionEmojis();
     const [actionTarget, setActionTarget] = useState<ChatMessage | null>(null);
     const [actionDraft, setActionDraft] = useState('');
@@ -225,17 +227,6 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     const myRole: ChatRole | null = info?.myRole ?? null;
     /** `manager` only — chat `admin` is NOT the owner. */
     const isOwner = isGroupOwner(myRole);
-
-    const sheetActions = useMemo(
-        () =>
-            sheetTarget === null
-                ? NO_MESSAGE_ACTIONS
-                : getMessageActions(sheetTarget, {
-                      currentUserId,
-                      canDeleteOthers: isGroup && isOwner,
-                  }),
-        [sheetTarget, currentUserId, isGroup, isOwner],
-    );
 
     /**
      * Ascending list with day separators and a one-shot unread divider before
@@ -402,12 +393,16 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     ensureActiveRef.current = conversation.ensureActive;
     const releaseActiveRef = useRef(conversation.releaseActive);
     releaseActiveRef.current = conversation.releaseActive;
+    // Blurring the chat closes the menu: the anchor no longer exists.
+    const popupCloseRef = useRef(popup.close);
+    popupCloseRef.current = popup.close;
     useFocusEffect(
         useCallback((): (() => void) => {
             setScreenFocused(true);
             ensureActiveRef.current();
             return (): void => {
                 setScreenFocused(false);
+                popupCloseRef.current();
                 releaseActiveRef.current();
             };
         }, []),
@@ -515,6 +510,13 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
             setReplyTarget(null);
         }
     }, [messages, replyTarget]);
+
+    // Leaving the screen (or switching chats) never leaves a menu behind.
+    useEffect((): (() => void) => {
+        return (): void => {
+            popup.close();
+        };
+    }, [popup, chatId]);
 
     // A viewer showing a message deleted by anyone closes with it, so video
     // playback never continues for a message that no longer exists.
@@ -717,7 +719,7 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
 
     const beginSelection = (message: ChatMessage): void => {
         if (!isForwardable(message) || message.id === null) return;
-        setSheetTarget(null);
+        popup.close();
         setSelecting(true);
         setSelectedIds(new Set([message.id]));
     };
@@ -739,7 +741,7 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
 
     const handleOpenForward = (message: ChatMessage | null): void => {
         if (message === null || message.id === null) return;
-        setSheetTarget(null);
+        popup.close();
         setSelecting(true);
         setSelectedIds(new Set([message.id]));
         setForwardOpen(true);
@@ -763,6 +765,301 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                     ? 'Forwarded to 1 chat'
                     : `Forwarded to ${successCount} chats`,
             );
+        }
+    };
+
+    /// Floating message popups -------------------------------------------------
+
+    const startEditing = (target: ChatMessage): void => {
+        setActionTarget(target);
+        setActionDraft(target.content ?? '');
+        setActionError(null);
+    };
+
+    const shareMessageFile = (target: ChatMessage): void => {
+        const document = target.attachments.find(
+            (attachment) =>
+                attachment.kind === 'file' && attachment.id !== null,
+        );
+        if (document === undefined || document.id === null) return;
+        void downloadAttachment(
+            {
+                id: document.id,
+                name: document.name,
+                mimeType: document.mimeType,
+            },
+            undefined,
+        )
+            .then((path) =>
+                shareLocalFile(
+                    path,
+                    mimeForFileName(document.name, document.mimeType),
+                    document.name,
+                ),
+            )
+            .catch((error: unknown) =>
+                Alert.alert(
+                    'Could not share file',
+                    error instanceof Error ? error.message : 'Share failed.',
+                ),
+            );
+    };
+
+    const deleteMessage = (target: ChatMessage): void => {
+        if (target.id === null || conversation.mutating) {
+            return;
+        }
+        const deletingOtherMember = !isOwnMessage(
+            currentUserId,
+            target.senderId,
+        );
+        const hasVoice = target.attachments.some(
+            (attachment) => attachment.kind === 'voice',
+        );
+        const hasAttachments = target.attachments.length > 0;
+        const explanation = deletingOtherMember
+            ? 'This message belongs to another member and will be removed for everyone in the group.'
+            : hasVoice
+              ? 'This voice message will be removed for everyone.'
+              : hasAttachments
+                ? 'This message and its attachments will be removed for everyone.'
+                : 'This message will be removed for everyone.';
+        Alert.alert(
+            deletingOtherMember ? 'Delete for everyone?' : 'Delete message?',
+            explanation,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: (): void => {
+                        const messageId = target.id;
+                        if (messageId === null) {
+                            return;
+                        }
+                        if (viewer?.message.id === messageId) {
+                            setViewer(null);
+                        }
+                        if (
+                            target.attachments.some(
+                                (attachment) =>
+                                    attachment.id !== null &&
+                                    attachment.id ===
+                                        getVoicePlayback().attachmentId,
+                            )
+                        ) {
+                            stopVoice();
+                        }
+                        void conversation
+                            .remove(messageId)
+                            .then((): void => {
+                                for (const attachment of target.attachments) {
+                                    if (attachment.id === null) {
+                                        continue;
+                                    }
+                                    void deleteCachedAttachment(attachment.id);
+                                    if (attachment.kind === 'voice') {
+                                        const path = voiceCachePath(
+                                            attachment.id,
+                                            attachment.mimeType,
+                                        );
+                                        if (path !== null) {
+                                            void deleteVoiceFile(path);
+                                        }
+                                    }
+                                }
+                            })
+                            .catch((error: unknown) =>
+                                Alert.alert(
+                                    'Could not delete message',
+                                    error instanceof Error
+                                        ? error.message
+                                        : 'Delete failed.',
+                                ),
+                            );
+                    },
+                },
+            ],
+        );
+    };
+
+    const performMessageAction = (
+        target: ChatMessage,
+        action: MessageMenuActionId,
+    ): void => {
+        switch (action) {
+            case 'reply':
+                if (target.status === 'sent') {
+                    setReplyTarget(target);
+                }
+                return;
+            case 'forward':
+                handleOpenForward(target);
+                return;
+            case 'select':
+                beginSelection(target);
+                return;
+            case 'share':
+                shareMessageFile(target);
+                return;
+            case 'edit':
+                startEditing(target);
+                return;
+            case 'delete':
+                deleteMessage(target);
+                return;
+        }
+    };
+
+    /**
+     * The popup's whole content, computed synchronously at press time. Every
+     * action runs only after the popup is gone; the host owns that sequencing.
+     */
+    const buildMessageMenuConfig = (
+        message: ChatMessage,
+        anchor: PopupRect,
+        options: { showPreview?: boolean | undefined } = {},
+    ): ContextPopupConfig => {
+        const mineMessage = isOwnMessage(currentUserId, message.senderId);
+        const actions = getMessageActions(message, {
+            currentUserId,
+            canDeleteOthers: isGroup && isOwner,
+        });
+        const items = buildMessageMenuItems(actions, {
+            onReply: (): void => performMessageAction(message, 'reply'),
+            onForward: (): void => performMessageAction(message, 'forward'),
+            onSelect: (): void => performMessageAction(message, 'select'),
+            onShare: (): void => performMessageAction(message, 'share'),
+            onEdit: (): void => performMessageAction(message, 'edit'),
+            onDelete: (): void => performMessageAction(message, 'delete'),
+        });
+        const messageId = message.id;
+        const canReact =
+            message.status === 'sent' &&
+            messageId !== null &&
+            !message.isDeleted;
+        const reactions = canReact
+            ? reactionChoices(reactionEmojis, message.myReaction).map(
+                  (choice) => ({
+                      ...choice,
+                      onPress: (): void => {
+                          void conversation.toggleReaction(
+                              messageId,
+                              choice.emoji,
+                          );
+                      },
+                  }),
+              )
+            : undefined;
+        const showPreview = options.showPreview !== false;
+        return {
+            anchor,
+            align: mineMessage ? 'end' : 'start',
+            actions: items,
+            ...(reactions === undefined ? {} : { reactions }),
+            ...(showPreview
+                ? {
+                      preview: (
+                          <MessageBubblePreview
+                              message={message}
+                              mine={mineMessage}
+                              isGroup={isGroup}
+                              currentUserId={currentUserId}
+                              showSenderName={isGroup && !mineMessage}
+                              showAvatar={false}
+                              width={anchor.width}
+                          />
+                      ),
+                  }
+                : {}),
+            accessibilityLabel: 'Message actions',
+        };
+    };
+
+    const openMessageMenu = (message: ChatMessage, anchor: PopupRect): void => {
+        if (message.status !== 'sent' || message.id === null) {
+            return;
+        }
+        popup.open(buildMessageMenuConfig(message, anchor));
+    };
+
+    const handleOpenReactor = (user: ReactionUserDto): void => {
+        // Close first, navigate afterwards: the overlay must be gone before the
+        // profile screen mounts.
+        popup.close((): void => {
+            openUserProfile({
+                userId: user.userId,
+                name: user.name,
+                avatar: user.avatars[0] ?? null,
+                isSelf:
+                    currentUserId !== null &&
+                    Number(user.userId) === Number(currentUserId),
+            });
+        });
+    };
+
+    const openReactionsList = (message: ChatMessage): void => {
+        if (message.id === null) return;
+        popup.open({
+            anchor: { x: 0, y: 0, width: 1, height: 1 },
+            center: {
+                width: Math.min(window.width - spacing.lg, 360),
+                height: Math.round(window.height * 0.6),
+                content: (
+                    <MessageReactionsCard
+                        chatId={chatId}
+                        message={message}
+                        currentUserId={currentUserId}
+                        onOpenUser={handleOpenReactor}
+                    />
+                ),
+            },
+            accessibilityLabel: 'Reactions',
+        });
+    };
+
+    const accessibilityActionsFor = (
+        message: ChatMessage,
+    ): { name: string; label: string }[] => {
+        const actions = getMessageActions(message, {
+            currentUserId,
+            canDeleteOthers: isGroup && isOwner,
+        });
+        return getBubbleAccessibilityActions(
+            actions,
+            message.status === 'sent' &&
+                message.id !== null &&
+                !message.isDeleted,
+        );
+    };
+
+    const handleBubbleAccessibilityAction = (
+        message: ChatMessage,
+        name: string,
+    ): void => {
+        if (name === 'react') {
+            // No touch anchor available: open the menu in the middle of the
+            // screen without a lifted copy so the emoji row is reachable.
+            const anchor: PopupRect = {
+                x: Math.max(0, Math.round(window.width / 2) - 2),
+                y: Math.max(0, Math.round(window.height / 2) - 2),
+                width: 4,
+                height: 4,
+            };
+            popup.open(
+                buildMessageMenuConfig(message, anchor, {
+                    showPreview: false,
+                }),
+            );
+            return;
+        }
+        if (
+            name === 'reply' ||
+            name === 'forward' ||
+            name === 'edit' ||
+            name === 'delete'
+        ) {
+            performMessageAction(message, name);
         }
     };
 
@@ -818,21 +1115,9 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
               })
             : null;
 
-    /**
-     * Runs only after the backend confirms the leave: drop the list row and every
-     * conversation cache for this chat, then replace the screen so Back cannot
-     * reopen the group from stale data.
-     */
-    const handleLeftGroup = (): void => {
-        purgeChatFromCaches(queryClient, chatId);
-        setAdminPanelOpen(false);
-        router.replace('/(app)');
-    };
-
     /** Removed by an owner/admin while this chat (or the group panel) is open. */
     const handleRemovedFromGroup = useCallback((): void => {
         purgeChatFromCaches(queryClient, chatId);
-        setAdminPanelOpen(false);
         Alert.alert('Removed from group', 'You were removed from this group');
         router.replace('/(app)');
     }, [queryClient, chatId]);
@@ -1012,29 +1297,6 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                     ) : (
                         headerIdentity
                     )}
-                    {isGroup && (
-                        <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel="Open chat admin panel"
-                            style={styles.pillButton}
-                            onPress={(): void => setAdminPanelOpen(true)}
-                        >
-                            <Text style={styles.pillText}>Admin</Text>
-                        </Pressable>
-                    )}
-                    {settingsVisible && (
-                        <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel="Group settings"
-                            style={({ pressed }) => [
-                                styles.iconButton,
-                                pressed && styles.pressed,
-                            ]}
-                            onPress={openGroupSettings}
-                        >
-                            <Text style={styles.gearGlyph}>⚙</Text>
-                        </Pressable>
-                    )}
                 </GlassHeader>
             )}
 
@@ -1191,15 +1453,25 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                                     othersLastSeenId={
                                         detail?.othersLastSeenId ?? null
                                     }
-                                    // Any confirmed message can be replied to;
-                                    // pending/failed bubbles cannot.
-                                    onLongPress={
-                                        !selecting &&
-                                        message.status === 'sent' &&
-                                        message.id !== null
-                                            ? (): void =>
-                                                  setSheetTarget(message)
-                                            : undefined
+                                    // Tap or hold on the bubble opens the
+                                    // floating menu; pending/failed bubbles
+                                    // keep their own retry/cancel actions.
+                                    onOpenMenu={
+                                        selecting ? undefined : openMessageMenu
+                                    }
+                                    accessibilityActions={
+                                        selecting
+                                            ? undefined
+                                            : accessibilityActionsFor(message)
+                                    }
+                                    onAccessibilityAction={
+                                        selecting
+                                            ? undefined
+                                            : (name): void =>
+                                                  handleBubbleAccessibilityAction(
+                                                      message,
+                                                      name,
+                                                  )
                                     }
                                     onReplyPress={
                                         selecting ? undefined : handleReplyPress
@@ -1261,8 +1533,7 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                                     onOpenReactions={
                                         selecting
                                             ? undefined
-                                            : (message): void =>
-                                                  setReactionsTarget(message)
+                                            : openReactionsList
                                     }
                                 />
                             );
@@ -1309,199 +1580,6 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                 onCancelReply={(): void => setReplyTarget(null)}
                 onTextChange={typing.onChangeText}
                 onBlur={typing.onBlur}
-            />
-
-            <MessageActionSheet
-                target={sheetTarget}
-                actions={sheetActions}
-                reactionEmojis={reactionEmojis}
-                myReaction={sheetTarget?.myReaction ?? null}
-                canReact={
-                    sheetTarget !== null &&
-                    sheetTarget.id !== null &&
-                    sheetTarget.status === 'sent' &&
-                    !sheetTarget.isDeleted
-                }
-                reacting={
-                    sheetTarget?.id !== null &&
-                    sheetTarget?.id !== undefined &&
-                    conversation.reactingIds.has(sheetTarget.id)
-                }
-                onReact={(emoji): void => {
-                    const target = sheetTarget;
-                    setSheetTarget(null);
-                    if (target === null || target.id === null) return;
-                    void conversation.toggleReaction(target.id, emoji);
-                }}
-                onForward={(): void => handleOpenForward(sheetTarget)}
-                onSelect={(): void => {
-                    const target = sheetTarget;
-                    if (target !== null) beginSelection(target);
-                }}
-                onReply={(): void => {
-                    const target = sheetTarget;
-                    setSheetTarget(null);
-                    if (
-                        target === null ||
-                        target.id === null ||
-                        target.status !== 'sent'
-                    ) {
-                        return;
-                    }
-                    setReplyTarget(target);
-                }}
-                onEdit={(): void => {
-                    onActionPress(sheetTarget);
-                    setSheetTarget(null);
-                }}
-                onShare={(): void => {
-                    const target = sheetTarget;
-                    setSheetTarget(null);
-                    if (target === null) return;
-                    const document = target.attachments.find(
-                        (attachment) =>
-                            attachment.kind === 'file' &&
-                            attachment.id !== null,
-                    );
-                    if (document === undefined || document.id === null) return;
-                    void downloadAttachment(
-                        {
-                            id: document.id,
-                            name: document.name,
-                            mimeType: document.mimeType,
-                        },
-                        undefined,
-                    )
-                        .then((path) =>
-                            shareLocalFile(
-                                path,
-                                mimeForFileName(
-                                    document.name,
-                                    document.mimeType,
-                                ),
-                                document.name,
-                            ),
-                        )
-                        .catch((error: unknown) =>
-                            Alert.alert(
-                                'Could not share file',
-                                error instanceof Error
-                                    ? error.message
-                                    : 'Share failed.',
-                            ),
-                        );
-                }}
-                onDelete={(): void => {
-                    const target = sheetTarget;
-                    setSheetTarget(null);
-                    if (
-                        target === null ||
-                        target.id === null ||
-                        conversation.mutating
-                    ) {
-                        return;
-                    }
-                    const deletingOtherMember = !isOwnMessage(
-                        currentUserId,
-                        target.senderId,
-                    );
-                    const hasVoice = target.attachments.some(
-                        (attachment) => attachment.kind === 'voice',
-                    );
-                    const hasAttachments = target.attachments.length > 0;
-                    const explanation = deletingOtherMember
-                        ? 'This message belongs to another member and will be removed for everyone in the group.'
-                        : hasVoice
-                          ? 'This voice message will be removed for everyone.'
-                          : hasAttachments
-                            ? 'This message and its attachments will be removed for everyone.'
-                            : 'This message will be removed for everyone.';
-                    Alert.alert(
-                        deletingOtherMember
-                            ? 'Delete for everyone?'
-                            : 'Delete message?',
-                        explanation,
-                        [
-                            { text: 'Cancel', style: 'cancel' },
-                            {
-                                text: 'Delete',
-                                style: 'destructive',
-                                onPress: (): void => {
-                                    const messageId = target.id;
-                                    if (messageId === null) {
-                                        return;
-                                    }
-                                    if (viewer?.message.id === messageId) {
-                                        setViewer(null);
-                                    }
-                                    if (
-                                        target.attachments.some(
-                                            (attachment) =>
-                                                attachment.id !== null &&
-                                                attachment.id ===
-                                                    getVoicePlayback()
-                                                        .attachmentId,
-                                        )
-                                    ) {
-                                        stopVoice();
-                                    }
-                                    void conversation
-                                        .remove(messageId)
-                                        .then((): void => {
-                                            for (const attachment of target.attachments) {
-                                                if (attachment.id === null) {
-                                                    continue;
-                                                }
-                                                void deleteCachedAttachment(
-                                                    attachment.id,
-                                                );
-                                                if (
-                                                    attachment.kind === 'voice'
-                                                ) {
-                                                    const path = voiceCachePath(
-                                                        attachment.id,
-                                                        attachment.mimeType,
-                                                    );
-                                                    if (path !== null) {
-                                                        void deleteVoiceFile(
-                                                            path,
-                                                        );
-                                                    }
-                                                }
-                                            }
-                                        })
-                                        .catch((error: unknown) =>
-                                            Alert.alert(
-                                                'Could not delete message',
-                                                error instanceof Error
-                                                    ? error.message
-                                                    : 'Delete failed.',
-                                            ),
-                                        );
-                                },
-                            },
-                        ],
-                    );
-                }}
-                onDismiss={(): void => setSheetTarget(null)}
-            />
-
-            <MessageReactionsSheet
-                chatId={chatId}
-                target={reactionsTarget}
-                currentUserId={currentUserId}
-                onClose={(): void => setReactionsTarget(null)}
-                onOpenUser={(user: ReactionUserDto): void => {
-                    setReactionsTarget(null);
-                    openUserProfile({
-                        userId: user.userId,
-                        name: user.name,
-                        avatar: user.avatars[0] ?? null,
-                        isSelf:
-                            currentUserId !== null &&
-                            Number(user.userId) === Number(currentUserId),
-                    });
-                }}
             />
 
             <MessageActionModal
@@ -1561,29 +1639,8 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                 onClose={(): void => setViewer(null)}
             />
 
-            {isGroup && (
-                <AdminPanel
-                    visible={adminPanelOpen}
-                    chatId={chatId}
-                    isGroup={isGroup}
-                    myRole={myRole}
-                    isOwner={isOwner}
-                    currentUserId={currentUserId}
-                    onClose={(): void => setAdminPanelOpen(false)}
-                    onLeft={handleLeftGroup}
-                />
-            )}
         </Screen>
     );
-
-    function onActionPress(message: ChatMessage | null): void {
-        if (message === null) {
-            return;
-        }
-        setActionTarget(message);
-        setActionDraft(message.content ?? '');
-        setActionError(null);
-    }
 }
 
 type List = ListChunk;
@@ -1592,184 +1649,6 @@ type List = ListChunk;
 interface ChatViewToken {
     item?: List | undefined;
 }
-
-/// Long-press action sheet (Reply / Edit / Delete / Cancel) --------------------
-
-interface MessageActionSheetProps {
-    target: ChatMessage | null;
-    actions: MessageActions;
-    reactionEmojis: string[];
-    myReaction: string | null;
-    canReact: boolean;
-    reacting: boolean;
-    onReact: (emoji: string) => void;
-    onReply: () => void;
-    onEdit: () => void;
-    onDelete: () => void;
-    onForward: () => void;
-    onShare: () => void;
-    onSelect: () => void;
-    onDismiss: () => void;
-}
-
-function MessageActionSheet(
-    props: MessageActionSheetProps,
-): React.ReactElement {
-    if (props.target === null) {
-        return <View />;
-    }
-    return (
-        <Modal
-            visible={true}
-            transparent={true}
-            animationType="slide"
-            onRequestClose={props.onDismiss}
-        >
-            <Pressable style={styles.sheetBackdrop} onPress={props.onDismiss}>
-                <Pressable style={styles.sheetCard}>
-                    {props.canReact && (
-                        <View style={styles.quickReactions}>
-                            <ScrollView
-                                horizontal={true}
-                                showsHorizontalScrollIndicator={false}
-                                contentContainerStyle={
-                                    styles.quickReactionsContent
-                                }
-                            >
-                                {props.reactionEmojis.map((emoji) => {
-                                    const selected =
-                                        props.myReaction !== null &&
-                                        normalizeEmoji(props.myReaction) ===
-                                            normalizeEmoji(emoji);
-                                    return (
-                                        <Pressable
-                                            key={emoji}
-                                            accessibilityRole="button"
-                                            accessibilityLabel={`React ${emoji}`}
-                                            accessibilityState={{ selected }}
-                                            disabled={props.reacting}
-                                            onPress={(): void =>
-                                                props.onReact(emoji)
-                                            }
-                                            style={({ pressed }) => [
-                                                styles.quickReaction,
-                                                selected &&
-                                                    styles.quickReactionSelected,
-                                                (pressed || props.reacting) &&
-                                                    styles.pressed,
-                                            ]}
-                                        >
-                                            <Text
-                                                style={
-                                                    styles.quickReactionEmoji
-                                                }
-                                            >
-                                                {emoji}
-                                            </Text>
-                                        </Pressable>
-                                    );
-                                })}
-                                {props.reacting && (
-                                    <ActivityIndicator
-                                        size="small"
-                                        color={palette.primary[500]}
-                                    />
-                                )}
-                            </ScrollView>
-                        </View>
-                    )}
-                    {props.actions.reply && (
-                        <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel="Reply to message"
-                            style={styles.sheetButton}
-                            onPress={props.onReply}
-                        >
-                            <Text style={styles.sheetActionText}>Reply</Text>
-                        </Pressable>
-                    )}
-                    {props.actions.forward && (
-                        <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel="Forward"
-                            style={styles.sheetButton}
-                            onPress={props.onForward}
-                        >
-                            <Text style={styles.sheetActionText}>Forward</Text>
-                        </Pressable>
-                    )}
-                    {props.actions.select && (
-                        <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel="Select messages"
-                            style={styles.sheetButton}
-                            onPress={props.onSelect}
-                        >
-                            <Text style={styles.sheetActionText}>Select</Text>
-                        </Pressable>
-                    )}
-                    {props.actions.share && (
-                        <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel="Share file"
-                            style={styles.sheetButton}
-                            onPress={props.onShare}
-                        >
-                            <Text style={styles.sheetActionText}>Share</Text>
-                        </Pressable>
-                    )}
-                    {props.actions.edit && (
-                        <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel={
-                                props.actions.editLabel ?? 'Edit'
-                            }
-                            style={styles.sheetButton}
-                            onPress={props.onEdit}
-                        >
-                            <Text style={styles.sheetActionText}>
-                                {props.actions.editLabel ?? 'Edit'}
-                            </Text>
-                        </Pressable>
-                    )}
-                    {props.actions.delete && !props.actions.deleteOthers && (
-                        <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel="Delete message"
-                            style={styles.sheetButton}
-                            onPress={props.onDelete}
-                        >
-                            <Text style={styles.sheetDeleteText}>Delete</Text>
-                        </Pressable>
-                    )}
-                    {props.actions.deleteOthers && (
-                        <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel="Delete message for everyone"
-                            style={styles.sheetButton}
-                            onPress={props.onDelete}
-                        >
-                            <Text style={styles.sheetDeleteText}>
-                                Delete for everyone
-                            </Text>
-                        </Pressable>
-                    )}
-                    <View style={styles.sheetDivider} />
-                    <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Cancel"
-                        style={styles.sheetButton}
-                        onPress={props.onDismiss}
-                    >
-                        <Text style={styles.sheetCancelText}>Cancel</Text>
-                    </Pressable>
-                </Pressable>
-            </Pressable>
-        </Modal>
-    );
-}
-
-/// Message edit modal ----------------------------------------------------------
 
 interface MessageActionModalProps {
     visible: boolean;
@@ -1852,346 +1731,6 @@ function MessageActionModal(
             </Pressable>
         </Modal>
     );
-}
-
-/// Admin panel (member add by phone + banned members; previously inline) --------
-
-interface AdminPanelProps {
-    visible: boolean;
-    chatId: number;
-    /** Leave is a group-only action (private chats have no membership row). */
-    isGroup: boolean;
-    /** Caller's own chat role (`manager` = owner, `admin` ≠ owner). */
-    myRole: ChatRole | null;
-    /** Owner-only moderation UI; the backend enforces the same rule. */
-    isOwner: boolean;
-    currentUserId: number | null;
-    onClose: () => void;
-    /** Called only after the backend confirms the membership removal. */
-    onLeft: () => void;
-}
-
-function AdminPanel({
-    visible,
-    chatId,
-    isGroup,
-    myRole,
-    isOwner,
-    currentUserId,
-    onClose,
-    onLeft,
-}: AdminPanelProps): React.ReactElement {
-    const bans = useBannedMembers(chatId, visible);
-    const addMember = useAddMemberByPhone();
-    const leaveGroup = useLeaveGroup();
-    const members = useChatMembers(chatId, visible && isGroup && isOwner);
-    const banMember = useBanChatMember(chatId);
-    const [phone, setPhone] = useState('+98');
-    const [addFeedback, setAddFeedback] = useState<string | null>(null);
-    const [leaveError, setLeaveError] = useState<string | null>(null);
-    const [banFeedback, setBanFeedback] = useState<string | null>(null);
-    const leaveInFlightRef = useRef(false);
-    const banInFlightRef = useRef(false);
-
-    const performBan = async (member: ChatMemberRow): Promise<void> => {
-        if (banInFlightRef.current || banMember.isPending) {
-            return;
-        }
-        banInFlightRef.current = true;
-        setBanFeedback(null);
-        try {
-            await banMember.mutateAsync(member.memberId);
-            setBanFeedback(`${member.name} was banned from the group.`);
-        } catch (error) {
-            setBanFeedback(
-                error instanceof Error ? error.message : 'Ban failed.',
-            );
-        } finally {
-            banInFlightRef.current = false;
-        }
-    };
-
-    const confirmBan = (member: ChatMemberRow): void => {
-        if (banMember.isPending || banInFlightRef.current) {
-            return;
-        }
-        Alert.alert(
-            `Ban ${member.name}?`,
-            'They will be removed from the group, disconnected from this chat and unable to rejoin until unbanned. Their messages stay in the conversation.',
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Ban',
-                    style: 'destructive',
-                    onPress: (): void => {
-                        void performBan(member);
-                    },
-                },
-            ],
-        );
-    };
-
-    /** Server confirmed (or membership is already gone): clear local access. */
-    const finishLeave = (): void => {
-        onLeft();
-        Alert.alert('Left group', 'You are no longer a member of this group.');
-    };
-
-    const performLeave = async (): Promise<void> => {
-        if (leaveInFlightRef.current || leaveGroup.isPending) {
-            return;
-        }
-        leaveInFlightRef.current = true;
-        setLeaveError(null);
-        try {
-            await leaveGroup.mutateAsync(chatId);
-            finishLeave();
-        } catch (error) {
-            // 403/404 = the caller is already out (or no longer allowed in):
-            // membership is gone server-side, so drop local access too.
-            if (
-                error instanceof ApiError &&
-                (error.statusCode === 403 || error.statusCode === 404)
-            ) {
-                finishLeave();
-                return;
-            }
-            setLeaveError(
-                error instanceof Error
-                    ? error.message
-                    : 'Could not leave the group.',
-            );
-        } finally {
-            leaveInFlightRef.current = false;
-        }
-    };
-
-    const confirmLeave = (): void => {
-        if (leaveGroup.isPending || leaveInFlightRef.current) {
-            return;
-        }
-        Alert.alert(
-            'Leave group?',
-            'You will be removed from this group and will no longer receive its messages. An admin will have to add you again.',
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Leave',
-                    style: 'destructive',
-                    onPress: (): void => {
-                        void performLeave();
-                    },
-                },
-            ],
-        );
-    };
-
-    return (
-        <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-            <Screen style={styles.adminScreen} withTopInset={true}>
-                <View style={styles.adminHeader}>
-                    <AppText variant="title">Chat admin</AppText>
-                    <Pressable
-                        accessibilityRole="button"
-                        onPress={onClose}
-                        style={styles.pillButton}
-                    >
-                        <Text style={styles.pillText}>Close</Text>
-                    </Pressable>
-                </View>
-
-                <View style={styles.section}>
-                    <AppText variant="title">Add member (by phone)</AppText>
-                    <TextInput
-                        style={styles.input}
-                        value={phone}
-                        onChangeText={setPhone}
-                        keyboardType="phone-pad"
-                        placeholder="+989123456789"
-                        placeholderTextColor={palette.neutral[300]}
-                    />
-                    <FormButtonSmall
-                        label={addMember.isPending ? 'Adding…' : 'Add member'}
-                        onPress={(): void => {
-                            setAddFeedback(null);
-                            void addMember
-                                .mutateAsync({
-                                    groupId: chatId,
-                                    phone: phone.trim(),
-                                })
-                                .then(() => setAddFeedback('Member added.'))
-                                .catch((error: unknown) =>
-                                    setAddFeedback(
-                                        error instanceof Error
-                                            ? error.message
-                                            : 'Failed.',
-                                    ),
-                                );
-                        }}
-                    />
-                    {addFeedback !== null && (
-                        <Text style={[typography.caption, styles.feedback]}>
-                            {addFeedback}
-                        </Text>
-                    )}
-                </View>
-
-                {isOwner && isGroup && (
-                    <View style={[styles.section, styles.sectionFlex]}>
-                        <AppText variant="title">Members</AppText>
-                        {members.isPending ? (
-                            <ActivityIndicator size="small" />
-                        ) : members.isError ? (
-                            <AppText variant="caption" style={styles.feedback}>
-                                {members.error.message}
-                            </AppText>
-                        ) : (
-                            <FlatList
-                                data={(members.data ?? []).filter(
-                                    (member) =>
-                                        !isOwnMessage(
-                                            currentUserId,
-                                            member.userId,
-                                        ) && member.role !== 'manager',
-                                )}
-                                keyExtractor={(item): string =>
-                                    String(item.memberId)
-                                }
-                                ListEmptyComponent={
-                                    <AppText variant="caption">
-                                        No other members to moderate.
-                                    </AppText>
-                                }
-                                renderItem={({ item }): React.ReactElement => (
-                                    <View style={styles.memberRow}>
-                                        <View style={styles.memberBody}>
-                                            <Text
-                                                style={typography.body}
-                                                numberOfLines={1}
-                                            >
-                                                {item.name}
-                                            </Text>
-                                            <Text
-                                                style={typography.caption}
-                                                numberOfLines={1}
-                                            >
-                                                {item.username === null
-                                                    ? `#${item.userId}`
-                                                    : `@${item.username}`}
-                                                {item.role === 'admin'
-                                                    ? ' · admin'
-                                                    : ''}
-                                            </Text>
-                                        </View>
-                                        <FormButtonSmall
-                                            intent="danger"
-                                            label={
-                                                banMember.isPending &&
-                                                banMember.variables ===
-                                                    item.memberId
-                                                    ? 'Banning…'
-                                                    : 'Ban'
-                                            }
-                                            disabled={banMember.isPending}
-                                            onPress={(): void => {
-                                                confirmBan(item);
-                                            }}
-                                        />
-                                    </View>
-                                )}
-                            />
-                        )}
-                        {banFeedback !== null && (
-                            <Text style={[typography.caption, styles.feedback]}>
-                                {banFeedback}
-                            </Text>
-                        )}
-                    </View>
-                )}
-
-                <View style={[styles.section, styles.sectionFlex]}>
-                    <AppText variant="title">Banned members</AppText>
-                    {bans.isPending ? (
-                        <ActivityIndicator size="small" />
-                    ) : bans.isError ? (
-                        <AppText variant="caption" style={styles.feedback}>
-                            {bansErrorText(bans.error)}
-                        </AppText>
-                    ) : (bans.data?.length ?? 0) === 0 ? (
-                        <AppText variant="caption">No banned members.</AppText>
-                    ) : (
-                        <FlatList
-                            data={bans.data}
-                            keyExtractor={(item): string => String(item.id)}
-                            renderItem={({ item }): React.ReactElement => (
-                                <View style={styles.bannedRow}>
-                                    <Text style={typography.body}>
-                                        {item.user.name} · {item.user.phone}
-                                    </Text>
-                                </View>
-                            )}
-                        />
-                    )}
-                </View>
-
-                {isGroup && (
-                    <View style={styles.section}>
-                        <AppText variant="title">Membership</AppText>
-                        {isGroupOwner(myRole) ? (
-                            <AppText variant="caption" style={styles.feedback}>
-                                The group owner cannot leave this group.
-                                Ownership transfer is not supported yet.
-                            </AppText>
-                        ) : myRole === null ? (
-                            <AppText variant="caption" style={styles.feedback}>
-                                {
-                                    'Your role here is unknown, so leaving is disabled.'
-                                }
-                            </AppText>
-                        ) : (
-                            <>
-                                <AppText
-                                    variant="caption"
-                                    style={styles.feedback}
-                                >
-                                    Leaving removes you from this group&apos;s
-                                    membership; you will stop receiving its
-                                    messages.
-                                </AppText>
-                                <FormButtonSmall
-                                    intent="danger"
-                                    label={
-                                        leaveGroup.isPending
-                                            ? 'Leaving…'
-                                            : 'Leave group'
-                                    }
-                                    disabled={leaveGroup.isPending}
-                                    onPress={confirmLeave}
-                                />
-                                {leaveError !== null && (
-                                    <Text
-                                        style={[
-                                            typography.caption,
-                                            styles.leaveError,
-                                        ]}
-                                    >
-                                        {leaveError}
-                                    </Text>
-                                )}
-                            </>
-                        )}
-                    </View>
-                )}
-            </Screen>
-        </Modal>
-    );
-}
-
-function bansErrorText(error: Error | null): string {
-    const status = (error as { statusCode?: number } | null)?.statusCode;
-    return status === 403
-        ? 'Not permitted — requires chat-manager rights (or chat-admin with ban_user).'
-        : (error?.message ?? 'Failed to load banned members.');
 }
 
 /// Skeletons ---------------------------------------------------------------------
@@ -2325,14 +1864,6 @@ const styles = StyleSheet.create({
     },
     backButton: { paddingHorizontal: spacing.xxs, paddingVertical: spacing.xs },
     backText: { color: palette.primary[600], fontSize: 26, fontWeight: '700' },
-    pillButton: {
-        borderWidth: 1,
-        borderColor: palette.primary[500],
-        borderRadius: radii.sm,
-        paddingHorizontal: spacing.sm,
-        paddingVertical: 4,
-    },
-    pillText: { color: palette.primary[600], fontSize: 13, fontWeight: '600' },
     iconButton: {
         width: 44,
         height: 44,
@@ -2392,70 +1923,8 @@ const styles = StyleSheet.create({
     },
     emptyCaption: { textAlign: 'center' },
     sendError: { color: palette.semantic.danger, paddingBottom: spacing.xxs },
-    // action sheet
-    sheetBackdrop: {
-        flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.4)',
-        justifyContent: 'flex-end',
-        paddingHorizontal: spacing.sm,
-        paddingBottom: spacing.md,
-    },
-    sheetCard: {
-        backgroundColor: palette.elevated,
-        borderWidth: 1,
-        borderColor: palette.border.subtle,
-        borderRadius: radii.md,
-        overflow: 'hidden',
-    },
-    quickReactions: {
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: palette.neutral[100],
-        paddingVertical: spacing.xs,
-    },
-    quickReactionsContent: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.xs,
-        paddingHorizontal: spacing.sm,
-    },
-    quickReaction: {
-        width: 42,
-        height: 42,
-        borderRadius: 21,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: palette.neutral[50],
-    },
-    quickReactionSelected: {
-        backgroundColor: palette.primary[100],
-        borderWidth: 1,
-        borderColor: palette.primary[500],
-    },
-    quickReactionEmoji: { fontSize: 22 },
-    sheetButton: { padding: spacing.md },
-    sheetActionText: {
-        color: palette.primary[600],
-        fontSize: 16,
-        fontWeight: '600',
-        textAlign: 'center',
-    },
-    sheetDeleteText: {
-        color: palette.semantic.danger,
-        fontSize: 16,
-        fontWeight: '600',
-        textAlign: 'center',
-    },
-    sheetCancelText: {
-        color: palette.neutral[500],
-        fontSize: 16,
-        textAlign: 'center',
-    },
-    sheetDivider: {
-        height: StyleSheet.hairlineWidth,
-        backgroundColor: palette.neutral[100],
-    },
-    modalAvoid: { flex: 1, justifyContent: 'center' },
     smallButtonDisabled: { opacity: 0.4 },
+    modalAvoid: { flex: 1, justifyContent: 'center' },
     // modals
     modalBackdrop: {
         flex: 1,
@@ -2485,24 +1954,6 @@ const styles = StyleSheet.create({
     },
     modalError: { color: palette.semantic.danger },
     modalActions: { flexDirection: 'row', gap: spacing.xs },
-    // admin
-    adminScreen: { gap: spacing.md, paddingHorizontal: spacing.lg },
-    adminHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-    },
-    section: { gap: spacing.xxs },
-    sectionFlex: { flex: 1 },
-    input: {
-        borderWidth: 1,
-        borderColor: palette.border.subtle,
-        borderRadius: radii.md,
-        paddingHorizontal: spacing.sm,
-        paddingVertical: spacing.xs,
-        color: palette.text.primary,
-        backgroundColor: palette.glass.elevated,
-    },
     smallButton: {
         alignSelf: 'flex-start',
         backgroundColor: palette.primary[500],
@@ -2530,19 +1981,4 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     feedback: { color: palette.neutral[500] },
-    leaveError: { color: palette.semantic.danger },
-    memberRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.sm,
-        paddingVertical: spacing.xxs,
-        borderBottomWidth: 1,
-        borderBottomColor: palette.neutral[100],
-    },
-    memberBody: { flex: 1 },
-    bannedRow: {
-        paddingVertical: spacing.xxs,
-        borderBottomWidth: 1,
-        borderBottomColor: palette.neutral[100],
-    },
 });

@@ -61,7 +61,11 @@ Any non-banned member. Bare object (project convention, no `data` wrapper):
   "membersCount": 5,
   "myRole": "owner",
   "owner": { "userId": 7, "name": "Sara", "username": "sara" },
-  "capabilities": { "canEditInfo": true }
+  "capabilities": {
+    "canEditInfo": true,
+    "canManageInviteLinks": true,
+    "canManageBans": true
+  }
 }
 ```
 
@@ -74,7 +78,9 @@ Any non-banned member. Bare object (project convention, no `data` wrapper):
 - `myRole`: the caller's highest-ranking row (`owner`/`admin`/`member`).
 - `capabilities`: computed for the caller. `canEditInfo` is true for the owner
   and for an admin holding `change_info_chat` or `all`; false for members,
-  banned users and outsiders. The app shows the group-settings gear when
+  banned users and outsiders. `canManageBans` is true for the owner and for an
+  admin holding `ban_user` or `all` — it gates the "Banned users" row, which is
+  hidden for everybody else. The app shows the group-settings gear when
   `myRole` is `owner` or `admin` and lists only features whose capability is
   true.
 
@@ -118,6 +124,65 @@ Any non-banned member.
 `actions` is computed for the CALLER with the same pure functions the action
 endpoints use. `canEditPermissions` is true only when the caller is the owner
 and the target is an ADMIN of that chat. No phone number is ever included.
+
+## `GET /chats/:chatId/banned?cursor=&limit=`
+
+Banned users (`role_chat.name = 'ban'` rows) of the group. Owner, or an admin
+holding `ban_user`/`all`; every other caller answers 403 (`You don't have
+permission to do this`), members and banned users included.
+
+- `limit`: default 30, maximum 100 (same clamp as the members list).
+- Order: newest ban first (`chat_members.id` DESC, so a fresh ban is always on
+  the first page).
+- Deduplicated by user: the OLDEST membership row of each banned user is the
+  one listed.
+- Keyset cursor is the last `memberId` of the previous page as a string; any
+  other value answers 400. `nextCursor: null` means the last page.
+- These rows are never part of `GET /chats/:chatId/members` and never counted
+  in `membersCount`.
+
+```json
+{
+  "items": [
+    {
+      "memberId": 91,
+      "userId": 12,
+      "name": "Nima",
+      "username": "nima",
+      "avatars": ["uploads/avatars/n.png"],
+      "bannedAt": "2026-02-03T10:11:12.000Z"
+    }
+  ],
+  "nextCursor": "91"
+}
+```
+
+`avatars` is the current photo only, in the same stored-path wire format as the
+members list (the app absolutizes it). `bannedAt` is the banned row's
+`updatedAt`; `null` if the row has no timestamp.
+
+## Unban
+
+```
+POST /chats/manage/onban/:memberId
+```
+
+Reuses the legacy route (the ban state lives on `chat_members`, not in a
+separate table). Same rule as the banned-users list: the owner, or an admin
+holding `ban_user`/`all`. An admin without the grant gets 403 `missing
+permission(s): ban_user`; a target that is not banned answers 400; acting on
+the owner is rejected.
+
+Unbanning restores the member's `user` role — a former admin comes back as a
+plain member, without permission grants — and does NOT join them to the chat
+room: they receive `group:added { chatId }` on their personal room and join
+on their next `joinChat`. Everyone currently in the chat room receives
+`group:changed { chatId, reason: 'member_unbanned' }`, plus
+`chat:members { chatId, membersCount }` with the restored count.
+
+```json
+{ "message": "user on baned successfully" }
+```
 
 ## Actions
 
@@ -187,7 +252,7 @@ role change between the pre-check and the lock answers 409.
 
 | Permission | Enforced where | Enforced? |
 |---|---|---|
-| `ban_user` | New panel `DELETE /chats/:chatId/members/:memberId`; legacy kick and ban-list routes | Yes |
+| `ban_user` | New panel `DELETE /chats/:chatId/members/:memberId` and `GET /chats/:chatId/banned`; legacy kick, ban-list and unban routes | Yes |
 | `change_info_chat` | New `PATCH /chats/:chatId/group` + group avatar routes (`GroupInfoService`); legacy `/chats/manage/*` | Yes |
 | `delete_message` | No route checks it; message deletion allows the sender or group owner only | **No** |
 | `all` | `ChatPermissionService.canEditInfo` / `ChatAccessService.assertPermissions` / legacy `ManagerChatGuard` bypass | Yes |

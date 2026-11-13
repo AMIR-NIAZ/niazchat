@@ -1,6 +1,8 @@
 import { httpClient } from '../../core/api';
 import type {
     GroupAvatarMutationResponse,
+    GroupBannedPage,
+    GroupBannedUser,
     GroupInfo,
     GroupInfoChanges,
     GroupInfoUpdateResponse,
@@ -18,6 +20,8 @@ import { normalizeAvatarMime } from '../users/profile-service';
  * REST surface of the group panel (docs/mobile-api/groups.md):
  *   GET    /chats/:chatId/group
  *   GET    /chats/:chatId/members?search=&cursor=&limit=
+ *   GET    /chats/:chatId/banned?cursor=&limit=
+ *   POST   /chats/manage/onban/:memberId           (legacy route, unban)
  *   POST   /chats/:chatId/members/:memberId/promote
  *   POST   /chats/:chatId/members/:memberId/demote
  *   DELETE /chats/:chatId/members/:memberId
@@ -53,6 +57,7 @@ function toGroupInfo(raw: GroupInfo): GroupInfo {
             canEditInfo: raw.capabilities?.canEditInfo === true,
             canManageInviteLinks:
                 raw.capabilities?.canManageInviteLinks === true,
+            canManageBans: raw.capabilities?.canManageBans === true,
         },
         owner:
             raw.owner === null || raw.owner === undefined
@@ -110,6 +115,51 @@ export async function fetchGroupMembers(
         items: (response.data.items ?? []).map(toGroupMember),
         nextCursor: response.data.nextCursor ?? null,
     };
+}
+
+function toGroupBannedUser(raw: GroupBannedUser): GroupBannedUser {
+    return {
+        memberId: number(raw.memberId),
+        userId: number(raw.userId),
+        name: raw.name ?? '',
+        username: raw.username ?? '',
+        avatars: Array.isArray(raw.avatars) ? raw.avatars : [],
+        bannedAt:
+            raw.bannedAt === null || raw.bannedAt === undefined
+                ? null
+                : String(raw.bannedAt),
+    };
+}
+
+/** One page of the group's banned users (owner, or admin with `ban_user`). */
+export async function fetchBannedUsers(
+    chatId: number,
+    options: { cursor?: string | null } = {},
+): Promise<GroupBannedPage> {
+    const params: Record<string, string | number> = {
+        limit: GROUP_MEMBERS_PAGE_SIZE,
+    };
+    if (options.cursor !== undefined && options.cursor !== null) {
+        params.cursor = options.cursor;
+    }
+    const response = await httpClient.get<GroupBannedPage>(
+        `/chats/${chatId}/banned`,
+        { params },
+    );
+    return {
+        items: (response.data.items ?? []).map(toGroupBannedUser),
+        nextCursor: response.data.nextCursor ?? null,
+    };
+}
+
+/**
+ * `POST /chats/manage/onban/:memberId` — restores the `user` role. The same
+ * permission rule as the banned list (owner, or admin with `ban_user`/`all`)
+ * is enforced server-side and the server emits `group:changed` so other open
+ * screens refresh.
+ */
+export async function unbanMember(memberId: number): Promise<void> {
+    await httpClient.post(`/chats/manage/onban/${memberId}`);
 }
 
 function toMemberActionResponse(

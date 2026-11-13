@@ -19,6 +19,8 @@ import type { ProfileAvatar } from '../users/use-profile';
 import * as api from './groups-api';
 import type {
     GroupAvatarMutationResponse,
+    GroupBannedPage,
+    GroupBannedUser,
     GroupInfo,
     GroupInfoChanges,
     GroupInfoUpdateResponse,
@@ -30,8 +32,10 @@ import type {
     MemberPermissionsUpdate,
 } from './group-model';
 import {
+    GROUP_BANNED_STALE_TIME_MS,
     GROUP_INFO_STALE_TIME_MS,
     GROUP_MEMBERS_STALE_TIME_MS,
+    groupBannedQueryKey,
     groupInfoQueryKey,
     groupMembersPrefix,
     groupMembersQueryKey,
@@ -245,6 +249,87 @@ export function useGroupMembers(chatId: number, search: string) {
     });
 }
 
+/**
+ * Banned users of one group, paginated like the members list. Called only for
+ * callers whose server-computed `canManageBans` is true; the endpoint answers
+ * 403 for everybody else.
+ */
+export function useGroupBannedUsers(chatId: number, enabled: boolean = true) {
+    return useInfiniteQuery<
+        GroupBannedPage,
+        Error,
+        InfiniteData<GroupBannedPage, string | null>,
+        readonly [string, number, string],
+        string | null
+    >({
+        queryKey: groupBannedQueryKey(chatId),
+        queryFn: ({ pageParam }): Promise<GroupBannedPage> =>
+            api.fetchBannedUsers(chatId, { cursor: pageParam }),
+        initialPageParam: null,
+        getNextPageParam: (last): string | null =>
+            last.nextCursor === '' ? null : last.nextCursor,
+        staleTime: GROUP_BANNED_STALE_TIME_MS,
+        retry: false,
+        enabled: enabled && chatId > 0,
+    });
+}
+
+type BannedPages = InfiniteData<GroupBannedPage, string | null>;
+
+interface UnbanContext {
+    previous: BannedPages | undefined;
+}
+
+/**
+ * Unban one user. The row disappears immediately (optimistic) and comes back
+ * on a failed request; on success the member/info caches are invalidated so a
+ * former admin reappears in the members list as a plain member.
+ */
+export function useUnbanMember(chatId: number) {
+    const queryClient = useQueryClient();
+    return useMutation<void, Error, GroupBannedUser, UnbanContext>({
+        mutationFn: (user): Promise<void> => api.unbanMember(user.memberId),
+        onMutate: async (user): Promise<UnbanContext> => {
+            const queryKey = groupBannedQueryKey(chatId);
+            await queryClient.cancelQueries({ queryKey });
+            const previous = queryClient.getQueryData<BannedPages>(queryKey);
+            queryClient.setQueryData<BannedPages>(queryKey, (current) =>
+                current === undefined
+                    ? current
+                    : {
+                          ...current,
+                          pages: current.pages.map((page) => ({
+                              ...page,
+                              items: page.items.filter(
+                                  (item) => item.memberId !== user.memberId,
+                              ),
+                          })),
+                      },
+            );
+            return { previous };
+        },
+        onError: (_error, _user, context): void => {
+            if (context?.previous !== undefined) {
+                queryClient.setQueryData<BannedPages>(
+                    groupBannedQueryKey(chatId),
+                    context.previous,
+                );
+            }
+        },
+        onSuccess: async (): Promise<void> => {
+            await Promise.all([
+                queryClient.invalidateQueries({
+                    queryKey: groupMembersPrefix(chatId),
+                }),
+                queryClient.invalidateQueries({
+                    queryKey: groupInfoQueryKey(chatId),
+                }),
+                queryClient.invalidateQueries({ queryKey: CHATS_QUERY_KEY }),
+            ]);
+        },
+    });
+}
+
 export function useMemberPermissions(
     chatId: number,
     memberId: number,
@@ -407,7 +492,9 @@ export interface GroupChangedEvent {
         | 'info_changed'
         | 'avatars_changed'
         | 'invite_links_changed'
-        | 'member_joined';
+        | 'member_joined'
+        | 'member_banned'
+        | 'member_unbanned';
     userId?: number;
 }
 
@@ -461,6 +548,14 @@ export function useGroupChangedEvents(chatId: number): void {
             void queryClient.invalidateQueries({
                 queryKey: memberPermissionsPrefix(chatId),
             });
+            if (
+                payload.reason === 'member_banned' ||
+                payload.reason === 'member_unbanned'
+            ) {
+                void queryClient.invalidateQueries({
+                    queryKey: groupBannedQueryKey(chatId),
+                });
+            }
             if (
                 payload.reason === 'invite_links_changed' ||
                 payload.reason === 'member_joined'

@@ -200,9 +200,13 @@ export class ManageChatsController {
         return await this.chatService.banMember(memberId, request.user.sub);
     }
 
+    /** Unban: owner, or an admin holding `ban_user`/`all`. */
     @Post('/onban/:memberId')
     @Role([RoleEnum.ALL])
-    @ChatAccess({ minRole: RoleChatEnum.MANAGER })
+    @ChatAccess({
+        minRole: RoleChatEnum.ADMIN,
+        permissions: [PermissionChatEnum.BAN_USER],
+    })
     async onBanMember(
         @Req() request: RequestAuth,
         @Param('memberId', ParseIntPipe) memberId: number,

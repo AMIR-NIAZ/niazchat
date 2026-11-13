@@ -40,12 +40,18 @@ interface AttachmentGridProps {
     attachments: readonly AttachmentView[];
     onOpenMedia: (mediaIndex: number) => void;
     onLongPress?: (() => void) | undefined;
+    /**
+     * Static lifted copy (context popup preview): render-only, disk-cached
+     * images, no press handlers. Never fetches a thumbnail over the network.
+     */
+    isStatic?: boolean | undefined;
 }
 
 export function AttachmentGrid({
     attachments,
     onOpenMedia,
     onLongPress,
+    isStatic = false,
 }: AttachmentGridProps): React.ReactElement {
     const { headers, refresh } = useAttachmentAuth();
     const visible = attachments.slice(0, 4);
@@ -76,6 +82,7 @@ export function AttachmentGrid({
                         }
                         onPress={(): void => onOpenMedia(index)}
                         onLongPress={onLongPress}
+                        isStatic={isStatic}
                     />
                 );
             })}
@@ -104,6 +111,7 @@ interface MediaTileProps {
     overlay: string | null;
     onPress: () => void;
     onLongPress?: (() => void) | undefined;
+    isStatic: boolean;
 }
 
 function MediaTile({
@@ -115,6 +123,7 @@ function MediaTile({
     overlay,
     onPress,
     onLongPress,
+    isStatic,
 }: MediaTileProps): React.ReactElement {
     const [reload, setReload] = useState(0);
     const [failed, setFailed] = useState(false);
@@ -143,12 +152,13 @@ function MediaTile({
 
     return (
         <Pressable
-            accessibilityRole="button"
+            accessibilityRole={isStatic ? undefined : 'button'}
             accessibilityLabel={
                 failed ? `${label}, failed to load, tap to retry` : label
             }
+            disabled={isStatic}
             onPress={failed ? reloadImage : onPress}
-            onLongPress={onLongPress}
+            onLongPress={isStatic ? undefined : onLongPress}
             delayLongPress={LONG_PRESS_DELAY_MS}
             style={[styles.tile, style]}
         >
@@ -157,9 +167,12 @@ function MediaTile({
                     key={`${posterUri}-${reload}`}
                     source={{
                         uri: posterUri,
-                        ...(headers !== undefined ? { headers } : {}),
+                        ...(headers !== undefined && !isStatic
+                            ? { headers }
+                            : {}),
                     }}
-                    cachePolicy="memory-disk"
+                    // The lifted copy renders only what the list already cached.
+                    cachePolicy={isStatic ? 'disk' : 'memory-disk'}
                     contentFit="cover"
                     transition={150}
                     style={styles.image}

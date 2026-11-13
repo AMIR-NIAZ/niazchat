@@ -132,7 +132,7 @@ Every route here first goes through `ManagerChatGuard` (`src/common/guards/restG
 | `POST /chats/manage/upload/avatar/:chatId` | `change_info_chat` | multipart field **`avatar`** | `{ message: 'avatar updated successfully' }` (path appended to `chat.avatars`) |
 | `DELETE /chats/manage/delete/avatar/:chatId` | `change_info_chat` | `{ "avatar": "<path from chat.avatars>" }` | `{ message: 'avatar updated successfully' }`; 404 when path not in array |
 | `POST /chats/manage/ban/:memberId` | `ban_user` | – | `{ message: 'user baned successfully' }` (member's chat role → `ban`) |
-| `POST /chats/manage/onban/:memberId` | `ban_user` | – | `{ message: 'user on baned successfully' }` (role → `user`) |
+| `POST /chats/manage/onban/:memberId` | `ban_user` | – | `{ message: 'user on baned successfully' }` (role → `user`); owner, or an admin with `ban_user`/`all` (owner-only before the banned-users screen). See `groups.md` |
 | `GET /chats/manage/:chatId/bans` | `ban_user` | – | `{ data: [{ ...ChatMember row, user: toUserResponse(...) }] }` — banned members only |
 | `POST /chats/manage/ban/:chatId` | – (needs platform `admin`) | – | same as `/chats/:chatId/ban` but through `ManagerChatGuard` |
 | `POST /chats/manage/admin/add/:memberId` | – | `{ permissions: PermissionChatEnum[] }` | `{ message: 'admin added successfully' }` — promotes member to chat-admin (replaces their permission set) |

@@ -17,6 +17,7 @@ import {
     useAuthStore,
 } from '../features/auth';
 import { appQueryClient } from '../core/query/query-client';
+import { ContextPopupProvider } from '../shared/context-popup';
 import { I18nManager } from 'react-native';
 
 I18nManager.allowRTL(false);
@@ -78,15 +79,21 @@ export default function RootLayout(): React.ReactElement {
         <QueryClientProvider client={appQueryClient}>
             <SafeAreaProvider>
                 <StatusBar style="light" />
-                <Stack
-                    screenOptions={{
-                        headerShown: false,
-                        animation: 'fade',
-                        contentStyle: { backgroundColor: palette.background },
-                    }}
-                >
-                    <Stack.Screen name="join/[code]" />
-                </Stack>
+                {/* One host for every floating popup: mounted LAST, above the
+                    navigator, so it covers the screens and their headers. */}
+                <ContextPopupProvider>
+                    <Stack
+                        screenOptions={{
+                            headerShown: false,
+                            animation: 'fade',
+                            contentStyle: {
+                                backgroundColor: palette.background,
+                            },
+                        }}
+                    >
+                        <Stack.Screen name="join/[code]" />
+                    </Stack>
+                </ContextPopupProvider>
             </SafeAreaProvider>
         </QueryClientProvider>
     );

@@ -6,7 +6,7 @@
 - `active-chat.ts`: module-level record of the open chat + whether the user is reading at the bottom.
 - `active-room.ts`: which `chat:<id>` room the single socket owns and which chat screen is focused. The backend allows one active room per socket, so the room follows focus: blur leaves it, focus re-joins it (with a one-page resync) — this is what keeps read receipts/live events working after a chat is pushed over another and popped back. The marker is cleared on socket disconnect.
 - `use-groups.ts`: query/mutation hooks (`createGroup`, `addMemberByPhone`, `leaveGroup`, `myChatRole`, `listBannedMembers`, avatar upload, `chatInfo`, leave-room-on-unmount — only for the screen that currently owns the room).
-- `chat-context-menu.tsx`: long-press bottom sheet (pin/unpin, mark as read, leave group with the owner rule).
+- `chat-list-actions.ts` + `chat-row-preview.tsx`: long-press floating popup (pin/unpin, mark as read with an optimistic badge, group info / view profile, leave group with the owner rule) over a lifted copy of the row. Mute/archive/delete-chat are intentionally absent: the backend has no behaviour for them yet, and `getChatListActions` is where they will be added.
 - Owner moderation (chat role `manager`, never `admin`): the chat panel lists active members and bans them via `POST /chats/manage/ban/:memberId`; the message sheet offers "Delete for everyone" on other members' messages.
 - `local-chat-prefs.ts`: pinned chat ids persisted per user in SecureStore (`usePinnedChatIds`).
 - `chats-cache.ts`: `purgeChatFromCaches` — shared post-leave cache/active-chat cleanup.

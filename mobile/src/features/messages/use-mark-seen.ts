@@ -85,7 +85,8 @@ export function useMarkSeen(
             runner.begin(target);
             markChatSeen(targetChatId, target)
                 .then((data) => {
-                    const acknowledged = toNumericId(data?.lastSeenId) ?? target;
+                    const acknowledged =
+                        toNumericId(data?.lastSeenId) ?? target;
                     runner.ack(acknowledged);
                     setChatUnreadCount(queryClient, targetChatId, 0);
                 })

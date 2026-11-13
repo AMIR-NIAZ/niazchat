@@ -59,6 +59,7 @@ import {
     useSetMainGroupAvatar,
 } from '../../../features/groups/use-group';
 import { describeGroupAvatarError } from '../../../features/groups/group-errors';
+import { Settings } from 'lucide-react-native';
 
 /**
  * GROUP INFO panel — reachable from a group chat header only.
@@ -180,8 +181,8 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
             action === 'promote'
                 ? promote
                 : action === 'demote'
-                  ? demote
-                  : remove;
+                    ? demote
+                    : remove;
         mutation
             .mutateAsync(member.memberId)
             .then((result): void => {
@@ -266,16 +267,16 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
                     privateChat
                         ? 'This screen is only available for groups.'
                         : error instanceof ApiError && error.statusCode === 403
-                          ? "You don't have access to this group."
-                          : 'Could not load this group.'
+                            ? "You don't have access to this group."
+                            : 'Could not load this group.'
                 }
                 {...(privateChat
                     ? {}
                     : {
-                          onRetry: (): void => {
-                              void infoQuery.refetch();
-                          },
-                      })}
+                        onRetry: (): void => {
+                            void infoQuery.refetch();
+                        },
+                    })}
             />
         );
     }
@@ -339,12 +340,6 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
                     {info.membersCount} member
                     {info.membersCount === 1 ? '' : 's'}
                 </Text>
-                {info.owner !== null && (
-                    <Text style={styles.ownerLine} numberOfLines={1}>
-                        Created by{' '}
-                        {info.owner.name || info.owner.username || 'Unknown'}
-                    </Text>
-                )}
             </View>
 
             {groupHasPhotoGallery(viewerAvatars.length) && (
@@ -406,7 +401,11 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
                         style={styles.iconButton}
                         onPress={openSettings}
                     >
-                        <Text style={styles.gearGlyph}>⚙</Text>
+                        <Settings
+                            size={21}
+                            color="#FFFFFF"
+                            strokeWidth={1.8}
+                        />
                     </Pressable>
                 ) : (
                     <View style={styles.topBarSpacer} />
@@ -592,9 +591,8 @@ function MemberRow(props: {
     return (
         <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`${name}${
-                badge === null ? '' : `, ${badge}`
-            }${props.isSelf ? ', you' : ''}`}
+            accessibilityLabel={`${name}${badge === null ? '' : `, ${badge}`
+                }${props.isSelf ? ', you' : ''}`}
             accessibilityState={{ disabled: props.pending }}
             disabled={props.pending}
             onPress={props.onOpenProfile}
@@ -725,6 +723,7 @@ const styles = StyleSheet.create({
         borderBottomWidth: StyleSheet.hairlineWidth,
         borderBottomColor: palette.border.subtle,
         backgroundColor: palette.surface,
+        paddingTop: 22
     },
     backButton: {
         width: 44,

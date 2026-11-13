@@ -60,7 +60,12 @@ export function highestVisibleMessageId(
             continue;
         }
         const id = row.message?.id;
-        if (id === null || id === undefined || !Number.isInteger(id) || id <= 0) {
+        if (
+            id === null ||
+            id === undefined ||
+            !Number.isInteger(id) ||
+            id <= 0
+        ) {
             continue;
         }
         highest = highest === null ? id : Math.max(highest, id);
@@ -78,9 +83,7 @@ export function pickReadTarget(input: {
     newestConfirmedId: number | null;
     highestVisibleId: number | null;
 }): number | null {
-    return input.atBottom
-        ? input.newestConfirmedId
-        : input.highestVisibleId;
+    return input.atBottom ? input.newestConfirmedId : input.highestVisibleId;
 }
 
 /** The monotonic/debounce gate used by `useMarkSeen`. */
@@ -109,7 +112,11 @@ export const MARK_SEEN_MAX_RETRIES = 2;
 
 export type ReadReceiptPlan =
     | { readonly action: 'send'; readonly target: number }
-    | { readonly action: 'wait'; readonly target: number; readonly delayMs: number }
+    | {
+          readonly action: 'wait';
+          readonly target: number;
+          readonly delayMs: number;
+      }
     | { readonly action: 'idle' };
 
 const IDLE: ReadReceiptPlan = { action: 'idle' };

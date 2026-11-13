@@ -104,7 +104,6 @@ export function needsChatRoomJoin(input: {
         return false;
     }
     return (
-        input.syncRequired === true ||
-        input.activeRoomChatId !== input.chatId
+        input.syncRequired === true || input.activeRoomChatId !== input.chatId
     );
 }

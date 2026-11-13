@@ -58,19 +58,26 @@ Messaging is **WebSocket-only** (docs/mobile-api/messages.md), implemented in th
 - The emoji list comes from `GET /react` (`useReactionEmojis`, cached with a long
   `staleTime`) with the fixed `👍 ❤️ 😂 😮 😢 🙏` fallback. `normalizeEmoji` strips
   `U+FE0F` and whitespace for comparisons.
-- The action sheet opens with a horizontal quick bar at the top (the caller's current
-  emoji highlighted). Tapping sends `reactMessage`, closes the sheet, applies an
-  optimistic update and rolls back with a short message if the ack fails. Taps for a
-  message already in flight are ignored.
+- Tapping or long-pressing a confirmed bubble opens a floating context popup
+  (`shared/context-popup`): an app-level overlay (no `Modal`), a static copy of
+  the bubble over the scrim, a low-intensity full-screen blur behind it on iOS
+  (a near-opaque dark scrim on Android), a quick-reaction pill above and the
+  action menu below (the caller's emoji has a ring). The bubble in the list is
+  never hidden or re-rendered. Picking an emoji sends `reactMessage` only after
+  the popup has closed, applies an optimistic update and rolls back with a short
+  message if the ack fails. Taps for a message already in flight are ignored.
 - Chips render inside the bubble above the meta line, wrap within the 85% bubble width,
   and use the accent color for the caller's chip. Tapping a chip toggles that emoji;
-  long-pressing one opens `MessageReactionsSheet` (`getMessageReactions`) with grouped
-  users, loading/error/retry/empty states, and profile navigation (self is inert).
+  long-pressing one opens `MessageReactionsCard` (`getMessageReactions`) as a centered
+  popup over the same backdrop, with grouped users, loading/error/retry/empty states,
+  and profile navigation (self is inert).
 
 ## Message actions
-- Long-press anywhere on a confirmed bubble opens the sheet, including photo/video tiles,
-  the voice player controls and waveform/time, document rows, forwarded headers and reply quotes.
-  Interactive children receive the same `onLongPress` (400 ms) so they cannot swallow it.
+- `bubble-press.ts` decides what a tap means (select / retry / menu / nothing). The
+  bubble `Pressable` wraps the bubble only, never the full-width row; interactive
+  children keep their own handlers (media viewer, voice controls, file rows, quote,
+  forwarded header, sender name/avatar, reaction chips, links) and a child press
+  suppresses the menu for that gesture.
 - `message-actions.ts#getMessageActions` is the single action rule set: Reply/Forward/Select for
   every confirmed message, Delete for own messages (or the group owner), Edit only for own,
   non-forwarded messages with existing non-empty text that are not voice. A message with

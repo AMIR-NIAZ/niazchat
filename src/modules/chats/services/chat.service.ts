@@ -604,8 +604,10 @@ export class ChatService {
             callerUserId,
         );
         this.access.assertUsableGroup(caller);
-        // Owner-only, matching ban (`manager` only; chat `admin` excluded).
-        this.access.assertOwner(caller, 'unban members');
+        // Same rule as the banned-users list: owner, or an admin with
+        // `ban_user`/`all` (chat `admin` without the grant is rejected).
+        this.access.assertRole(caller, RoleChatEnum.ADMIN);
+        this.access.assertPermissions(caller, [PermissionChatEnum.BAN_USER]);
         this.access.assertCanTarget(caller, target, 'unban');
 
         if (target.role?.name !== RoleChatEnum.BAN) {

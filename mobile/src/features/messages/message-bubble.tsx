@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ComponentRef } from 'react';
 import {
     AccessibilityInfo,
     Animated,
@@ -7,16 +8,30 @@ import {
     Text,
     View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { UserAvatar } from '../../shared/components';
 import { palette, radii, spacing } from '../../shared/theme';
 import { LONG_PRESS_DELAY_MS } from '../../shared/long-press';
+import { measureInWindow } from '../../shared/context-popup';
+import type { PopupRect } from '../../shared/context-popup';
 import { formatMessageTime, isOwnMessage } from './messages-model';
-import type { ChatMessage, ReplyPreview } from './messages-model';
-import { attachmentPreviewLabel } from '../attachments/attachment-labels';
+import type {
+    AttachmentView,
+    ChatMessage,
+    ReplyPreview,
+} from './messages-model';
+import {
+    attachmentPreviewLabel,
+    formatFileSize,
+} from '../attachments/attachment-labels';
+import { attachmentPreviewUrl } from '../attachments/attachment-url';
+import { fileTypeLabel } from '../attachments/file-name';
+import { formatDuration } from '../attachments/duration';
 import { AttachmentGrid } from '../attachments/attachment-grid';
 import { AttachmentFileRow } from '../attachments/attachment-file-row';
 import { VoiceBubble } from '../voice/voice-bubble';
 import { splitLinkifiedText } from '../groups/invite-links-model';
+import { childPressBlocksMenu, resolveBubblePress } from './bubble-press';
 /**
  * A single message bubble. Mine → primary, right-aligned; others → white,
  * left-aligned with the sender name shown in group chats. Pending/failed
@@ -29,7 +44,15 @@ interface MessageBubbleProps {
     mine: boolean;
     isGroup: boolean;
     currentUserId: number | null;
-    onLongPress?: ((message: ChatMessage) => void) | undefined;
+    /** Opens the floating menu around this bubble (tap or long press). */
+    onOpenMenu?:
+        | ((message: ChatMessage, anchor: PopupRect) => void)
+        | undefined;
+    /** Screen-reader actions, so the gestures are never required. */
+    accessibilityActions?: { name: string; label: string }[] | undefined;
+    onAccessibilityAction?: ((actionName: string) => void) | undefined;
+    /** Static copy for the popup preview: no handlers, no players, no animations. */
+    isStatic?: boolean | undefined;
     onRetryFailed?: ((message: ChatMessage) => void) | undefined;
     onReplyPress?: ((replyId: number) => void) | undefined;
     highlighted?: boolean;
@@ -74,6 +97,11 @@ interface MessageBubbleProps {
 /** Bubble avatar edge length (the spacer keeps the other rows aligned). */
 const AVATAR_SIZE = 45;
 
+/** Tap and hold both open the same floating menu. */
+const BUBBLE_LONG_PRESS_MS = 350;
+/** Height cap for the static media tile in the lifted preview. */
+const STATIC_MEDIA_HEIGHT = 180;
+
 function quoteSnippet(reply: ReplyPreview): string {
     if (reply.isDeleted) {
         return 'Message deleted';
@@ -95,7 +123,10 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
         mine,
         isGroup,
         currentUserId,
-        onLongPress,
+        onOpenMenu,
+        accessibilityActions,
+        onAccessibilityAction,
+        isStatic = false,
         onRetryFailed,
         onReplyPress,
         highlighted = false,
@@ -115,6 +146,60 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
         onToggleReaction,
         onOpenReactions,
     } = props;
+    // Anchor of the lifted preview: measured in window coordinates at press
+    // time so the popup lands on the bubble with the keyboard open too.
+    const bubbleRef = useRef<ComponentRef<typeof View>>(null);
+    // A child control that saw this touch start keeps its own behaviour; the
+    // bubble menu is suppressed for the remainder of that gesture.
+    const childPressAtRef = useRef(0);
+    const markChildPress = useCallback((): void => {
+        childPressAtRef.current = Date.now();
+    }, []);
+
+    const showMenu =
+        !selectionMode && message.status === 'sent' && message.id !== null;
+
+    const openMenu = useCallback((): void => {
+        if (onOpenMenu === undefined) {
+            return;
+        }
+        void measureInWindow(bubbleRef).then((anchor): void => {
+            if (anchor === null) {
+                return;
+            }
+            onOpenMenu(message, anchor);
+        });
+    }, [message, onOpenMenu]);
+
+    const handlePress = (): void => {
+        const outcome = resolveBubblePress({
+            selectionMode,
+            status: message.status,
+            hasAttachments: message.attachments.length > 0,
+            hasConfirmedId: message.id !== null,
+            childHandled: childPressBlocksMenu(
+                childPressAtRef.current,
+                Date.now(),
+            ),
+        });
+        if (outcome === 'select') {
+            onToggleSelect?.(message);
+            return;
+        }
+        if (outcome === 'retry') {
+            onRetryFailed?.(message);
+            return;
+        }
+        if (outcome === 'menu') {
+            openMenu();
+        }
+    };
+
+    const childLongPress =
+        !isStatic && showMenu && onOpenMenu !== undefined
+            ? openMenu
+            : undefined;
+
     const showSender = !mine && isGroup && showSenderName;
     const showFailedHint = message.status === 'failed';
     const isSending = message.status === 'pending';
@@ -175,6 +260,8 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
     const forwarded = message.forwardedFrom;
     const body = (
         <View
+            ref={bubbleRef}
+            collapsable={false}
             style={[
                 styles.bubble,
                 mine ? styles.mine : styles.theirs,
@@ -188,11 +275,8 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                     accessibilityRole="button"
                     accessibilityLabel={`Forwarded from ${forwarded.name || 'unknown'}`}
                     disabled={selectionMode}
-                    onLongPress={
-                        onLongPress === undefined
-                            ? undefined
-                            : (): void => onLongPress(message)
-                    }
+                    onPressIn={markChildPress}
+                    onLongPress={childLongPress}
                     delayLongPress={LONG_PRESS_DELAY_MS}
                     onPress={
                         forwarded.userId !== null &&
@@ -222,11 +306,8 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                     accessibilityRole="button"
                     accessibilityLabel="Jump to replied message"
                     disabled={selectionMode}
-                    onLongPress={
-                        onLongPress === undefined
-                            ? undefined
-                            : (): void => onLongPress(message)
-                    }
+                    onPressIn={markChildPress}
+                    onLongPress={childLongPress}
                     delayLongPress={LONG_PRESS_DELAY_MS}
                     onPress={
                         canJump &&
@@ -286,11 +367,8 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                         accessibilityLabel={`Open profile of ${message.senderName}`}
                         hitSlop={{ top: 15, bottom: 15, left: 8, right: 8 }}
                         onPress={(): void => onOpenProfile(message)}
-                        onLongPress={
-                            onLongPress === undefined
-                                ? undefined
-                                : (): void => onLongPress(message)
-                        }
+                        onPressIn={markChildPress}
+                        onLongPress={childLongPress}
                         delayLongPress={LONG_PRESS_DELAY_MS}
                         style={({ pressed }) => pressed && styles.pressed}
                     >
@@ -301,31 +379,34 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                 ))}
             {message.attachments.length > 0 && (
                 <View style={styles.attachmentsWrap}>
-                    {voiceAttachments.map((attachment) => (
-                        <VoiceBubble
-                            key={attachment.key}
-                            attachment={attachment}
-                            mine={mine}
-                            onLongPress={
-                                onLongPress === undefined
-                                    ? undefined
-                                    : (): void => onLongPress(message)
-                            }
-                        />
-                    ))}
-                    {mediaAttachments.length > 0 && (
-                        <AttachmentGrid
-                            attachments={mediaAttachments}
-                            onOpenMedia={(mediaIndex): void =>
-                                onOpenMedia?.(message, mediaIndex)
-                            }
-                            onLongPress={
-                                onLongPress === undefined
-                                    ? undefined
-                                    : (): void => onLongPress(message)
-                            }
-                        />
+                    {voiceAttachments.map((attachment) =>
+                        isStatic ? (
+                            <StaticVoiceRow
+                                key={attachment.key}
+                                attachment={attachment}
+                                mine={mine}
+                            />
+                        ) : (
+                            <VoiceBubble
+                                key={attachment.key}
+                                attachment={attachment}
+                                mine={mine}
+                                onLongPress={childLongPress}
+                            />
+                        ),
                     )}
+                    {mediaAttachments.length > 0 &&
+                        (isStatic ? (
+                            <StaticMediaGrid attachments={mediaAttachments} />
+                        ) : (
+                            <AttachmentGrid
+                                attachments={mediaAttachments}
+                                onOpenMedia={(mediaIndex): void =>
+                                    onOpenMedia?.(message, mediaIndex)
+                                }
+                                onLongPress={childLongPress}
+                            />
+                        ))}
                     {fileAttachments.length > 0 && (
                         <View
                             style={[
@@ -345,16 +426,18 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                                             ]}
                                         />
                                     )}
-                                    <AttachmentFileRow
-                                        attachment={attachment}
-                                        mine={mine}
-                                        onLongPress={
-                                            onLongPress === undefined
-                                                ? undefined
-                                                : (): void =>
-                                                      onLongPress(message)
-                                        }
-                                    />
+                                    {isStatic ? (
+                                        <StaticFileRow
+                                            attachment={attachment}
+                                            mine={mine}
+                                        />
+                                    ) : (
+                                        <AttachmentFileRow
+                                            attachment={attachment}
+                                            mine={mine}
+                                            onLongPress={childLongPress}
+                                        />
+                                    )}
                                 </View>
                             ))}
                         </View>
@@ -388,7 +471,10 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                                 onPress={
                                     onOpenLink === undefined
                                         ? undefined
-                                        : (): void => onOpenLink(segment.url)
+                                        : (): void => {
+                                              markChildPress();
+                                              onOpenLink(segment.url);
+                                          }
                                 }
                             >
                                 {segment.text}
@@ -401,6 +487,7 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                 <ReactionChips
                     message={message}
                     mine={mine}
+                    isStatic={isStatic}
                     onToggle={onToggleReaction}
                     onOpen={onOpenReactions}
                 />
@@ -487,37 +574,40 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
         </View>
     );
 
-    const bubbleBody = selectionMode ? (
+    if (isStatic) {
+        // Lifted preview: same markup, zero interactivity or side effects.
+        return <View pointerEvents="none">{body}</View>;
+    }
+
+    const bubbleBody = (
         <Pressable
             accessibilityRole="button"
             accessibilityLabel={
-                selected ? 'Deselect message' : 'Select message'
+                selectionMode
+                    ? selected
+                        ? 'Deselect message'
+                        : 'Select message'
+                    : 'Message actions'
             }
-            accessibilityState={{ selected }}
-            onPress={
-                onToggleSelect === undefined
+            accessibilityHint={
+                selectionMode
                     ? undefined
-                    : (): void => onToggleSelect(message)
+                    : 'Tap or long press for message actions'
             }
-        >
-            {body}
-        </Pressable>
-    ) : showFailedHint &&
-      message.attachments.length === 0 &&
-      onRetryFailed !== undefined ? (
-        <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Retry sending message"
-            onPress={(): void => onRetryFailed(message)}
-        >
-            {body}
-        </Pressable>
-    ) : onLongPress === undefined ? (
-        body
-    ) : (
-        <Pressable
-            onLongPress={(): void => onLongPress(message)}
-            delayLongPress={400}
+            accessibilityState={selectionMode ? { selected } : undefined}
+            accessibilityActions={accessibilityActions}
+            onAccessibilityAction={
+                onAccessibilityAction === undefined
+                    ? undefined
+                    : (event): void =>
+                          onAccessibilityAction(event.nativeEvent.actionName)
+            }
+            onPress={handlePress}
+            onLongPress={showMenu ? openMenu : undefined}
+            delayLongPress={BUBBLE_LONG_PRESS_MS}
+            style={({ pressed }) =>
+                pressed && !selectionMode ? styles.pressed : undefined
+            }
         >
             {body}
         </Pressable>
@@ -584,6 +674,8 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
 interface ReactionChipsProps {
     message: ChatMessage;
     mine: boolean;
+    /** Lifted preview: no press handlers and no entrance animation. */
+    isStatic?: boolean | undefined;
     onToggle?: ((message: ChatMessage, emoji: string) => void) | undefined;
     onOpen?: ((message: ChatMessage) => void) | undefined;
 }
@@ -594,7 +686,7 @@ interface ReactionChipsProps {
  * The whole row scales in once when a new chip appears (native driver).
  */
 function ReactionChips(props: ReactionChipsProps): React.ReactElement {
-    const { message, mine, onToggle, onOpen } = props;
+    const { message, mine, isStatic = false, onToggle, onOpen } = props;
     const scale = useRef(new Animated.Value(1)).current;
     const [reduceMotion, setReduceMotion] = useState(false);
 
@@ -614,7 +706,7 @@ function ReactionChips(props: ReactionChipsProps): React.ReactElement {
     }, []);
 
     useEffect((): void => {
-        if (reduceMotion) {
+        if (isStatic || reduceMotion) {
             scale.setValue(1);
             return;
         }
@@ -626,7 +718,7 @@ function ReactionChips(props: ReactionChipsProps): React.ReactElement {
             stiffness: 220,
             useNativeDriver: true,
         }).start();
-    }, [message.reactions.length, reduceMotion, scale]);
+    }, [message.reactions.length, reduceMotion, isStatic, scale]);
 
     return (
         <Animated.View
@@ -714,6 +806,268 @@ export function DateSeparator({
         </View>
     );
 }
+
+/**
+ * Static voice row for the lifted preview: identical waveform/time layout with
+ * no player mounted (no cache read, no audio, no playback subscription).
+ */
+function StaticVoiceRow({
+    attachment,
+    mine,
+}: {
+    attachment: AttachmentView;
+    mine: boolean;
+}): React.ReactElement {
+    const waveform = attachment.waveform ?? attachment.localWaveform ?? null;
+    const bars =
+        Array.isArray(waveform) && waveform.length === 64 ? waveform : null;
+    const duration = attachment.duration ?? attachment.localDuration ?? 0;
+    return (
+        <View style={staticStyles.voiceRow}>
+            <View
+                style={[
+                    staticStyles.voiceButton,
+                    mine
+                        ? staticStyles.voiceButtonMine
+                        : staticStyles.voiceButtonTheirs,
+                ]}
+            >
+                <Text
+                    style={[
+                        staticStyles.voiceGlyph,
+                        mine && staticStyles.onAccentText,
+                    ]}
+                >
+                    ▶
+                </Text>
+            </View>
+            <View style={staticStyles.waveform}>
+                {Array.from({ length: 64 }, (_, index) => (
+                    <View
+                        key={index}
+                        style={[
+                            staticStyles.bar,
+                            {
+                                height:
+                                    bars === null
+                                        ? 5
+                                        : 4 + (bars[index] ?? 0) * 0.22,
+                                backgroundColor: mine
+                                    ? 'rgba(255,255,255,0.45)'
+                                    : palette.neutral[300],
+                            },
+                        ]}
+                    />
+                ))}
+            </View>
+            <Text
+                style={[staticStyles.speed, mine && staticStyles.onAccentText]}
+            >
+                1x
+            </Text>
+            <Text
+                style={[staticStyles.time, mine && staticStyles.onAccentText]}
+            >
+                {formatDuration(duration)}
+            </Text>
+        </View>
+    );
+}
+
+/** Media tiles for the lifted preview: cached thumbnails only, no handlers. */
+function StaticMediaGrid({
+    attachments,
+}: {
+    attachments: readonly AttachmentView[];
+}): React.ReactElement {
+    const visible = attachments.slice(0, 4);
+    const extra = attachments.length - visible.length;
+    return (
+        <View style={staticStyles.grid}>
+            {visible.map((attachment, index) => {
+                const single = visible.length === 1;
+                const width = single ? 240 : 116;
+                const height = single ? STATIC_MEDIA_HEIGHT : 116;
+                const poster =
+                    attachment.id !== null &&
+                    (attachment.kind !== 'video' ||
+                        attachment.hasPoster === true)
+                        ? attachmentPreviewUrl(attachment.id, 640)
+                        : attachment.kind === 'image'
+                          ? (attachment.localUri ?? null)
+                          : null;
+                return (
+                    <View
+                        key={attachment.key}
+                        style={[staticStyles.tile, { width, height }]}
+                    >
+                        {poster !== null && (
+                            <Image
+                                source={{ uri: poster }}
+                                cachePolicy="disk"
+                                contentFit="cover"
+                                style={staticStyles.image}
+                            />
+                        )}
+                        {attachment.kind === 'video' && (
+                            <View style={staticStyles.playBadge}>
+                                <Text style={staticStyles.playIcon}>▶</Text>
+                            </View>
+                        )}
+                        {extra > 0 && index === visible.length - 1 && (
+                            <View style={staticStyles.countOverlay}>
+                                <Text style={staticStyles.countText}>
+                                    {`+${extra}`}
+                                </Text>
+                            </View>
+                        )}
+                    </View>
+                );
+            })}
+        </View>
+    );
+}
+
+/** Document row for the lifted preview: no cache lookup, no download. */
+function StaticFileRow({
+    attachment,
+    mine,
+}: {
+    attachment: AttachmentView;
+    mine: boolean;
+}): React.ReactElement {
+    return (
+        <View style={staticStyles.fileRow}>
+            <Text
+                style={[
+                    staticStyles.fileIcon,
+                    mine && staticStyles.onAccentText,
+                ]}
+            >
+                📎
+            </Text>
+            <View style={staticStyles.fileBody}>
+                <Text
+                    style={[
+                        staticStyles.fileName,
+                        mine && staticStyles.onAccentText,
+                    ]}
+                    numberOfLines={1}
+                    ellipsizeMode="middle"
+                >
+                    {attachment.name}
+                </Text>
+                <Text
+                    style={[
+                        staticStyles.fileMeta,
+                        mine && staticStyles.fileMetaMine,
+                    ]}
+                    numberOfLines={1}
+                >
+                    {fileTypeLabel(attachment.name, attachment.mimeType)} ·{' '}
+                    {formatFileSize(attachment.size)}
+                </Text>
+            </View>
+        </View>
+    );
+}
+
+const staticStyles = StyleSheet.create({
+    voiceRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.xs,
+    },
+    voiceButton: {
+        width: 34,
+        height: 34,
+        borderRadius: radii.full,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    voiceButtonMine: { backgroundColor: 'rgba(255,255,255,0.16)' },
+    voiceButtonTheirs: { backgroundColor: palette.primary[100] },
+    voiceGlyph: { color: palette.primary[600], fontSize: 13 },
+    onAccentText: { color: palette.text.onAccent },
+    waveform: {
+        flex: 1,
+        minWidth: 96,
+        height: 30,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 1.5,
+    },
+    bar: { width: 2, borderRadius: 2 },
+    speed: {
+        color: palette.primary[700],
+        fontSize: 10,
+        fontWeight: '700',
+        paddingHorizontal: 4,
+    },
+    time: {
+        color: palette.text.muted,
+        fontSize: 10,
+        minWidth: 30,
+        textAlign: 'right',
+    },
+    grid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 4,
+        marginTop: spacing.xxs,
+    },
+    tile: {
+        borderRadius: radii.sm,
+        overflow: 'hidden',
+        backgroundColor: palette.neutral[100],
+    },
+    image: { width: '100%', height: '100%' },
+    playBadge: {
+        position: 'absolute',
+        top: '50%',
+        left: '50%',
+        width: 36,
+        height: 36,
+        marginTop: -18,
+        marginLeft: -18,
+        borderRadius: radii.full,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(28, 32, 36, 0.58)',
+    },
+    playIcon: { color: palette.text.onAccent, fontSize: 15, marginLeft: 2 },
+    countOverlay: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(28, 32, 36, 0.55)',
+    },
+    countText: {
+        color: palette.text.onAccent,
+        fontSize: 20,
+        fontWeight: '700',
+    },
+    fileRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.xs,
+        paddingVertical: spacing.xs,
+        paddingHorizontal: spacing.xs,
+    },
+    fileIcon: { fontSize: 20, color: palette.primary[700] },
+    fileBody: { flex: 1, minWidth: 0, gap: 1 },
+    fileName: {
+        color: palette.text.primary,
+        fontSize: 13,
+        fontWeight: '600',
+    },
+    fileMeta: { color: palette.text.muted, fontSize: 11 },
+    fileMetaMine: { color: 'rgba(255,255,255,0.82)' },
+});
 
 const styles = StyleSheet.create({
     row: {

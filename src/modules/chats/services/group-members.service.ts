@@ -17,7 +17,9 @@ import { PermissionAdmin } from '../entities/permission_admin.entity';
 import { PermissionChat } from '../entities/permission_chat.entity';
 import { RoleChat } from '../entities/role_chat.entity';
 import {
+    assertCanManageBans,
     canEditInfo,
+    canManageBans,
     canManageInviteLinks,
     ChatCallerContext,
     ChatPermissionService,
@@ -61,7 +63,11 @@ export interface GroupInfo {
     title: string;
     description: string | null;
     avatars: string[];
-    capabilities: { canEditInfo: boolean; canManageInviteLinks: boolean };
+    capabilities: {
+        canEditInfo: boolean;
+        canManageInviteLinks: boolean;
+        canManageBans: boolean;
+    };
     createdAt: Date;
     membersCount: number;
     myRole: GroupRole;
@@ -83,6 +89,31 @@ export interface GroupMemberItem {
 export interface GroupMemberPage {
     items: GroupMemberItem[];
     nextCursor: string | null;
+}
+
+export interface GroupBannedItem {
+    memberId: number;
+    userId: number;
+    name: string;
+    username: string;
+    /** Current photo only, same wire shape as the members list. */
+    avatars: string[];
+    /** ISO timestamp of the ban (last `chat_members.updatedAt`), if known. */
+    bannedAt: string | null;
+}
+
+export interface GroupBannedPage {
+    items: GroupBannedItem[];
+    nextCursor: string | null;
+}
+
+interface BannedQueryRow {
+    memberId: string | number;
+    userId: string | number;
+    name: string | null;
+    username: string | null;
+    avatars: string[] | null;
+    bannedAt: Date | string | null;
 }
 
 export interface MemberActionResponse {
@@ -191,6 +222,7 @@ export class GroupMembersService {
             capabilities: {
                 canEditInfo: canEditInfo(caller),
                 canManageInviteLinks: canManageInviteLinks(caller),
+                canManageBans: canManageBans(caller),
             },
             createdAt: caller.chat.createdAt,
             membersCount: Number(countRows[0]?.count ?? 0),
@@ -310,6 +342,82 @@ export class GroupMembersService {
                 hasMore && last !== undefined
                     ? encodeMemberCursor(roleRank(last.role), last.memberId)
                     : null,
+        };
+    }
+
+    /**
+     * Paginated list of the group's banned users (`role_chat.name = 'ban'`).
+     *
+     * Owner, or an admin holding `ban_user`/`all`. Banned rows are deduplicated
+     * by user (oldest membership row wins, like the members list) and ordered by
+     * membership row id DESC, so a new ban always lands on the first page.
+     * The cursor is the last `memberId` of the page as a string.
+     */
+    async getBannedMembers(
+        chatId: ChatId,
+        callerUserId: UserId,
+        options: { cursor?: string; limit?: number | string },
+    ): Promise<GroupBannedPage> {
+        const caller = await this.permissions.getCallerContext(
+            chatId,
+            callerUserId,
+        );
+        this.permissions.assertGroup(caller);
+        assertCanManageBans(caller);
+
+        const limit = this.normalizeLimit(options.limit);
+        let cursor: number | null = null;
+        if (typeof options.cursor === 'string' && options.cursor !== '') {
+            const parsed = Number(options.cursor);
+            if (!Number.isInteger(parsed) || parsed <= 0) {
+                throw new BadRequestException('invalid banned cursor');
+            }
+            cursor = parsed;
+        }
+
+        const rows = await this.memberRepository.query<BannedQueryRow[]>(
+            `WITH banned AS (
+                SELECT m.id AS "memberId",
+                       m."userId" AS "userId",
+                       p.name AS "name",
+                       p.username AS "username",
+                       p.avatars AS "avatars",
+                       m."updatedAt" AS "bannedAt",
+                       ROW_NUMBER() OVER (
+                           PARTITION BY m."userId" ORDER BY m.id ASC
+                       ) AS "rn"
+                  FROM chat_members m
+                  JOIN role_chat r ON r.id = m."roleId"
+             LEFT JOIN user_profiles p ON p."userId" = m."userId"
+                 WHERE m."chatId" = $1 AND r.name = 'ban'
+             )
+             SELECT * FROM banned
+              WHERE "rn" = 1
+                AND ($3::bigint IS NULL OR "memberId" < $3)
+              ORDER BY "memberId" DESC
+              LIMIT $2`,
+            [chatId, limit + 1, cursor],
+        );
+
+        const hasMore = rows.length > limit;
+        const page = hasMore ? rows.slice(0, limit) : rows;
+        const items: GroupBannedItem[] = page.map((row) => ({
+            memberId: Number(row.memberId),
+            userId: Number(row.userId),
+            name: row.name ?? '',
+            username: row.username ?? '',
+            avatars: Array.isArray(row.avatars) ? row.avatars.slice(0, 1) : [],
+            bannedAt:
+                row.bannedAt === null || row.bannedAt === undefined
+                    ? null
+                    : new Date(row.bannedAt).toISOString(),
+        }));
+
+        const last = items[items.length - 1];
+        return {
+            items,
+            nextCursor:
+                hasMore && last !== undefined ? String(last.memberId) : null,
         };
     }
 

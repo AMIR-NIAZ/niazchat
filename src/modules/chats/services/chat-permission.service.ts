@@ -60,6 +60,28 @@ export function canEditInfo(caller: GroupCallerRules): boolean {
     );
 }
 
+/**
+ * Ban management capability (list banned users, unban).
+ *
+ * The owner always may; an admin needs `ban_user` or the `all` bypass.
+ * Members, banned users and outsiders never may.
+ */
+export function canManageBans(caller: GroupCallerRules): boolean {
+    if (caller.isOwner) return true;
+    if (!caller.isAdmin) return false;
+    return (
+        caller.permissions.includes(PermissionChatEnum.BAN_USER) ||
+        caller.permissions.includes(PermissionChatEnum.ALL)
+    );
+}
+
+/** Throws the shared 403 unless the caller may manage this group's bans. */
+export function assertCanManageBans(caller: GroupCallerRules): void {
+    if (!canManageBans(caller)) {
+        throw new ForbiddenException("You don't have permission to do this");
+    }
+}
+
 @Injectable()
 export class ChatPermissionService {
     constructor(

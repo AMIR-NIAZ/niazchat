@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import React, { useCallback } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -110,16 +110,16 @@ function GroupSettings({ chatId }: { chatId: number }): React.ReactElement {
                             ? 'This screen is only available for groups.'
                             : error instanceof ApiError &&
                                 error.statusCode === 403
-                              ? "You don't have access to this group."
-                              : 'Could not load this group.'
+                                ? "You don't have access to this group."
+                                : 'Could not load this group.'
                     }
                     {...(privateChat
                         ? {}
                         : {
-                              onRetry: (): void => {
-                                  void infoQuery.refetch();
-                              },
-                          })}
+                            onRetry: (): void => {
+                                void infoQuery.refetch();
+                            },
+                        })}
                 />
             </View>
         );
@@ -171,9 +171,11 @@ function GroupSettings({ chatId }: { chatId: number }): React.ReactElement {
                             ]}
                         >
                             <View style={styles.rowIcon}>
-                                <Text style={styles.rowIconText}>
-                                    {item.icon}
-                                </Text>
+                                <item.icon
+                                    size={21}
+                                    color="#FFFFFF"
+                                    strokeWidth={1.8}
+                                />
                             </View>
                             <View style={styles.rowBody}>
                                 <Text style={styles.rowTitle}>

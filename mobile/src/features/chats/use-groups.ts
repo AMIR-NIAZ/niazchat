@@ -41,20 +41,23 @@ export function useCreateGroup() {
  * The caller's own chat role for one group, from the members endpoint extras.
  * Used only to gate the owner's Leave action; the backend remains the final
  * authority. `null` means banned/unknown.
+ *
+ * Read through the query cache (the chat-list popup prefetches it on hold), so
+ * the menu can be built synchronously without a subscribing hook.
  */
-export function useMyChatRole(chatId: number | null, enabled: boolean) {
-    return useQuery({
-        queryKey: ['chats', 'my-role', chatId] as const,
-        queryFn: async (): Promise<ChatRole | null> => {
-            if (chatId === null) {
-                return null;
-            }
-            return groupsService.getMyChatRole(chatId);
-        },
-        enabled: enabled && chatId !== null,
-        retry: false,
+export const MY_CHAT_ROLE_QUERY_KEY = 'my-role' as const;
+
+export function myChatRoleQuery(chatId: number): {
+    queryKey: readonly ['chats', 'my-role', number];
+    queryFn: () => Promise<ChatRole | null>;
+    staleTime: number;
+} {
+    return {
+        queryKey: ['chats', MY_CHAT_ROLE_QUERY_KEY, chatId] as const,
+        queryFn: (): Promise<ChatRole | null> =>
+            groupsService.getMyChatRole(chatId),
         staleTime: 60_000,
-    });
+    };
 }
 
 /**

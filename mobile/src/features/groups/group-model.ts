@@ -5,6 +5,8 @@
  * flags it receives and never derives permissions locally.
  */
 
+import { Link, LucideIcon, PencilSparkles } from "lucide-react-native";
+
 export type GroupRole = 'owner' | 'admin' | 'member';
 
 export interface GroupMemberActions {
@@ -51,6 +53,12 @@ export interface GroupOwner {
 export interface GroupCapabilities {
     canEditInfo: boolean;
     canManageInviteLinks: boolean;
+    /** Owner, or an admin with `ban_user`/`all`: banned list + unban. */
+    canManageBans?: boolean;
+}
+
+export function canManageBansHelper(capabilities: GroupCapabilities): boolean {
+    return capabilities.canManageBans === true;
 }
 
 export interface GroupInfo {
@@ -79,14 +87,29 @@ export interface GroupMember {
     lastSeen: string | null;
     role: GroupRole;
     actions: GroupMemberActions;
-}
-
-export interface GroupMemberPage {
+}export interface GroupMemberPage {
     items: GroupMember[];
     nextCursor: string | null;
 }
 
-export interface MemberActionResponse {
+/** One banned user (`role_chat.name = 'ban'` membership row). */
+export interface GroupBannedUser {
+    memberId: number;
+    userId: number;
+    name: string;
+    username: string;
+    /** Current photo only, same wire format as members. */
+    avatars: string[];
+    /** ISO timestamp of the ban, when the server knows it. */
+    bannedAt: string | null;
+}
+
+export interface GroupBannedPage {
+    items: GroupBannedUser[];
+    nextCursor: string | null;
+}
+
+ export interface MemberActionResponse {
     memberId: number;
     /** null after removal. */
     role: GroupRole | null;
@@ -137,6 +160,14 @@ export function groupPhotoLimitHint(photoCount: number): string | null {
 
 export const GROUP_INFO_STALE_TIME_MS = 30_000;
 export const GROUP_MEMBERS_STALE_TIME_MS = 30_000;
+
+export const GROUP_BANNED_STALE_TIME_MS = 15_000;
+
+export function groupBannedQueryKey(
+    chatId: number,
+): readonly [string, number, string] {
+    return ['group', chatId, 'banned'] as const;
+}
 
 export function groupInfoQueryKey(chatId: number): readonly [string, number] {
     return ['group', chatId] as const;
@@ -315,7 +346,7 @@ export interface GroupSettingsFeature {
     key: 'group_info' | 'invite_links';
     title: string;
     subtitle: string;
-    icon: string;
+    icon: LucideIcon;
     requires: GroupSettingsCapability;
     route: (chatId: number) => string;
 }
@@ -329,7 +360,7 @@ export const GROUP_SETTINGS_FEATURES: readonly GroupSettingsFeature[] = [
         key: 'group_info',
         title: 'Group info',
         subtitle: 'Name, photo and description',
-        icon: '⚙',
+        icon: PencilSparkles,
         requires: 'canEditInfo',
         route: (chatId: number): string => `/group-settings/${chatId}/info`,
     },
@@ -337,7 +368,7 @@ export const GROUP_SETTINGS_FEATURES: readonly GroupSettingsFeature[] = [
         key: 'invite_links',
         title: 'Invite links',
         subtitle: 'Create and manage links to join this group',
-        icon: '🔗',
+        icon: Link,
         requires: 'canManageInviteLinks',
         route: (chatId: number): string =>
             `/group-settings/${chatId}/invite-links`,

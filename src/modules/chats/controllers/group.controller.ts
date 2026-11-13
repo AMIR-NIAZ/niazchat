@@ -19,6 +19,7 @@ import { RoleEnum } from 'src/common/enums/role.enum';
 import { ChatId } from 'src/common/types/brands.type';
 import { RequestAuth } from 'src/common/types/RequestAuth.type';
 import {
+    GroupBannedPage,
     GroupInfo,
     GroupMemberPage,
     GroupMembersService,
@@ -155,6 +156,24 @@ export class GroupController {
     ): Promise<GroupMemberPage> {
         return this.groups.getMembers(chatId, request.user.sub, {
             search,
+            cursor,
+            limit,
+        });
+    }
+
+    /**
+     * Banned users of the group, paginated like the members list. Owner, or an
+     * admin holding `ban_user`/`all` (403 otherwise).
+     */
+    @Get(':chatId/banned')
+    @Role([RoleEnum.ALL])
+    getBannedMembers(
+        @Req() request: RequestAuth,
+        @Param('chatId', ParseIntPipe) chatId: ChatId,
+        @Query('cursor') cursor?: string,
+        @Query('limit') limit?: string,
+    ): Promise<GroupBannedPage> {
+        return this.groups.getBannedMembers(chatId, request.user.sub, {
             cursor,
             limit,
         });

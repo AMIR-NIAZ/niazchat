@@ -113,7 +113,10 @@ describe('read receipt lifecycle', () => {
                 target,
             });
             // Duplicate listener/evaluation with the same target: still one send.
-            expect(plan(runner, chatId, target)).toEqual({ action: 'send', target });
+            expect(plan(runner, chatId, target)).toEqual({
+                action: 'send',
+                target,
+            });
             runner.begin(target);
             expect(plan(runner, chatId, target)).toEqual({ action: 'idle' });
             runner.ack(target);
@@ -219,7 +222,9 @@ describe('read receipt lifecycle', () => {
                 })!,
             ),
         ).toEqual({ action: 'send', target: 75 });
-        expect(highestVisibleMessageId([{ kind: 'message', message: { id: 75 } }])).toBe(75);
+        expect(
+            highestVisibleMessageId([{ kind: 'message', message: { id: 75 } }]),
+        ).toBe(75);
         runner.begin(75);
         runner.ack(75);
         runner.finish();
