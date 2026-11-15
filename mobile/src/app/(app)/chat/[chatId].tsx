@@ -31,6 +31,7 @@ import * as Clipboard from 'expo-clipboard';
 import {
     AppText,
     GlassHeader,
+    OfflineCaption,
     Screen,
     UserAvatar,
     palette,
@@ -38,6 +39,7 @@ import {
     spacing,
     typography,
 } from '../../../shared/components';
+import { useSocketConnectionState } from '../../../core/socket';
 import type { ReactionUserDto } from '../../../core/api';
 import { useAndroidKeyboardInset } from '../../../shared/hooks/use-android-keyboard-inset';
 import {
@@ -55,6 +57,7 @@ import {
     useScrollToBottomButton,
     useTypingEmitter,
     useTypingUsers,
+    NO_MORE_SAVED_MESSAGES,
     assignMessageRuns,
     formatDaySeparator,
     firstUnreadMessageId,
@@ -206,6 +209,7 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     // Session-derived (access-token `sub`), numeric, and stable across profile
     // updates: a `['me']` refetch can never change or lose it.
     const currentUserId = useCurrentUserId();
+    const socketState = useSocketConnectionState();
     const conversation = useChatMessages(chatId, true, currentUserId);
     const reactionEmojis = useReactionEmojis();
     const [actionTarget, setActionTarget] = useState<ChatMessage | null>(null);
@@ -263,7 +267,7 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     const isGroup = !isPrivate;
     // The gear is rendered only after the server says the caller is owner or
     // admin (group info is fetched once per group chat, hidden while unknown).
-    const groupInfoQuery = useGroupInfo(isGroup ? chatId : 0);
+    const groupInfoQuery = useGroupInfo(isGroup && info !== null ? chatId : 0);
     useGroupUpdatedEvents();
     const settingsVisible =
         isGroup && canOpenGroupSettings(groupInfoQuery.data?.myRole ?? null);
@@ -1207,7 +1211,7 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         ? null
         : presenceProfile !== null
           ? presenceLabel(presenceProfile)
-          : info?.peer !== undefined && info?.peer !== null
+          : info?.peer != null
             ? presenceLabel({
                   isOnline: info.peer.isOnline,
                   lastSeen: info.peer.lastSeen,
@@ -1247,10 +1251,12 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     // Without a session user id nothing can be classified as mine: wait for it
     // instead of rendering every bubble on the wrong side. This is session
     // state (not the profile query), so a profile/me refetch never returns here.
-    if (conversation.isLoading || currentUserId === null) {
+    // Cached data always wins: a pending/failed refetch must never replace a
+    // rendered conversation with a loader or an error screen.
+    if ((conversation.isLoading && detail === null) || currentUserId === null) {
         return <LoadingBlock />;
     }
-    if (conversation.error !== null || info === null) {
+    if (detail === null) {
         return (
             <ErrorBlock
                 title="Could not open the chat"
@@ -1285,7 +1291,7 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                                 ? membersCount
                                 : null
                         }
-                        suffix={info.isBan ? ' · banned' : ''}
+                        suffix={info?.isBan === true ? ' · banned' : ''}
                     />
                 ) : (
                     <GroupChatSubtitle
@@ -1331,7 +1337,8 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     const hasNotices =
         conversation.sendError !== null ||
         conversation.reactionError !== null ||
-        jumpNotice !== null;
+        jumpNotice !== null ||
+        socketState === 'disconnected';
     // The scroll-to-latest button lives in the full-screen list layer, so its
     // bottom offset is measured from the window edge: on iOS the list frame is
     // lifted by the keyboard while the layer is not, on Android the resized
@@ -1579,6 +1586,13 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                                                 color={palette.primary[500]}
                                             />
                                         </View>
+                                    ) : conversation.loadOlderError ===
+                                      NO_MORE_SAVED_MESSAGES ? (
+                                        <View style={styles.olderRow}>
+                                            <Text style={styles.olderRetryText}>
+                                                No more saved messages
+                                            </Text>
+                                        </View>
                                     ) : conversation.loadOlderError !== null ? (
                                         <Pressable
                                             accessibilityRole="button"
@@ -1806,6 +1820,7 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                         style={styles.notices}
                         onLayout={measureNotices}
                     >
+                        <OfflineCaption />
                         {conversation.sendError !== null && (
                             <Text style={styles.sendError}>
                                 {conversation.sendError}

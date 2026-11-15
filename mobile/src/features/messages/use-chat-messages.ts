@@ -24,6 +24,7 @@ import {
     toChatMessage,
     toPendingChatMessage,
     mergeMessages,
+    reconcileMessages,
     removeMessageById,
     replaceMessage,
     dropPendingKeys,
@@ -49,6 +50,11 @@ import {
 import type { LocalAttachment } from '../attachments/validation';
 import { MAX_CONCURRENT_UPLOADS } from '../attachments/constants';
 import { nextClientMessageId, nextPendingMessageKey } from './local-keys';
+import {
+    loadLatestLocalMessages,
+    loadOlderLocalMessages,
+} from '../../shared/local-db';
+import type { ChatInfo, ChatPreview } from '../chats/chats-model';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
     deliverMessage,
@@ -94,7 +100,18 @@ export interface ConversationDetail {
     myLastSeenId: number | null;
     /** Highest read position among the other members (tick state). */
     othersLastSeenId: number | null;
+    /**
+     * Where `nextCursor` comes from: local SQLite rows, or the server.
+     * Undefined is treated as `'server'` (a plain network conversation).
+     */
+    nextCursorSource?: 'local' | 'server';
 }
+
+/**
+ * Pagination reached the end of locally saved history while offline. Not an
+ * error: the chat shows this line instead of a retry row.
+ */
+export const NO_MORE_SAVED_MESSAGES = 'No more saved messages';
 
 export type EnsureMessageOutcome =
     | 'found'
@@ -227,6 +244,49 @@ function pendingSendsFor(chatId: number): Map<string, PendingSendState> {
     return sends;
 }
 
+/**
+ * Chat info for a locally seeded conversation: the persisted `chat-info`
+ * entry, otherwise the persisted chat-list row. Without one the chat still
+ * opens (messages render); the header just cannot name the conversation until
+ * the server answers.
+ */
+function buildCachedChatInfo(
+    queryClient: ReturnType<typeof useQueryClient>,
+    chatId: number,
+): ChatDto | null {
+    const detailed = queryClient.getQueryData<ChatInfo>(['chat-info', chatId]);
+    if (detailed !== undefined) {
+        return {
+            id: detailed.id,
+            createdAt: detailed.createdAt,
+            updatedAt: detailed.updatedAt,
+            title: detailed.title,
+            peer: detailed.peer,
+            avatars: detailed.avatarUrls,
+            type: detailed.type,
+            isBan: detailed.isBan,
+            myLastSeenId: detailed.myLastSeenId,
+            othersLastSeenId: detailed.othersLastSeenId,
+            membersCount: detailed.membersCount,
+        };
+    }
+    const list = queryClient.getQueryData<ChatPreview[]>(['chats']);
+    const row = list?.find((chat) => Number(chat.id) === chatId);
+    if (row === undefined) {
+        return null;
+    }
+    return {
+        id: row.id,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        title: row.title,
+        peer: row.peer,
+        avatars: row.avatarUrls,
+        type: row.type,
+        isBan: row.isBan,
+    };
+}
+
 export function useChatMessages(
     chatId: number,
     enabled: boolean,
@@ -270,8 +330,15 @@ export function useChatMessages(
                 initialJoinPendingRef.current = false;
             });
             if (joined === null || joined.info === null) {
+                // Keep a locally seeded conversation instead of wiping it.
+                const seeded = queryClient.getQueryData<ConversationDetail>(
+                    messagesQueryKey(chatId),
+                );
+                if (seeded !== undefined) {
+                    return seeded;
+                }
                 return {
-                    info: joined?.info ?? null,
+                    info: null,
                     messages: [],
                     hasMore: false,
                     nextCursor: null,
@@ -283,16 +350,71 @@ export function useChatMessages(
                 .filter((message: MessageDto): boolean => !message.isDeleted)
                 .reverse() // WS delivers each page DESC; the cache is ascending.
                 .map(toChatMessage);
+            // The server page is authoritative inside its id range; anything
+            // seeded from SQLite that the server no longer has is dropped.
+            const cached = queryClient.getQueryData<ConversationDetail>(
+                messagesQueryKey(chatId),
+            );
             return {
                 info: joined.info,
-                messages: history,
+                messages: reconcileMessages(
+                    cached?.messages ?? [],
+                    history,
+                    currentUserId ?? -1,
+                ),
                 hasMore: joined.hasMore,
                 nextCursor: joined.nextCursor,
+                nextCursorSource: 'server',
                 myLastSeenId: toNumericId(joined.info.myLastSeenId),
                 othersLastSeenId: toNumericId(joined.info.othersLastSeenId),
             };
         },
     });
+
+    // Seed from SQLite before the first server page resolves: a chat opened
+    // before renders its saved messages instead of a loader (and stays usable
+    // offline). The server page later merges via `reconcileMessages`.
+    const seededChatRef = useRef<number | null>(null);
+    useEffect((): (() => void) | undefined => {
+        if (
+            !enabled ||
+            currentUserId === null ||
+            seededChatRef.current === chatId
+        ) {
+            return undefined;
+        }
+        const userId = currentUserId;
+        seededChatRef.current = chatId;
+        const key = messagesQueryKey(chatId);
+        let cancelled = false;
+        void (async (): Promise<void> => {
+            // The server (or another screen) already produced data: never
+            // overwrite it with older local rows.
+            if (queryClient.getQueryState(key)?.data !== undefined) {
+                return;
+            }
+            const local = await loadLatestLocalMessages(userId, chatId, 50);
+            if (cancelled || local.length === 0) {
+                return;
+            }
+            if (queryClient.getQueryState(key)?.data !== undefined) {
+                return;
+            }
+            const oldest = local[0]?.id ?? null;
+            queryClient.setQueryData<ConversationDetail>(key, {
+                info: buildCachedChatInfo(queryClient, chatId),
+                messages: local,
+                hasMore: true,
+                nextCursor: oldest,
+                nextCursorSource: oldest === null ? 'server' : 'local',
+                myLastSeenId: null,
+                othersLastSeenId: null,
+            });
+        })();
+        return (): void => {
+            cancelled = true;
+        };
+    }, [chatId, enabled, currentUserId, queryClient]);
 
     // Message-list updates preserve every other field (hasMore, nextCursor,
     // info), so live events can never drop pagination state.
@@ -440,7 +562,7 @@ export function useChatMessages(
                 .reverse()
                 .map(toChatMessage);
             applyToCache((current) =>
-                mergeMessages(current, history, currentUserId ?? -1),
+                reconcileMessages(current, history, currentUserId ?? -1),
             );
             // Resync of the room-wide read line; never regress it.
             const others = toNumericId(joined.info?.othersLastSeenId);
@@ -580,8 +702,68 @@ export function useChatMessages(
         setLoadingOlder(true);
         setLoadOlderError(null);
 
-        const promise = fetchChatMessages(chatId, beforeId, MESSAGES_PAGE_SIZE)
-            .then((page): OlderPageOutcome => {
+        const promise = (async (): Promise<OlderPageOutcome> => {
+            const source = current.nextCursorSource ?? 'server';
+            let localExhausted = false;
+
+            // Local-first: a chat seeded from SQLite pages through saved rows
+            // before touching the network. Empty/partial local history falls
+            // through to the server at the SAME cursor boundary.
+            if (source === 'local' && currentUserId !== null) {
+                const local = await loadOlderLocalMessages(
+                    currentUserId,
+                    chatId,
+                    beforeId,
+                    MESSAGES_PAGE_SIZE,
+                );
+                if (requestId !== olderRequestId.current) {
+                    return 'noop';
+                }
+                if (local.length > 0 && beforeId !== null) {
+                    const full = local.length >= MESSAGES_PAGE_SIZE;
+                    const oldest = local[0]?.id ?? beforeId;
+                    queryClient.setQueryData<ConversationDetail>(
+                        messagesQueryKey(chatId),
+                        (previous) =>
+                            previous === undefined
+                                ? previous
+                                : {
+                                      ...previous,
+                                      messages: mergeMessages(
+                                          previous.messages,
+                                          local,
+                                          currentUserId ?? -1,
+                                      ),
+                                      nextCursor: full ? oldest : beforeId,
+                                      nextCursorSource: full
+                                          ? 'local'
+                                          : 'server',
+                                  },
+                    );
+                    return 'loaded';
+                }
+                localExhausted = true;
+            }
+
+            // The messages API is socket-backed: with no live socket there is
+            // nothing to ask, and waiting for the request timeout would look
+            // like a stuck loader while offline.
+            const liveSocket = getSocket();
+            if (liveSocket === null || !liveSocket.connected) {
+                setLoadOlderError(
+                    localExhausted
+                        ? NO_MORE_SAVED_MESSAGES
+                        : 'You are offline.',
+                );
+                return 'error';
+            }
+
+            try {
+                const page = await fetchChatMessages(
+                    chatId,
+                    beforeId,
+                    MESSAGES_PAGE_SIZE,
+                );
                 if (requestId !== olderRequestId.current) {
                     return 'noop';
                 }
@@ -608,28 +790,32 @@ export function useChatMessages(
                                   ),
                                   hasMore: page.hasMore,
                                   nextCursor: page.nextCursor,
+                                  nextCursorSource: 'server',
                               },
                 );
                 return 'loaded';
-            })
-            .catch((error: unknown): OlderPageOutcome => {
+            } catch (error: unknown) {
                 if (requestId !== olderRequestId.current) {
                     return 'noop';
                 }
+                // Out of locally saved rows and the network is unreachable:
+                // that is the end of local history, not a failure to retry.
                 setLoadOlderError(
-                    error instanceof Error
-                        ? error.message
-                        : 'Failed to load older messages.',
+                    localExhausted
+                        ? NO_MORE_SAVED_MESSAGES
+                        : error instanceof Error
+                          ? error.message
+                          : 'Failed to load older messages.',
                 );
                 return 'error';
-            })
-            .finally((): void => {
-                if (requestId !== olderRequestId.current) {
-                    return;
-                }
-                loadingOlderRef.current = false;
-                setLoadingOlder(false);
-            });
+            }
+        })().finally((): void => {
+            if (requestId !== olderRequestId.current) {
+                return;
+            }
+            loadingOlderRef.current = false;
+            setLoadingOlder(false);
+        });
 
         olderPagePromise.current = promise;
         void promise.finally((): void => {
@@ -763,7 +949,7 @@ export function useChatMessages(
                 .reverse()
                 .map(toChatMessage);
             applyToCache((current) =>
-                mergeMessages(current, history, currentUserId ?? -1),
+                reconcileMessages(current, history, currentUserId ?? -1),
             );
         } catch {
             // The next focus/reconnect (or a manual retry) resyncs.

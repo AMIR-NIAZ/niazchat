@@ -58,8 +58,12 @@ export function useProfile(): {
         queryKey: ME_QUERY_KEY,
         // Same queryFn as `useMe`: the shared entry is always normalized.
         queryFn: fetchMe,
-        retry: false,
         staleTime: 10 * 60 * 1000,
+        retry: 3,
+        retryDelay: (attempt): number =>
+            [1_000, 3_000, 8_000][attempt] ?? 30_000,
+        refetchInterval: (query): number | false =>
+            query.state.status === 'error' ? 30_000 : false,
     });
 
     const profile = query.data ?? null;

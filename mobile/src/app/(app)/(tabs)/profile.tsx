@@ -16,6 +16,7 @@ import {
     Avatar,
     GlassCard,
     GlassHeader,
+    OfflineCaption,
     Screen,
     palette,
     radii,
@@ -81,14 +82,15 @@ export default function ProfileScreen(): React.ReactElement {
           ? (setMainAvatar.variables ?? null)
           : null;
 
-    if (profile.isLoading) {
+    // Cached profile data wins over a pending/failed refetch.
+    if (profile.isLoading && user === null) {
         return (
             <Screen style={styles.center}>
                 <ActivityIndicator size="large" color={palette.primary[500]} />
             </Screen>
         );
     }
-    if (profile.error !== null || user === null) {
+    if (user === null) {
         return (
             <Screen style={styles.center}>
                 <AppText variant="title">Could not load your profile</AppText>
@@ -315,6 +317,8 @@ export default function ProfileScreen(): React.ReactElement {
                             : `@${user.username}`}
                     </AppText>
                 </GlassHeader>
+
+                <OfflineCaption />
 
                 <GlassCard
                     padding={spacing.lg}

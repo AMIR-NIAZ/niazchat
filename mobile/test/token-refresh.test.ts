@@ -153,9 +153,9 @@ async function main(): Promise<void> {
         assertEqual(calls, 2, 'a later caller starts a new round-trip');
     });
 
-    await test('refresh failure classification is 401/403 → rejected only', () => {
+    await test('refresh failure classification is 401 → rejected only', () => {
         assertEqual(classifyRefreshStatus(401), 'rejected');
-        assertEqual(classifyRefreshStatus(403), 'rejected');
+        assertEqual(classifyRefreshStatus(403), 'unavailable');
         assertEqual(classifyRefreshStatus(400), 'unavailable');
         assertEqual(classifyRefreshStatus(429), 'unavailable');
         assertEqual(classifyRefreshStatus(500), 'unavailable');

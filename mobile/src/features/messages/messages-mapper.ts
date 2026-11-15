@@ -467,6 +467,42 @@ export function replaceMessage(
     );
 }
 
+/**
+ * Merges one authoritative server page over the cached list:
+ * - every confirmed cached message INSIDE the server page's id range that is
+ *   missing from the page was deleted server-side → it is dropped;
+ * - messages outside the range (older loaded pages, live arrivals) and local
+ *   pending/failed bubbles survive;
+ * - the page is then merged normally (dedupe by id, pending/failed last).
+ */
+export function reconcileMessages(
+    current: ChatMessage[],
+    incoming: ChatMessage[],
+    currentUserId: number,
+): ChatMessage[] {
+    const serverIds = new Set<number>();
+    let minId = Number.POSITIVE_INFINITY;
+    let maxId = Number.NEGATIVE_INFINITY;
+    for (const message of incoming) {
+        if (message.id === null || message.isDeleted) {
+            continue;
+        }
+        serverIds.add(message.id);
+        minId = Math.min(minId, message.id);
+        maxId = Math.max(maxId, message.id);
+    }
+    if (serverIds.size === 0) {
+        return mergeMessages(current, incoming, currentUserId);
+    }
+    const kept = current.filter((message) => {
+        if (message.id === null || serverIds.has(message.id)) {
+            return true;
+        }
+        return message.id < minId || message.id > maxId;
+    });
+    return mergeMessages(kept, incoming, currentUserId);
+}
+
 /** Removed a failed pending entry (used by the retry-tap action before resend). */
 export function dropPendingKeys(
     current: ChatMessage[],

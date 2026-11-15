@@ -19,6 +19,7 @@ import {
     radii,
     spacing,
     typography,
+    OfflineCaption,
 } from '../../../shared/components';
 import { useDebouncedValue } from '../../../shared/hooks/use-debounced-value';
 import { dialog, toast } from '../../../shared/dialog';
@@ -277,11 +278,12 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
             });
     };
 
-    if (infoQuery.isPending) {
+    // Cached group info always wins over a pending/failed refetch.
+    if (infoQuery.isPending && info === undefined) {
         return <LoadingBlock label="Loading group info…" />;
     }
 
-    if (infoQuery.isError || info === undefined) {
+    if (info === undefined) {
         const error = infoQuery.error;
         const privateChat =
             error instanceof ApiError && error.statusCode === 400;
@@ -437,6 +439,8 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
                     <View style={styles.topBarSpacer} />
                 )}
             </View>
+
+            <OfflineCaption />
 
             <FlatList
                 data={members}

@@ -5,6 +5,7 @@ import {
     readRefreshToken,
     writeTokens,
 } from '../../core/storage/secure-token.storage';
+import { setCurrentCacheUserId } from '../../core/query/query-persister';
 import { connectSocket } from '../../core/socket';
 import { accessTokenSubject } from './access-token-subject';
 import { refreshSession } from './session-refresh';
@@ -72,16 +73,32 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
         if (storedAccessToken === null && storedRefreshToken === null) {
             forgetCachedTokens();
+            setCurrentCacheUserId(null);
             set({ status: 'guest', userId: null });
             return;
         }
 
         if (storedAccessToken !== null) {
             setCachedAccessToken(storedAccessToken);
+            // The token's `sub` is enough to enter the app: the session is NOT
+            // validated against the network here. Cached profile/chats render
+            // immediately and the lifecycle refreshes in the background. An
+            // unreachable backend is never an auth failure.
+            const storedUserId = accessTokenSubject(storedAccessToken);
+            if (storedUserId !== null) {
+                setCurrentCacheUserId(storedUserId);
+                connectSocket(storedAccessToken);
+                set({
+                    status: 'authenticated',
+                    userId: storedUserId,
+                    sessionNotice: null,
+                });
+                return;
+            }
         }
 
-        // Always refresh first: the token may have expired while the app was away,
-        // and a fresh one must exist before the socket opens or queries fire.
+        // No usable stored access token (e.g. token-only recovery): the refresh
+        // round-trip is the only way to learn the identity.
         const refreshResult =
             storedRefreshToken === null ? null : await refreshSession();
         if (generation !== restoreGeneration) {
@@ -101,20 +118,24 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             // Definitive end of the session (or unusable + no refresh token).
             await clearTokens();
             forgetCachedTokens();
+            setCurrentCacheUserId(null);
             set({ status: 'guest', userId: null });
             return;
         }
 
         if (outcome.kind === 'unreachable') {
+            setCurrentCacheUserId(null);
             set({ status: 'unreachable', userId: null });
             return;
         }
 
+        const userId = accessTokenSubject(outcome.accessToken);
         setCachedAccessToken(outcome.accessToken);
+        setCurrentCacheUserId(userId);
         connectSocket(outcome.accessToken);
         set({
             status: 'authenticated',
-            userId: accessTokenSubject(outcome.accessToken),
+            userId,
             sessionNotice: null,
         });
     },
@@ -127,15 +148,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         restoreGeneration += 1;
         await writeTokens(accessToken, refreshToken);
         setCachedAccessToken(accessToken);
+        const userId = accessTokenSubject(accessToken);
+        setCurrentCacheUserId(userId);
         connectSocket(accessToken);
         set({
             status: 'authenticated',
-            userId: accessTokenSubject(accessToken),
+            userId,
             sessionNotice: null,
         });
     },
 
     resetSessionState: (reason) => {
+        setCurrentCacheUserId(null);
         set({
             status: 'guest',
             userId: null,

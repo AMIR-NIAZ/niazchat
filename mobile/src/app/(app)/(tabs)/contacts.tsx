@@ -21,6 +21,7 @@ import {
     AppText,
     GlassHeader,
     GlassInput,
+    OfflineCaption,
     PrimaryButton,
     Screen,
     UserAvatar,
@@ -53,6 +54,7 @@ import type {
     ContactRow,
     ContactSection,
 } from '../../../features/contacts/contacts-model';
+import { useSocketConnectionState } from '../../../core/socket/use-socket';
 import { useContactsAccess } from '../../../features/contacts/use-contacts-access';
 import type { ContactsAccessApi } from '../../../features/contacts/use-contacts-access';
 import { useContactMatches } from '../../../features/contacts/use-contact-matches';
@@ -84,6 +86,7 @@ export default function ContactsScreen(): React.ReactElement {
     const queryClient = useQueryClient();
     const popup = useContextPopup();
     const access = useContactsAccess();
+    const socketState = useSocketConnectionState();
     const saved = useContacts();
     const device = useContactMatches(access.canRead);
     const addContact = useAddContact();
@@ -94,13 +97,11 @@ export default function ContactsScreen(): React.ReactElement {
     const [renameTarget, setRenameTarget] = useState<ContactRow | null>(null);
     const [openingId, setOpeningId] = useState<number | null>(null);
 
+    // Persisted matches are shown even without contact permission (as app
+    // names); the saved list always wins for a person present in both.
     const rows = useMemo(
-        () =>
-            buildContactRows(
-                saved.contacts,
-                access.canRead ? device.contacts : [],
-            ),
-        [saved.contacts, device.contacts, access.canRead],
+        () => buildContactRows(saved.contacts, device.contacts),
+        [saved.contacts, device.contacts],
     );
     const filtered = useMemo(
         () => filterContactRows(rows, search),
@@ -112,23 +113,27 @@ export default function ContactsScreen(): React.ReactElement {
         () => rows.filter((row) => row.saved).length,
         [rows],
     );
+    // Only a screen with NOTHING to show gets a loading state.
     const isLoading =
-        saved.isLoading ||
-        (access.canRead && device.isLoading && rows.length === 0);
+        rows.length === 0 && (saved.isLoading || device.isLoading);
     const isRefreshing = saved.isRefreshing || device.isRefreshing;
     const error = saved.error
         ? describeSavedContactError(saved.error)
-        : access.canRead
-          ? device.error
-          : null;
+        : device.error;
     const searching = search.trim() !== '';
 
     const refresh = useCallback((): void => {
+        if (socketState === 'disconnected') {
+            // Never start a pointless request (and never clear the list) while
+            // offline: the already-rendered rows stay exactly as they are.
+            toast.show("You're offline");
+            return;
+        }
         saved.refetch();
         if (access.canRead) {
             device.refresh();
         }
-    }, [saved, device, access.canRead]);
+    }, [saved, device, access.canRead, socketState]);
 
     const openChat = useCallback(
         async (row: ContactRow): Promise<void> => {
@@ -285,6 +290,10 @@ export default function ContactsScreen(): React.ReactElement {
     );
 
     const showEmpty = !isLoading && filtered.length === 0;
+    // Offline failures are already covered by the caption; a banner would
+    // read as an error state over perfectly good saved rows.
+    const showErrorBanner =
+        error !== null && rows.length > 0 && socketState !== 'disconnected';
 
     return (
         <Screen style={styles.screen} withTopInset={true}>
@@ -321,13 +330,16 @@ export default function ContactsScreen(): React.ReactElement {
             <PermissionCard access={access} />
 
             {rows.length > 0 && (
-                <AppText variant="caption" style={styles.counts}>
-                    On the app · {rows.length}
-                    {savedCount > 0 ? ` · ${savedCount} saved` : ''}
-                </AppText>
+                <>
+                    <AppText variant="caption" style={styles.counts}>
+                        On the app · {rows.length}
+                        {savedCount > 0 ? ` · ${savedCount} saved` : ''}
+                    </AppText>
+                    <OfflineCaption />
+                </>
             )}
 
-            {error !== null && rows.length > 0 && (
+            {showErrorBanner && (
                 <View style={styles.errorBanner}>
                     <Text style={styles.errorBannerText}>{error}</Text>
                     <Pressable
@@ -472,7 +484,8 @@ function PermissionCard({
             <Text style={styles.permissionTitle}>Find your friends</Text>
             <Text style={styles.permissionText}>
                 Allow access to your contacts to see which of them are already
-                on the app. Contacts are matched on request and never stored.
+                on the app. Matching accounts are saved on this device; your
+                address book is never uploaded.
             </Text>
             {blocked ? (
                 <View style={styles.permissionActions}>

@@ -16,6 +16,7 @@ import {
     GlassHeader,
     GlassInput,
     GlassSurface,
+    OfflineCaption,
     Screen,
     radii,
     spacing,
@@ -91,6 +92,8 @@ export default function ChatsScreen(): React.ReactElement {
     );
 
     const chats = chatsQuery.data ?? [];
+    // Cached rows always render, even while a background refetch is failing.
+    const hasCachedChats = chatsQuery.data !== undefined;
     const visible = useMemo(
         () => sortPinnedFirst(filterChats(chats, search), pinned),
         [chats, search, pinned],
@@ -300,14 +303,16 @@ export default function ChatsScreen(): React.ReactElement {
                 leading={<Text style={styles.searchGlyph}>⌕</Text>}
             />
 
-            {chatsQuery.isPending ? (
+            {hasCachedChats && <OfflineCaption />}
+
+            {!hasCachedChats && chatsQuery.isPending ? (
                 <View style={styles.center}>
                     <ActivityIndicator
                         size="large"
                         color={palette.primary[500]}
                     />
                 </View>
-            ) : chatsQuery.isError ? (
+            ) : !hasCachedChats && chatsQuery.isError ? (
                 <StateBlock
                     title="Could not load chats"
                     detail={chatsQuery.error.message}

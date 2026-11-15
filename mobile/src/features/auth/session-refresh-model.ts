@@ -17,13 +17,14 @@ export type RefreshSessionResult =
 export const TOKEN_EXPIRY_MARGIN_SECONDS = 60;
 
 /**
- * 401/403 from the refresh endpoint is the ONLY definitive rejection. Network
- * errors, timeouts, aborted requests, 5xx and 429 are transient.
+ * A 401 answered by the refresh endpoint is the ONLY definitive rejection.
+ * Network errors, timeouts, aborted requests, 403, 5xx and 429 are transient:
+ * an unreachable or misconfigured backend must never log the user out.
  */
 export function classifyRefreshStatus(
     status: number | null | undefined,
 ): 'rejected' | 'unavailable' {
-    return status === 401 || status === 403 ? 'rejected' : 'unavailable';
+    return status === 401 ? 'rejected' : 'unavailable';
 }
 
 export interface TokenPair {

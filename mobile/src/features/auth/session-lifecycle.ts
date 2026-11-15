@@ -30,8 +30,8 @@ import { TOKEN_EXPIRY_MARGIN_SECONDS } from './session-refresh-model';
 /** Foreground refreshes the session after this long in the background. */
 export const FOREGROUND_REFRESH_THRESHOLD_MS = 20_000;
 const AUTH_ERROR_COOLDOWN_MS = 5_000;
-const RETRY_BASE_MS = 5_000;
-const RETRY_MAX_MS = 60_000;
+/** 1 s → 3 s → 8 s, then every 30 s while the app stays foregrounded. */
+const RETRY_DELAYS_MS = [1_000, 3_000, 8_000, 30_000] as const;
 const MIN_TIMER_MS = 1_000;
 
 let started = false;
@@ -40,7 +40,7 @@ let appState: AppStateStatus = (AppState.currentState ??
 let backgroundedAt: number | null = null;
 let proactiveTimer: ReturnType<typeof setTimeout> | null = null;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
-let retryDelayMs = RETRY_BASE_MS;
+let retryAttempt = 0;
 let lastAuthErrorAt = 0;
 
 type Stop = () => void;
@@ -67,7 +67,13 @@ export function clearSessionLifecycleTimers(): void {
     clearProactiveTimer();
     clearRetryTimer();
     backgroundedAt = null;
-    retryDelayMs = RETRY_BASE_MS;
+    retryAttempt = 0;
+}
+
+function nextRetryDelay(): number {
+    const index = Math.min(retryAttempt, RETRY_DELAYS_MS.length - 1);
+    retryAttempt += 1;
+    return RETRY_DELAYS_MS[index] ?? 30_000;
 }
 
 async function isAccessTokenExpiring(): Promise<boolean> {
@@ -124,8 +130,7 @@ function scheduleRetry(): void {
     retryTimer = setTimeout((): void => {
         retryTimer = null;
         void refreshForSession();
-    }, retryDelayMs);
-    retryDelayMs = Math.min(RETRY_MAX_MS, retryDelayMs * 2);
+    }, nextRetryDelay());
 }
 
 async function refreshForSession(): Promise<void> {
@@ -135,7 +140,7 @@ async function refreshForSession(): Promise<void> {
     }
     const result = await refreshSession();
     if (result.status === 'ok') {
-        retryDelayMs = RETRY_BASE_MS;
+        retryAttempt = 0;
         clearRetryTimer();
         syncSocketToken(result.accessToken);
         void scheduleProactiveRefresh();
@@ -168,18 +173,17 @@ function scheduleUnreachableRetry(): void {
                 if (useAuthStore.getState().status === 'unreachable') {
                     void scheduleUnreachableRetry();
                 } else {
-                    retryDelayMs = RETRY_BASE_MS;
+                    retryAttempt = 0;
                 }
             });
-    }, retryDelayMs);
-    retryDelayMs = Math.min(RETRY_MAX_MS, retryDelayMs * 2);
+    }, nextRetryDelay());
 }
 
 async function handleForeground(elapsedMs: number | null): Promise<void> {
     const status = useAuthStore.getState().status;
 
     if (status === 'unreachable') {
-        retryDelayMs = RETRY_BASE_MS;
+        retryAttempt = 0;
         await useAuthStore.getState().retryRestore();
         return;
     }
@@ -229,7 +233,7 @@ function handleSocketAuthError(): void {
 
 function handleStatusChange(status: string): void {
     if (status === 'authenticated') {
-        retryDelayMs = RETRY_BASE_MS;
+        retryAttempt = 0;
         void scheduleProactiveRefresh();
         return;
     }

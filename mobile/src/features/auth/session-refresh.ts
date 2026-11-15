@@ -17,7 +17,7 @@ import {
  * one in-flight request: one refresh round-trip, one result for everybody.
  *
  * `refreshSession()` never throws and never logs out by itself — it reports
- * `rejected` (definitive: no refresh token, or the endpoint said 401/403) or
+ * `rejected` (definitive: no refresh token, or the endpoint answered 401) or
  * `unavailable` (network, timeout, 5xx, 429, abort). Callers decide.
  */ let activeController: AbortController | null = null;
 /** Bumped on logout so a response that lands late cannot resurrect tokens. */

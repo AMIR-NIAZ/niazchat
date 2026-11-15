@@ -1,5 +1,10 @@
 import { router } from 'expo-router';
 import { appQueryClient } from '../../core/query/query-client';
+import {
+    getCurrentCacheUserId,
+    setCurrentCacheUserId,
+} from '../../core/query/query-persister';
+import { clearAllLocalData } from '../../shared/local-db';
 import { disconnectSocket } from '../../core/socket';
 import { runSessionCleanups } from '../../core/session/cleanup-registry';
 import { clearTokens } from '../../core/storage';
@@ -31,6 +36,14 @@ async function performLogout(reason: LogoutReason): Promise<void> {
     disconnectSocket();
     await clearTokens();
     forgetCachedTokens();
+    // Capture the identity BEFORE resetting the store, then remove exactly this
+    // user's persisted query cache and SQLite database. User B must never see
+    // user A's data. Media files are deliberately kept.
+    const userId = getCurrentCacheUserId();
+    setCurrentCacheUserId(null);
+    if (userId !== null) {
+        await clearAllLocalData(userId);
+    }
     appQueryClient.clear();
     useAuthStore.getState().resetSessionState(reason);
 

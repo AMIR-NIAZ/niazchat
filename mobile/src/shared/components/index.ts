@@ -2,6 +2,7 @@ export * from './screen';
 export * from './app-text';
 export * from './form-field';
 export * from './gate-placeholder';
+export * from './offline-caption';
 export * from './form-button';
 export * from './user-avatar';
 export * from './avatar';

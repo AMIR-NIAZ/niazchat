@@ -370,7 +370,7 @@ function GroupInfoEditor({ chatId }: { chatId: number }): React.ReactElement {
         }
     };
 
-    if (infoQuery.isPending) {
+    if (infoQuery.isPending && info === undefined) {
         return (
             <View style={styles.root}>
                 <EditorTopBar onBack={handleBack} />
@@ -385,7 +385,7 @@ function GroupInfoEditor({ chatId }: { chatId: number }): React.ReactElement {
         );
     }
 
-    if (infoQuery.isError || info === undefined) {
+    if (info === undefined) {
         const error = infoQuery.error;
         const privateChat =
             error instanceof ApiError && error.statusCode === 400;

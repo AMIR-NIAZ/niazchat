@@ -42,7 +42,8 @@
       ],
       "expo-status-bar",
       "expo-video",
-      "expo-asset"
+      "expo-asset",
+      "expo-sqlite"
     ]
   }
 }
