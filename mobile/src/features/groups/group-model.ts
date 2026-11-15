@@ -5,7 +5,12 @@
  * flags it receives and never derives permissions locally.
  */
 
-import { Link, LucideIcon, PencilSparkles } from "lucide-react-native";
+import {
+    Link,
+    LucideIcon,
+    PencilSparkles,
+    UserX,
+} from "lucide-react-native";
 
 export type GroupRole = 'owner' | 'admin' | 'member';
 
@@ -15,9 +20,16 @@ export interface GroupMemberActions {
     canRemove: boolean;
     /** Owner viewing an admin: open the permission editor. */
     canEditPermissions: boolean;
+    /** Owner (members/admins) or admin with `ban_user`/`all` (members). */
+    canBan: boolean;
 }
 
-export type GroupMemberAction = 'permissions' | 'promote' | 'demote' | 'remove';
+export type GroupMemberAction =
+    | 'permissions'
+    | 'promote'
+    | 'demote'
+    | 'remove'
+    | 'ban';
 
 export type MemberPermissionKey =
     | 'ban_user'
@@ -57,7 +69,7 @@ export interface GroupCapabilities {
     canManageBans?: boolean;
 }
 
-export function canManageBansHelper(capabilities: GroupCapabilities): boolean {
+export function canManageBans(capabilities: GroupCapabilities): boolean {
     return capabilities.canManageBans === true;
 }
 
@@ -257,6 +269,7 @@ export function visibleMemberActions(
     if (actions.canPromote) visible.push('promote');
     if (actions.canDemote) visible.push('demote');
     if (actions.canRemove) visible.push('remove');
+    if (actions.canBan) visible.push('ban');
     return visible;
 }
 
@@ -274,6 +287,8 @@ export function memberActionLabel(action: GroupMemberAction): string {
             return 'Remove admin';
         case 'remove':
             return 'Remove from group';
+        case 'ban':
+            return 'Ban';
     }
 }
 
@@ -340,14 +355,13 @@ export function canOpenGroupSettings(
     return role === 'owner' || role === 'admin';
 }
 
-export type GroupSettingsCapability = keyof GroupCapabilities;
-
 export interface GroupSettingsFeature {
-    key: 'group_info' | 'invite_links';
+    key: 'group_info' | 'invite_links' | 'banned-users';
     title: string;
     subtitle: string;
     icon: LucideIcon;
-    requires: GroupSettingsCapability;
+    /** Server-computed capability that gates this row. */
+    visible: (capabilities: GroupCapabilities) => boolean;
     route: (chatId: number) => string;
 }
 
@@ -361,7 +375,8 @@ export const GROUP_SETTINGS_FEATURES: readonly GroupSettingsFeature[] = [
         title: 'Group info',
         subtitle: 'Name, photo and description',
         icon: PencilSparkles,
-        requires: 'canEditInfo',
+        visible: (capabilities): boolean =>
+            capabilities.canEditInfo === true,
         route: (chatId: number): string => `/group-settings/${chatId}/info`,
     },
     {
@@ -369,9 +384,19 @@ export const GROUP_SETTINGS_FEATURES: readonly GroupSettingsFeature[] = [
         title: 'Invite links',
         subtitle: 'Create and manage links to join this group',
         icon: Link,
-        requires: 'canManageInviteLinks',
+        visible: (capabilities): boolean =>
+            capabilities.canManageInviteLinks === true,
         route: (chatId: number): string =>
             `/group-settings/${chatId}/invite-links`,
+    },
+    {
+        key: 'banned-users',
+        title: 'Banned users',
+        subtitle: 'See who is banned and unban them',
+        icon: UserX,
+        visible: canManageBans,
+        route: (chatId: number): string =>
+            `/group-settings/${chatId}/banned`,
     },
 ];
 
@@ -381,8 +406,8 @@ export function visibleGroupSettingsFeatures(
     if (capabilities === null || capabilities === undefined) {
         return [];
     }
-    return GROUP_SETTINGS_FEATURES.filter(
-        (feature) => capabilities[feature.requires] === true,
+    return GROUP_SETTINGS_FEATURES.filter((feature) =>
+        feature.visible(capabilities),
     );
 }
 

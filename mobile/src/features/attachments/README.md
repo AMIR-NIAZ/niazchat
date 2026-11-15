@@ -19,7 +19,8 @@ Files (photos and documents) in chat. The **file** goes over HTTP, the
    both carry `clientMessageId`, so `mergeMessages` consumes exactly the right
    pending bubble (empty captions and two identical photos included).
 4. **Render** — images inline (`AttachmentGrid`, preview route, auth header,
-   memory-disk cache, tap → full-screen viewer); documents as rows
+   `memory-disk` cache with a stable per-attachment `cacheKey`, tap → full-screen
+   viewer); documents as rows
    (`AttachmentFileRow`). A document tap downloads to
    `<cache>/files/<attachmentId>/<sanitized original name>` (temp file then
    rename), then opens it: Android uses a `content://` URI + ACTION_VIEW intent
@@ -30,6 +31,28 @@ Files (photos and documents) in chat. The **file** goes over HTTP, the
    failed files and reuses the ids that already succeeded. Cancel aborts the
    uploads and removes the bubble. A socket failure keeps the uploaded ids
    (valid during the 6 h orphan window) so Retry only resends.
+
+## Media cache (images and videos)
+
+Full-size images opened in the viewer and videos that finished downloading live
+under the app's **documents** directory (not the OS-purgeable cache):
+
+```
+media-cache/
+  index.json            attachmentId -> { path, size, lastAccessedAt }
+  images/<id>.<ext>     full-size images the user opened
+  videos/<id>.<ext>     completely downloaded videos
+```
+
+Downloads go to `<final>.part` and are renamed only after a clean, non-empty
+download, so a partial file is never used. The index is LRU-ordered and capped
+at `MAX_MEDIA_CACHE_BYTES` (500 MB, never evicting the video playing); leftover
+`.part` files are removed on app start. There is NO streaming: a video plays
+only after it is fully downloaded and its byte size verified (Telegram-style).
+The bubble shows a download button + size; a ready video shows play and opens
+the viewer, which plays the local file (offline included). Bubble thumbnails
+keep using expo-image's cache with `att-<id>-thumb`; the viewer poster uses
+`att-<id>-poster`.
 
 ## Voice messages
 
@@ -71,6 +94,7 @@ Voice messages cannot be edited and are never rendered as generic file rows.
 - `file-cache-policy.ts` — 200-file / 300-MB document cache eviction.
 - `file-open-policy.ts` / `open-file.ts` — Android intent vs iOS share decisions.
 - `attachment-grid.tsx` / `attachment-file-row.tsx` / `attachment-viewer.tsx`.
+- `../shared/media-cache/` — persistent image/video cache, LRU index, startup cleanup.
 
 Long-press on a tile, voice control/waveform/time, document row or its share
 button is forwarded to the message bubble's action sheet; short taps keep

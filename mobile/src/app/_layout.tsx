@@ -4,6 +4,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import {
     AppText,
     FormButton,
@@ -17,7 +18,10 @@ import {
     useAuthStore,
 } from '../features/auth';
 import { appQueryClient } from '../core/query/query-client';
+import { initVideoDownloader } from '../shared/media-cache';
 import { ContextPopupProvider } from '../shared/context-popup';
+import { DialogProvider } from '../shared/dialog';
+import { MediaViewerProvider } from '../features/attachments';
 import { I18nManager } from 'react-native';
 
 I18nManager.allowRTL(false);
@@ -42,6 +46,9 @@ export default function RootLayout(): React.ReactElement {
     useEffect(() => {
         let cancelled = false;
         registerAuthTokenProvider();
+        // Delete leftover `.part` files from interrupted media downloads and
+        // mark fully downloaded videos `ready` before the first bubble renders.
+        void initVideoDownloader();
         const stopLifecycle = startSessionLifecycle();
         const bootstrap = async (): Promise<void> => {
             await useAuthStore.getState().restoreSession();
@@ -76,26 +83,39 @@ export default function RootLayout(): React.ReactElement {
     }
 
     return (
-        <QueryClientProvider client={appQueryClient}>
-            <SafeAreaProvider>
-                <StatusBar style="light" />
-                {/* One host for every floating popup: mounted LAST, above the
-                    navigator, so it covers the screens and their headers. */}
-                <ContextPopupProvider>
-                    <Stack
-                        screenOptions={{
-                            headerShown: false,
-                            animation: 'fade',
-                            contentStyle: {
-                                backgroundColor: palette.background,
-                            },
-                        }}
-                    >
-                        <Stack.Screen name="join/[code]" />
-                    </Stack>
-                </ContextPopupProvider>
-            </SafeAreaProvider>
-        </QueryClientProvider>
+        <GestureHandlerRootView style={styles.root}>
+            <QueryClientProvider client={appQueryClient}>
+                <SafeAreaProvider>
+                    <StatusBar style="light" />
+                    {/* Overlay stacking, painted in this order:
+                        navigator < media viewer (900) < context popups (1000)
+                        < dialogs and toasts (1100).
+
+                        Each provider draws its host AFTER `children`, so the
+                        nesting below is the stacking order: the viewer is the
+                        innermost child (painted first, above the navigator),
+                        then the popup host, then the dialog/toast host. */}
+                    <DialogProvider>
+                        <ContextPopupProvider>
+                            <MediaViewerProvider>
+                                <Stack
+                                    screenOptions={{
+                                        headerShown: false,
+                                        animation: 'fade',
+                                        contentStyle: {
+                                            backgroundColor:
+                                                palette.background,
+                                        },
+                                    }}
+                                >
+                                    <Stack.Screen name="join/[code]" />
+                                </Stack>
+                            </MediaViewerProvider>
+                        </ContextPopupProvider>
+                    </DialogProvider>
+                </SafeAreaProvider>
+            </QueryClientProvider>
+        </GestureHandlerRootView>
     );
 }
 
@@ -135,6 +155,7 @@ function ServerUnreachableScreen({
 }
 
 const styles = StyleSheet.create({
+    root: { flex: 1 },
     unreachableScreen: {
         justifyContent: 'center',
         gap: spacing.md,

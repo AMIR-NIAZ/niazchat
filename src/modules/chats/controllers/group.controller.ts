@@ -238,4 +238,19 @@ export class GroupController {
     ): Promise<MemberActionResponse> {
         return this.groups.removeMember(chatId, memberId, request.user.sub);
     }
+
+    /**
+     * Ban: owner (members and admins) or an admin with `ban_user`/`all`
+     * (members only). The row keeps existing with the `ban` role, so the user
+     * cannot read/send, rejoin by link or be re-added until unbanned.
+     */
+    @Post(':chatId/members/:memberId/ban')
+    @Role([RoleEnum.ALL])
+    banMember(
+        @Req() request: RequestAuth,
+        @Param('chatId', ParseIntPipe) chatId: ChatId,
+        @Param('memberId', ParseIntPipe) memberId: number,
+    ): Promise<MemberActionResponse> {
+        return this.groups.banMember(chatId, memberId, request.user.sub);
+    }
 }

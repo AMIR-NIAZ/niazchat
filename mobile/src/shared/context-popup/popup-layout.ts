@@ -8,8 +8,14 @@
  * never shown with an empty or half-sized container.
  *
  * The stack is: reaction pill, gap, copy of the pressed element, gap, action
- * menu. When the menu does not fit below the source, the sandwich flips: the
- * menu sits above the copy and the pill below it (`placement`).
+ * menu. Every copy — text, media, voice, file — keeps the measured size of the
+ * pressed element EXACTLY: `previewHeight === anchor.height` is an invariant,
+ * so the copy always shows the whole bubble (footer/time row included) and the
+ * live row's box can be replaced by it without any visible jump.
+ *
+ * When the stack does not fit, it is moved as ONE block by the missing amount
+ * (up when it would cross the bottom, down when it would cross the top), then
+ * clamped to the usable area. No part is ever resized or re-stacked.
  */
 
 export interface PopupRect {
@@ -38,10 +44,6 @@ export type PopupPlacement = 'below';
 export const POPUP_GAP = 8;
 /** Minimum distance kept from every window / safe-area edge. */
 export const POPUP_SCREEN_MARGIN = 12;
-/** The copy is clipped to this share of the window height. */
-export const POPUP_MAX_PREVIEW_RATIO = 0.70;
-/** Never shrink the copy below this, even in a tiny window. */
-export const POPUP_MIN_PREVIEW_HEIGHT = 48;
 /** Centered cards (reactor list) never exceed this share of the window. */
 export const POPUP_MAX_CENTERED_RATIO = 0.6;
 
@@ -83,7 +85,7 @@ export interface PopupLayoutInput {
 }
 
 export interface PopupLayout {
-    /** The copy: the anchor's x/width, clamped (and clipped) y/height. */
+    /** The copy: the anchor's exact width and height, slid y. */
     previewX: number;
     previewY: number;
     previewWidth: number;
@@ -92,9 +94,9 @@ export interface PopupLayout {
     menu: PopupRect | null;
     /** Centered card; when set, the anchor stack fields are zero. */
     center: PopupRect | null;
-    /** Whether the action menu ended up below or above the copy. */
+    /** The menu always sits below the copy. */
     placement: PopupPlacement;
-    /** True when the copy had to be cut to fit the window. */
+    /** True when the centered card had to be cut. Anchor copies are never cut. */
     clipped: boolean;
 }
 
@@ -172,50 +174,40 @@ export function computePopupLayout(input: PopupLayoutInput): PopupLayout {
         ? Math.min(reactionPillWidth(reactions), availableWidth)
         : 0;
 
+    // EVERY copy keeps the measured anchor box exactly (its chrome — meta row,
+    // caption, reply header — is part of the anchor). The copy is the live
+    // bubble's box, so nothing is cropped and the footer never disappears.
+    const previewX = input.anchor.x;
+    const previewWidth = input.anchor.width;
+    const previewHeight = input.anchor.height;
+    const clipped = false;
+    const placement: PopupPlacement = 'below';
+
+    // The stack: [pill + GAP] copy [GAP + menu]. Its natural top puts the copy
+    // exactly on the anchor. When the block does not fit, the WHOLE block is
+    // shifted by the missing amount, then clamped to the usable area: the copy
+    // is never resized and the gaps between the parts never change.
     const pillBlock = hasReactions ? REACTION_PILL_HEIGHT + POPUP_GAP : 0;
-    const menuBlock = hasMenu ? menuBoxHeight + POPUP_GAP : 0;
+    const menuBlock = hasMenu ? POPUP_GAP + menuBoxHeight : 0;
+    const stackHeight = pillBlock + previewHeight + menuBlock;
 
-    const previewLimit = Math.max(
-        POPUP_MIN_PREVIEW_HEIGHT,
-        Math.floor(windowHeight * POPUP_MAX_PREVIEW_RATIO),
-    );
-    const room = Math.max(
-        POPUP_MIN_PREVIEW_HEIGHT,
-        availableHeight - pillBlock - menuBlock,
-    );
-    const previewHeight = Math.max(
-        1,
-        Math.min(input.anchor.height, previewLimit, room),
-    );
-    const clipped = previewHeight < input.anchor.height;
+    let stackTop = input.anchor.y - pillBlock;
+    if (stackTop + stackHeight > safeBottom) {
+        stackTop -= stackTop + stackHeight - safeBottom;
+    }
+    stackTop = Math.max(safeTop, stackTop);
 
-    // Prefer the menu below the copy; flip the whole sandwich when that would
-    // push it off-screen but the mirror image fits.
-    const fitsBelow = input.anchor.y + previewHeight + menuBlock <= safeBottom;
-    const canFlip =
-        hasMenu &&
-        input.anchor.y - POPUP_GAP - menuBoxHeight >= safeTop &&
-        input.anchor.y + previewHeight + pillBlock <= safeBottom;
-    const placement: PopupPlacement = !fitsBelow && canFlip ? 'below' : 'below';
-
-    const aboveBlock = placement === 'below' ? pillBlock : menuBlock;
-    const belowBlock = placement === 'below' ? menuBlock : pillBlock;
-    const minY = safeTop + aboveBlock;
-    const maxY = Math.max(minY, safeBottom - belowBlock - previewHeight);
+    const pillTop = stackTop;
     // Rounded only here: the host compensates this rounding with a translateY,
     // so the copy still rests on the bubble's exact y. x/width stay fractional
     // so the copy keeps the bubble's horizontal geometry (no re-wrapping).
-    const previewY = Math.round(Math.min(Math.max(input.anchor.y, minY), maxY));
-    const previewX = input.anchor.x;
-    const previewWidth = Math.max(1, input.anchor.width);
+    const previewY = Math.round(stackTop + pillBlock);
+    const menuTop = previewY + previewHeight + POPUP_GAP;
 
     const reactionRect: PopupRect | null = hasReactions
         ? {
               x: Math.round(alignX(previewX, previewWidth, pillWidth)),
-              y:
-                  placement === 'below'
-                      ? previewY - POPUP_GAP - REACTION_PILL_HEIGHT
-                      : previewY + previewHeight + POPUP_GAP,
+              y: Math.round(pillTop),
               width: pillWidth,
               height: REACTION_PILL_HEIGHT,
           }
@@ -224,10 +216,7 @@ export function computePopupLayout(input: PopupLayoutInput): PopupLayout {
     const menuRect: PopupRect | null = hasMenu
         ? {
               x: Math.round(alignX(previewX, previewWidth, menuWidth)),
-              y:
-                  placement === 'below'
-                      ? previewY + previewHeight + POPUP_GAP
-                      : previewY - POPUP_GAP - menuBoxHeight,
+              y: Math.round(menuTop),
               width: menuWidth,
               height: menuBoxHeight,
           }

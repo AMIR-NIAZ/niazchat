@@ -27,6 +27,7 @@ import {
 import { GroupRealtimeService } from './group-realtime.service';
 import {
     ADMIN_PERMISSION_OPTIONS,
+    canBan,
     canDemote,
     canPromote,
     canRemove,
@@ -642,6 +643,132 @@ export class GroupMembersService {
         callerUserId: UserId,
     ): Promise<MemberActionResponse> {
         return this.changeRole(chatId, memberId, callerUserId, 'remove');
+    }
+
+    /**
+     * Ban a member: their membership row(s) keep existing but the role becomes
+     * `ban` (the only ban representation in this schema), every permission
+     * grant is deleted and the caller is removed from the chat room.
+     *
+     * The owner may ban members and admins; an admin needs `ban_user`/`all`
+     * and may ban plain members only. Nobody bans the owner or themselves, and
+     * an already banned target is a 409. Same one-transaction locking pattern
+     * as the other actions: the caller and every row of the target user are
+     * locked, then the rules are re-checked on the locked roles.
+     */
+    async banMember(
+        chatId: ChatId,
+        memberId: number,
+        callerUserId: UserId,
+    ): Promise<MemberActionResponse> {
+        const caller = await this.permissions.getCallerContext(
+            chatId,
+            callerUserId,
+        );
+        this.permissions.assertGroup(caller);
+
+        const target = await this.memberRepository.findOne({
+            where: { id: memberId, chat: { id: chatId } },
+            relations: { chat: true, role: true, user: true },
+        });
+        if (!target) {
+            throw new NotFoundException('member not found in this group');
+        }
+        const targetUserId = Number(target.user.id);
+        const expectedRole = toGroupRole(target.role?.name);
+
+        await this.rateLimit.consume(
+            `group:member-action:${callerUserId}`,
+            GROUP_ACTION_RATE_LIMIT,
+            GROUP_ACTION_RATE_WINDOW_SECONDS,
+            'Too many group actions, please try again later',
+        );
+
+        const result = await this.dataSource.transaction(async (manager) => {
+            const callerCtx = await this.loadLockedCaller(
+                manager,
+                chatId,
+                callerUserId,
+            );
+            if (callerCtx.chat.type !== caller.chat.type) {
+                throw new ConflictException('chat changed, retry');
+            }
+            if (callerCtx.chat.isBan) {
+                throw new ForbiddenException('this chat has been banned');
+            }
+
+            const targetRows = await manager
+                .getRepository(ChatMember)
+                .createQueryBuilder('m')
+                .innerJoinAndSelect('m.role', 'role')
+                .where('m."chatId" = :chatId', { chatId })
+                .andWhere('m."userId" = :userId', { userId: targetUserId })
+                .setLock('pessimistic_write')
+                .getMany();
+            if (targetRows.length === 0) {
+                throw new ConflictException(
+                    'member is no longer in this group',
+                );
+            }
+
+            const targetIds = targetRows.map((row) => Number(row.id));
+            const bestTarget = targetRows.reduce((current, candidate) =>
+                roleRank(candidate.role?.name) > roleRank(current.role?.name)
+                    ? candidate
+                    : current,
+            );
+            if (bestTarget.role?.name === RoleChatEnum.BAN) {
+                throw new ConflictException('user is already banned');
+            }
+            const lockedRole = toGroupRole(bestTarget.role?.name);
+            if (lockedRole === null) {
+                throw new ConflictException('member role changed, retry');
+            }
+            if (
+                Number(callerUserId) === targetUserId ||
+                lockedRole === 'owner'
+            ) {
+                throw new ForbiddenException(
+                    "You don't have permission to do this",
+                );
+            }
+            if (expectedRole !== null && expectedRole !== lockedRole) {
+                throw new ConflictException('cannot ban this user');
+            }
+
+            const rules = {
+                isOwner: callerCtx.isOwner,
+                isAdmin: callerCtx.isAdmin,
+                permissions: callerCtx.permissions,
+            };
+            if (!canBan(rules, lockedRole)) {
+                throw new ForbiddenException(
+                    "You don't have permission to do this",
+                );
+            }
+
+            const banRole = await this.roleOrFail(manager, RoleChatEnum.BAN);
+            await this.setRoleForRows(manager, targetIds, banRole.id);
+            // A banned admin loses their permission grants.
+            await manager
+                .getRepository(PermissionAdmin)
+                .delete({ member: { id: In(targetIds) } });
+
+            return {
+                memberId: Number(bestTarget.id),
+                role: null,
+                changed: true,
+            };
+        });
+
+        // Drops the chat from the banned user's app (and their sockets from the
+        // chat room); members get `member_banned` for the row + count refresh.
+        void this.realtime
+            .memberRemoved(chatId, targetUserId, 'banned')
+            .catch(() => undefined);
+        void this.notifyMembersCount(chatId);
+
+        return result;
     }
 
     private async changeRole(

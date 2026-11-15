@@ -45,6 +45,7 @@
         "class-transformer": "^0.5.1",
         "class-validator": "^0.14.3",
         "dotenv": "^17.4.0",
+        "libphonenumber-js": "^1.13.16",
         "pg": "^8.18.0",
         "postgres": "^3.4.8",
         "reflect-metadata": "^0.2.2",

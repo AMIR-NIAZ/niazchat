@@ -1,5 +1,6 @@
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ban } from 'lucide-react-native';
 import { palette, radii, spacing, typography } from '../../shared/theme';
 import {
     GroupMemberActions,
@@ -59,14 +60,32 @@ export function MemberActionsSheet(props: {
                                 props.busy && styles.rowDisabled,
                             ]}
                         >
-                            <Text
-                                style={[
-                                    styles.rowLabel,
-                                    action === 'remove' && styles.rowDanger,
-                                ]}
-                            >
-                                {memberActionLabel(action)}
-                            </Text>
+                            {action === 'ban' ? (
+                                <View style={styles.dangerRow}>
+                                    <Ban
+                                        size={18}
+                                        color={palette.semantic.danger}
+                                        strokeWidth={1.8}
+                                    />
+                                    <Text
+                                        style={[
+                                            styles.rowLabel,
+                                            styles.rowDanger,
+                                        ]}
+                                    >
+                                        {memberActionLabel(action)}
+                                    </Text>
+                                </View>
+                            ) : (
+                                <Text
+                                    style={[
+                                        styles.rowLabel,
+                                        action === 'remove' && styles.rowDanger,
+                                    ]}
+                                >
+                                    {memberActionLabel(action)}
+                                </Text>
+                            )}
                         </Pressable>
                     ))}
 
@@ -115,6 +134,11 @@ const styles = StyleSheet.create({
     },
     rowPressed: { backgroundColor: palette.neutral[100] },
     rowDisabled: { opacity: 0.45 },
+    dangerRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.xs,
+    },
     rowLabel: {
         fontSize: 16,
         fontWeight: '600',

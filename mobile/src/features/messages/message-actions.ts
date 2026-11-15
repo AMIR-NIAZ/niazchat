@@ -10,6 +10,8 @@ export interface MessageActionContext {
 export interface MessageActions {
     reply: boolean;
     forward: boolean;
+    /** Copies the full message text, never the popup copy. */
+    copy: boolean;
     select: boolean;
     edit: boolean;
     editLabel: 'Edit message' | 'Edit caption' | null;
@@ -22,6 +24,7 @@ export interface MessageActions {
 export const NO_MESSAGE_ACTIONS: MessageActions = {
     reply: false,
     forward: false,
+    copy: false,
     select: false,
     edit: false,
     editLabel: null,
@@ -54,6 +57,7 @@ export function getMessageActions(
     return {
         reply: true,
         forward: true,
+        copy: hasText,
         select: true,
         edit,
         editLabel: edit

@@ -10,11 +10,14 @@ import { OtpService } from './services/otp.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from './entities/user.entity';
 import { UserProfile } from './entities/user_profile.entity';
+import { Contact } from './entities/contact.entity';
+import { ContactsService } from './services/contacts.service';
 import { JwtAppService } from './services/jwt.service';
 import { JwtService } from '@nestjs/jwt';
 import { UserService } from './services/user.service';
 import { UserGateway } from './gateways/user.gateway';
 import { UserController } from './controllers/user.controller';
+import { ContactsController } from './controllers/contacts.controller';
 import { Role } from './entities/role.entity';
 import { UserPermission } from './entities/user_permissions.entity';
 import { Permission } from './entities/permission.entity';
@@ -32,15 +35,17 @@ import { RateLimitService } from 'src/common/services/rate-limit.service';
         TypeOrmModule.forFeature([
             User,
             UserProfile,
+            Contact,
             Role,
             UserPermission,
             Permission,
         ]),
     ],
-    controllers: [AuthController, UserController],
+    controllers: [AuthController, UserController, ContactsController],
     providers: [
         AuthService,
         UserService,
+        ContactsService,
         PermissionService,
         OtpService,
         OtpConsumer,

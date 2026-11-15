@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
     ActivityIndicator,
-    Alert,
     AppState,
     BackHandler,
     FlatList,
@@ -17,9 +16,18 @@ import {
     View,
     useWindowDimensions,
 } from 'react-native';
-import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
+import type {
+    LayoutChangeEvent,
+    NativeScrollEvent,
+    NativeSyntheticEvent,
+    StyleProp,
+    ViewStyle,
+} from 'react-native';
 import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import MaskedView from '@react-native-masked-view/masked-view';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as Clipboard from 'expo-clipboard';
 import {
     AppText,
     GlassHeader,
@@ -68,11 +76,13 @@ import type {
     MessageMenuActionId,
 } from '../../../features/messages';
 import type { LocalAttachment } from '../../../features/attachments';
+import type { ViewerRect } from '../../../features/attachments/viewer/viewer-model';
 import {
-    AttachmentViewer,
+    closeMediaViewer,
     deleteCachedAttachment,
     downloadAttachment,
     mimeForFileName,
+    openMediaViewer,
     shareLocalFile,
 } from '../../../features/attachments';
 import {
@@ -105,6 +115,7 @@ import {
 } from '../../../features/users';
 import { useReactionEmojis } from '../../../features/reactions';
 import { useContextPopup } from '../../../shared/context-popup';
+import { dialog, toast } from '../../../shared/dialog';
 import type {
     ContextPopupConfig,
     PopupRect,
@@ -127,6 +138,32 @@ import type {
  */
 
 type ChatDetailRouteParams = { chatId?: string | string[] };
+
+/**
+ * `@react-native-masked-view/masked-view` still ships React-18 class typings
+ * (`React.Component<P>` without a context argument), which React 19's JSX
+ * rejects. The component is a normal View-like host component at runtime, so
+ * the cast only repairs the type surface.
+ */
+const MaskedViewSafe = MaskedView as unknown as React.ComponentType<{
+    style?: StyleProp<ViewStyle>;
+    maskElement?: React.ReactElement;
+    children?: React.ReactNode;
+    pointerEvents?: 'auto' | 'none' | 'box-none' | 'box-only';
+}>;
+
+/** Extra height added on top of the header/composer height for the edge fades. */
+const FADE_EXTRA = 100;
+/** Gradient stops for the edge fade mask, shared (mirrored) by top and bottom. */
+const FADE_STOPS = {
+    colors: [
+        'rgba(0,0,0,0)',
+        'rgba(0, 0, 0, 0.15)',
+        'rgba(0, 0, 0, 0.82)',
+        'rgba(0,0,0,1)',
+    ] as [string, string, string, string],
+    locations: [0, 0.35, 0.7, 1] as [number, number, number, number],
+};
 
 /** Inverted list: offset 0 is the newest message; below it counts as "scrolled up". */
 const NEAR_BOTTOM_OFFSET = 80;
@@ -163,7 +200,7 @@ export default function ChatDetailScreen(): React.ReactElement {
 function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     const queryClient = useQueryClient();
     const insets = useSafeAreaInsets();
-    const keyboard = useAndroidKeyboardInset(insets.bottom);
+    const keyboard = useAndroidKeyboardInset();
     const popup = useContextPopup();
     const window = useWindowDimensions();
     // Session-derived (access-token `sub`), numeric, and stable across profile
@@ -178,15 +215,45 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     const [selecting, setSelecting] = useState(false);
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
     const [forwardOpen, setForwardOpen] = useState(false);
-    const [viewer, setViewer] = useState<{
-        message: ChatMessage;
-        index: number;
-    } | null>(null);
     const [unreadDividerId, setUnreadDividerId] = useState<number | null>(null);
     const [screenFocused, setScreenFocused] = useState(false);
     const [appActive, setAppActive] = useState(
         AppState.currentState === 'active',
     );
+    // Measured chrome, so the full-screen list can reserve exactly the space
+    // the floating header/composer cover (never magic numbers).
+    const [headerHeight, setHeaderHeight] = useState(0);
+    const [composerHeight, setComposerHeight] = useState(0);
+    const [noticesHeight, setNoticesHeight] = useState(0);
+    const [keyboardVisible, setKeyboardVisible] = useState(false);
+    const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+    useEffect((): (() => void) => {
+        const show = Keyboard.addListener('keyboardDidShow', (event): void => {
+            setKeyboardHeight(Math.round(event.endCoordinates.height));
+            setKeyboardVisible(true);
+        });
+        const hide = Keyboard.addListener('keyboardDidHide', (): void => {
+            setKeyboardHeight(0);
+            setKeyboardVisible(false);
+        });
+        return (): void => {
+            show.remove();
+            hide.remove();
+        };
+    }, []);
+
+    const measureHeader = useCallback((event: LayoutChangeEvent): void => {
+        const height = Math.round(event.nativeEvent.layout.height);
+        setHeaderHeight((current) => (current === height ? current : height));
+    }, []);
+    const measureNotices = useCallback((event: LayoutChangeEvent): void => {
+        const height = Math.round(event.nativeEvent.layout.height);
+        setNoticesHeight((current) => (current === height ? current : height));
+    }, []);
+    const measureComposer = useCallback((height: number): void => {
+        setComposerHeight((current) => (current === height ? current : height));
+    }, []);
 
     const detail = conversation.detail;
     const messages = detail?.messages ?? [];
@@ -511,21 +578,14 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         }
     }, [messages, replyTarget]);
 
-    // Leaving the screen (or switching chats) never leaves a menu behind.
+    // Leaving the screen (or switching chats) never leaves a menu — or the
+    // full-screen media viewer, which is mounted above the whole app — behind.
     useEffect((): (() => void) => {
         return (): void => {
             popup.close();
+            closeMediaViewer();
         };
     }, [popup, chatId]);
-
-    // A viewer showing a message deleted by anyone closes with it, so video
-    // playback never continues for a message that no longer exists.
-    useEffect((): void => {
-        if (viewer === null || viewer.message.id === null) return;
-        if (!messages.some((message) => message.id === viewer.message.id)) {
-            setViewer(null);
-        }
-    }, [messages, viewer]);
 
     const newestKey =
         messages.length > 0
@@ -798,10 +858,14 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                 ),
             )
             .catch((error: unknown) =>
-                Alert.alert(
-                    'Could not share file',
-                    error instanceof Error ? error.message : 'Share failed.',
-                ),
+                dialog.show({
+                    title: 'Could not share file',
+                    message:
+                        error instanceof Error
+                            ? error.message
+                            : 'Share failed.',
+                    tone: 'danger',
+                }),
             );
     };
 
@@ -824,63 +888,62 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
               : hasAttachments
                 ? 'This message and its attachments will be removed for everyone.'
                 : 'This message will be removed for everyone.';
-        Alert.alert(
-            deletingOtherMember ? 'Delete for everyone?' : 'Delete message?',
-            explanation,
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Delete',
-                    style: 'destructive',
-                    onPress: (): void => {
-                        const messageId = target.id;
-                        if (messageId === null) {
-                            return;
-                        }
-                        if (viewer?.message.id === messageId) {
-                            setViewer(null);
-                        }
-                        if (
-                            target.attachments.some(
-                                (attachment) =>
-                                    attachment.id !== null &&
-                                    attachment.id ===
-                                        getVoicePlayback().attachmentId,
-                            )
-                        ) {
-                            stopVoice();
-                        }
-                        void conversation
-                            .remove(messageId)
-                            .then((): void => {
-                                for (const attachment of target.attachments) {
-                                    if (attachment.id === null) {
-                                        continue;
-                                    }
-                                    void deleteCachedAttachment(attachment.id);
-                                    if (attachment.kind === 'voice') {
-                                        const path = voiceCachePath(
-                                            attachment.id,
-                                            attachment.mimeType,
-                                        );
-                                        if (path !== null) {
-                                            void deleteVoiceFile(path);
-                                        }
-                                    }
+        void dialog
+            .confirm({
+                title: deletingOtherMember
+                    ? 'Delete for everyone?'
+                    : 'Delete message?',
+                message: explanation,
+                confirmText: 'Delete',
+                destructive: true,
+            })
+            .then((confirmed): void => {
+                if (!confirmed) {
+                    return;
+                }
+                const messageId = target.id;
+                if (messageId === null) {
+                    return;
+                }
+                if (
+                    target.attachments.some(
+                        (attachment) =>
+                            attachment.id !== null &&
+                            attachment.id === getVoicePlayback().attachmentId,
+                    )
+                ) {
+                    stopVoice();
+                }
+                void conversation
+                    .remove(messageId)
+                    .then((): void => {
+                        for (const attachment of target.attachments) {
+                            if (attachment.id === null) {
+                                continue;
+                            }
+                            void deleteCachedAttachment(attachment.id);
+                            if (attachment.kind === 'voice') {
+                                const path = voiceCachePath(
+                                    attachment.id,
+                                    attachment.mimeType,
+                                );
+                                if (path !== null) {
+                                    void deleteVoiceFile(path);
                                 }
-                            })
-                            .catch((error: unknown) =>
-                                Alert.alert(
-                                    'Could not delete message',
-                                    error instanceof Error
-                                        ? error.message
-                                        : 'Delete failed.',
-                                ),
-                            );
-                    },
-                },
-            ],
-        );
+                            }
+                        }
+                    })
+                    .catch((error: unknown) =>
+                        dialog.show({
+                            title: 'Could not delete message',
+                            message:
+                                error instanceof Error
+                                    ? error.message
+                                    : 'Delete failed.',
+                            tone: 'danger',
+                        }),
+                    );
+            });
     };
 
     const performMessageAction = (
@@ -895,6 +958,10 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                 return;
             case 'forward':
                 handleOpenForward(target);
+                return;
+            case 'copy':
+                // Always the FULL text, never the popup copy.
+                void Clipboard.setStringAsync(target.content ?? '');
                 return;
             case 'select':
                 beginSelection(target);
@@ -928,6 +995,7 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         const items = buildMessageMenuItems(actions, {
             onReply: (): void => performMessageAction(message, 'reply'),
             onForward: (): void => performMessageAction(message, 'forward'),
+            onCopy: (): void => performMessageAction(message, 'copy'),
             onSelect: (): void => performMessageAction(message, 'select'),
             onShare: (): void => performMessageAction(message, 'share'),
             onEdit: (): void => performMessageAction(message, 'edit'),
@@ -955,6 +1023,7 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         return {
             anchor,
             align: mineMessage ? 'end' : 'start',
+            sourceKey: message.key,
             actions: items,
             ...(reactions === undefined ? {} : { reactions }),
             ...(showPreview
@@ -968,12 +1037,41 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                               showSenderName={isGroup && !mineMessage}
                               showAvatar={false}
                               width={anchor.width}
+                              height={anchor.height}
                           />
                       ),
                   }
                 : {}),
             accessibilityLabel: 'Message actions',
         };
+    };
+
+    // Opens the app-wide full-screen viewer (mounted at the root, above this
+    // screen's header and composer). Only a snapshot of the conversation is
+    // handed over, so nothing here re-renders when it opens or closes.
+    const openMedia = (
+        source: ChatMessage,
+        mediaIndex: number,
+        origin: ViewerRect | null,
+    ): void => {
+        openMediaViewer({
+            messages,
+            initialMessageKey: source.key,
+            initialIndex: mediaIndex,
+            origin,
+            onForward: handleOpenForward,
+            onGoToMessage: (message): void => {
+                if (message.id !== null) {
+                    performJump(message.id);
+                }
+            },
+            onDelete: deleteMessage,
+            canDelete: (message): boolean =>
+                getMessageActions(message, {
+                    currentUserId,
+                    canDeleteOthers: isGroup && isOwner,
+                }).delete === true,
+        });
     };
 
     const openMessageMenu = (message: ChatMessage, anchor: PopupRect): void => {
@@ -1002,6 +1100,7 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         if (message.id === null) return;
         popup.open({
             anchor: { x: 0, y: 0, width: 1, height: 1 },
+            sourceKey: message.key,
             center: {
                 width: Math.min(window.width - spacing.lg, 360),
                 height: Math.round(window.height * 0.6),
@@ -1118,7 +1217,7 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     /** Removed by an owner/admin while this chat (or the group panel) is open. */
     const handleRemovedFromGroup = useCallback((): void => {
         purgeChatFromCaches(queryClient, chatId);
-        Alert.alert('Removed from group', 'You were removed from this group');
+        toast.show('You were removed from this group');
         router.replace('/(app)');
     }, [queryClient, chatId]);
     useGroupRemovedEvent(chatId, handleRemovedFromGroup);
@@ -1201,386 +1300,540 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         </>
     );
 
+    // ── Full-screen list geometry ────────────────────────────────────────────
+    // The header and the composer float over the list, so the list only needs
+    // to keep its content clear of them:
+    //   · `headerHeight`   = measured header layer (safe-area top + pill)
+    //   · `composerReach`  = measured composer + notices + the bottom inset it
+    //     floats above (that inset is already outside the list frame while the
+    //     keyboard lifts it)
+    //   · `composerBottom` = where the composer layer is anchored; it follows
+    //     the keyboard exactly like the old Screen padding did (the Android
+    //     `keyboard.inset` is the part the native window did not already
+    //     shrink by, so it is never applied twice).
+    const composerBottom =
+        Math.max(insets.bottom, spacing.xs) +
+        (keyboard.open ? keyboard.inset : 0);
+    // On iOS the list's KeyboardAvoidingView lifts the frame's bottom to the
+    // keyboard, so the bottom inset/margin under the composer is already
+    // outside it. On Android the frame's bottom stays the window edge (the
+    // native resize only moves that edge), so the composer's own bottom offset
+    // is still inside and must be cleared.
+    const keyboardLifted = keyboardVisible && Platform.OS === 'ios';
+    const composerReach =
+        composerHeight + noticesHeight + (keyboardLifted ? 0 : composerBottom);
+    /** Inverted list: paddingTop is the VISUAL bottom (composer side). */
+    const listPaddingTop = Math.round(composerReach + 12);
+    /** Inverse: paddingBottom is the VISUAL top (header side). */
+    const listPaddingBottom = Math.round(headerHeight + 12);
+    const topFade = Math.round(headerHeight + FADE_EXTRA);
+    const bottomFade = Math.round(composerReach + FADE_EXTRA);
+    const hasNotices =
+        conversation.sendError !== null ||
+        conversation.reactionError !== null ||
+        jumpNotice !== null;
+    // The scroll-to-latest button lives in the full-screen list layer, so its
+    // bottom offset is measured from the window edge: on iOS the list frame is
+    // lifted by the keyboard while the layer is not, on Android the resized
+    // window already moves that edge.
+    const scrollButtonBottom =
+        (Platform.OS === 'ios' && keyboardVisible
+            ? keyboardHeight
+            : composerBottom) +
+        composerHeight +
+        noticesHeight +
+        spacing.sm;
+
     return (
         <Screen
-            style={[
-                styles.screen,
-                {
-                    // While the keyboard is open it replaces the safe-area
-                    // bottom padding; on Android only the part the native
-                    // window did not already shrink by is added (measured in
-                    // `useAndroidKeyboardInset`, so never twice).
-                    paddingBottom: keyboard.open
-                        ? keyboard.inset
-                        : insets.bottom + spacing.md,
-                },
-            ]}
+            style={styles.screen}
             // The container spans the window: its measured bottom edge tells
             // the keyboard hook whether Android already resized it.
             onLayout={keyboard.onContainerLayout}
-            withTopInset={true}
+            withTopInset={false}
             withBottomInset={false}
         >
-            {selecting ? (
-                <View style={styles.selectionBar}>
-                    <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Cancel selection"
-                        style={styles.selectionAction}
-                        onPress={exitSelection}
-                    >
-                        <Text style={styles.selectionCancel}>Cancel</Text>
-                    </Pressable>
-                    <Text
-                        style={styles.selectionCount}
-                        accessibilityLabel={`${selectedIds.size} selected`}
-                    >
-                        {selectedIds.size} selected
-                    </Text>
-                    <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Forward selected messages"
-                        accessibilityState={{
-                            disabled: selectedIds.size === 0,
-                        }}
-                        disabled={selectedIds.size === 0}
-                        style={[
-                            styles.selectionForward,
-                            selectedIds.size === 0 &&
-                                styles.selectionForwardDisabled,
-                        ]}
-                        onPress={(): void => setForwardOpen(true)}
-                    >
-                        <Text style={styles.selectionForwardText}>Forward</Text>
-                    </Pressable>
-                </View>
-            ) : (
-                <GlassHeader style={styles.headerBar} layout="row">
-                    <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Go back"
-                        style={styles.backButton}
-                        onPress={(): void => router.back()}
-                    >
-                        <Text style={styles.backText}>‹</Text>
-                    </Pressable>
-                    {peerUserId !== null ? (
+            <View
+                pointerEvents="box-none"
+                style={[
+                    styles.headerLayer,
+                    {
+                        paddingTop: insets.top + spacing.md,
+                        paddingHorizontal: spacing.sm,
+                    },
+                ]}
+                onLayout={measureHeader}
+            >
+                {selecting ? (
+                    <View style={styles.selectionBar}>
                         <Pressable
                             accessibilityRole="button"
-                            accessibilityLabel={`Open profile of ${name}`}
-                            onPress={(): void => {
-                                openUserProfile({
-                                    userId: peerUserId,
-                                    name,
-                                    avatar: avatarPath,
-                                });
+                            accessibilityLabel="Cancel selection"
+                            style={styles.selectionAction}
+                            onPress={exitSelection}
+                        >
+                            <Text style={styles.selectionCancel}>Cancel</Text>
+                        </Pressable>
+                        <Text
+                            style={styles.selectionCount}
+                            accessibilityLabel={`${selectedIds.size} selected`}
+                        >
+                            {selectedIds.size} selected
+                        </Text>
+                        <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel="Forward selected messages"
+                            accessibilityState={{
+                                disabled: selectedIds.size === 0,
                             }}
-                            style={({ pressed }) => [
-                                styles.headerIdentity,
-                                pressed && styles.pressed,
+                            disabled={selectedIds.size === 0}
+                            style={[
+                                styles.selectionForward,
+                                selectedIds.size === 0 &&
+                                    styles.selectionForwardDisabled,
                             ]}
+                            onPress={(): void => setForwardOpen(true)}
                         >
-                            {headerIdentity}
+                            <Text style={styles.selectionForwardText}>
+                                Forward
+                            </Text>
                         </Pressable>
-                    ) : isGroup ? (
+                    </View>
+                ) : (
+                    <GlassHeader layout="row">
                         <Pressable
                             accessibilityRole="button"
-                            accessibilityLabel={`Open group info for ${name}`}
-                            onPress={openGroupInfo}
-                            style={({ pressed }) => [
-                                styles.headerIdentity,
-                                pressed && styles.pressed,
-                            ]}
+                            accessibilityLabel="Go back"
+                            style={styles.backButton}
+                            onPress={(): void => router.back()}
                         >
-                            {headerIdentity}
+                            <Text style={styles.backText}>‹</Text>
                         </Pressable>
-                    ) : (
-                        headerIdentity
-                    )}
-                </GlassHeader>
-            )}
+                        {peerUserId !== null ? (
+                            <Pressable
+                                accessibilityRole="button"
+                                accessibilityLabel={`Open profile of ${name}`}
+                                onPress={(): void => {
+                                    openUserProfile({
+                                        userId: peerUserId,
+                                        name,
+                                        avatar: avatarPath,
+                                    });
+                                }}
+                                style={({ pressed }) => [
+                                    styles.headerIdentity,
+                                    pressed && styles.pressed,
+                                ]}
+                            >
+                                {headerIdentity}
+                            </Pressable>
+                        ) : isGroup ? (
+                            <Pressable
+                                accessibilityRole="button"
+                                accessibilityLabel={`Open group info for ${name}`}
+                                onPress={openGroupInfo}
+                                style={({ pressed }) => [
+                                    styles.headerIdentity,
+                                    pressed && styles.pressed,
+                                ]}
+                            >
+                                {headerIdentity}
+                            </Pressable>
+                        ) : (
+                            headerIdentity
+                        )}
+                    </GlassHeader>
+                )}
+            </View>
 
-            {messages.length === 0 ? (
-                <View style={styles.emptyState}>
-                    <AppText variant="title">No messages yet</AppText>
-                    <AppText variant="caption" style={styles.emptyCaption}>
-                        Say hello — messages are delivered over WebSocket.
-                    </AppText>
-                </View>
-            ) : (
-                <KeyboardAvoidingView
-                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-                    style={styles.chatArea}
-                    keyboardVerticalOffset={
-                        Platform.OS === 'ios' ? spacing.lg : 0
-                    }
-                >
-                    <FlatList
-                        ref={listRef}
-                        inverted={true}
-                        style={styles.list}
-                        contentContainerStyle={styles.listContent}
-                        keyExtractor={(chunk): string =>
-                            chunk.kind === 'message'
-                                ? `m-${chunk.message.key}`
-                                : chunk.kind === 'unread'
-                                  ? `u-${chunk.key}`
-                                  : `d-${chunk.key}`
-                        }
-                        keyboardShouldPersistTaps="handled"
-                        onScrollBeginDrag={(): void => {
-                            cancelJump();
-                            scrollToLatestButton.cancelScrollToBottom();
-                            Keyboard.dismiss();
-                        }}
-                        onScroll={handleListScroll}
-                        onViewableItemsChanged={onViewableItemsChanged}
-                        viewabilityConfig={viewabilityConfig}
-                        onLayout={scrollToLatestButton.onLayout}
-                        onContentSizeChange={
-                            scrollToLatestButton.onContentSizeChange
-                        }
-                        scrollEventThrottle={16}
-                        // Inverted: the visual top is the END of the data, so
-                        // this fires when the user nears the oldest message.
-                        onEndReached={(): void => conversation.loadOlder()}
-                        onEndReachedThreshold={0.4}
-                        onScrollToIndexFailed={(info): void => {
-                            // Variable row heights: jump approximately, then
-                            // retry the exact target once rows are measured.
-                            listRef.current?.scrollToOffset({
-                                offset: info.averageItemLength * info.index,
-                                animated: false,
-                            });
-                            setTimeout((): void => {
-                                listRef.current?.scrollToIndex({
-                                    index: info.index,
-                                    viewPosition: 0.5,
-                                    animated: true,
-                                });
-                            }, 120);
-                        }}
-                        ListFooterComponent={
-                            conversation.loadingOlder ? (
-                                <View style={styles.olderRow}>
-                                    <ActivityIndicator
-                                        size="small"
-                                        color={palette.primary[500]}
+            <View
+                pointerEvents="box-none"
+                style={[
+                    styles.listLayer,
+                    keyboard.open &&
+                        keyboard.inset > 0 && { paddingBottom: keyboard.inset },
+                ]}
+            >
+                {messages.length === 0 ? (
+                    <View style={styles.emptyState}>
+                        <AppText variant="title">No messages yet</AppText>
+                        <AppText variant="caption" style={styles.emptyCaption}>
+                            Say hello — messages are delivered over WebSocket.
+                        </AppText>
+                    </View>
+                ) : (
+                    <KeyboardAvoidingView
+                        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                        style={styles.chatArea}
+                        // The list now spans the window, so there is no offset to
+                        // compensate for: the padding is exactly the overlap.
+                        keyboardVerticalOffset={0}
+                    >
+                        {/* Soft edge fade at both ends. MaskedView (not overlay
+                        gradients) because the Screen background is painted
+                        with ambient shapes that must show through the fade. */}
+                        <MaskedViewSafe
+                            style={styles.list}
+                            maskElement={
+                                <View style={StyleSheet.absoluteFill}>
+                                    <LinearGradient
+                                        colors={FADE_STOPS.colors}
+                                        locations={FADE_STOPS.locations}
+                                        style={[
+                                            styles.fadeBand,
+                                            { top: 0, height: topFade },
+                                        ]}
+                                    />
+                                    <View
+                                        style={[
+                                            styles.fadeOpaque,
+                                            {
+                                                top: topFade,
+                                                bottom: bottomFade,
+                                            },
+                                        ]}
+                                    />
+                                    <LinearGradient
+                                        colors={FADE_STOPS.colors}
+                                        locations={FADE_STOPS.locations}
+                                        start={{ x: 0.5, y: 1 }}
+                                        end={{ x: 0.5, y: 0 }}
+                                        style={[
+                                            styles.fadeBand,
+                                            { bottom: 0, height: bottomFade },
+                                        ]}
                                     />
                                 </View>
-                            ) : conversation.loadOlderError !== null ? (
-                                <Pressable
-                                    accessibilityRole="button"
-                                    accessibilityLabel="Retry loading older messages"
-                                    style={styles.olderRow}
-                                    onPress={(): void =>
-                                        conversation.loadOlder()
-                                    }
-                                >
-                                    <Text style={styles.olderRetryText}>
-                                        Couldn&apos;t load older messages ·
-                                        Retry
-                                    </Text>
-                                </Pressable>
-                            ) : undefined
-                        }
-                        data={reversedListData}
-                        extraData={`${selecting}:${[...selectedIds].join(',')}`}
-                        renderItem={({ item }): React.ReactElement => {
-                            if (item.kind === 'unread') {
-                                return (
-                                    <View style={styles.daySlot}>
-                                        <UnreadDivider />
-                                    </View>
-                                );
                             }
-                            if (item.kind === 'day') {
-                                return (
-                                    <View style={styles.daySlot}>
-                                        <DateSeparator label={item.label} />
-                                    </View>
-                                );
-                            }
-                            const message = item.message;
-                            // Both ids normalized to numbers (a bigint-string
-                            // id can never flip the whole history to "theirs").
-                            const mine = isOwnMessage(
-                                currentUserId,
-                                message.senderId,
-                            );
-                            return (
-                                <MessageBubble
-                                    message={message}
-                                    mine={mine}
-                                    isGroup={isGroup}
-                                    currentUserId={currentUserId}
-                                    showSenderName={item.showSenderName}
-                                    showAvatar={item.showAvatar}
-                                    onOpenLink={
-                                        selecting ? undefined : handleOpenLink
+                        >
+                            <FlatList
+                                ref={listRef}
+                                inverted={true}
+                                style={styles.list}
+                                contentContainerStyle={[
+                                    styles.listContent,
+                                    {
+                                        paddingTop: listPaddingTop,
+                                        paddingBottom: listPaddingBottom,
+                                    },
+                                ]}
+                                // Native scrollbar stays between header and composer.
+                                scrollIndicatorInsets={{
+                                    top: Math.round(headerHeight),
+                                    bottom: Math.round(composerReach),
+                                }}
+                                keyExtractor={(chunk): string =>
+                                    chunk.kind === 'message'
+                                        ? `m-${chunk.message.key}`
+                                        : chunk.kind === 'unread'
+                                          ? `u-${chunk.key}`
+                                          : `d-${chunk.key}`
+                                }
+                                keyboardShouldPersistTaps="handled"
+                                onScrollBeginDrag={(): void => {
+                                    cancelJump();
+                                    scrollToLatestButton.cancelScrollToBottom();
+                                    // The popup was measured against the current
+                                    // layout: dismissing the keyboard mid-gesture would
+                                    // relayout the list under a fresh anchor. Once the
+                                    // overlay is up the list cannot scroll anyway.
+                                    if (!popup.isOpen()) {
+                                        Keyboard.dismiss();
                                     }
-                                    onOpenProfile={
-                                        selecting
-                                            ? undefined
-                                            : (sender): void => {
-                                                  openUserProfile({
-                                                      userId: sender.senderId,
-                                                      name: sender.senderName,
-                                                      avatar: sender.senderAvatarPath,
-                                                  });
-                                              }
-                                    }
-                                    onForwardedProfilePress={(
-                                        userId,
-                                        forwardedName,
-                                    ): void => {
-                                        openUserProfile({
-                                            userId,
-                                            name: forwardedName,
-                                            isSelf: isOwnMessage(
-                                                currentUserId,
-                                                userId,
-                                            ),
+                                }}
+                                onScroll={handleListScroll}
+                                onViewableItemsChanged={onViewableItemsChanged}
+                                viewabilityConfig={viewabilityConfig}
+                                onLayout={scrollToLatestButton.onLayout}
+                                onContentSizeChange={
+                                    scrollToLatestButton.onContentSizeChange
+                                }
+                                scrollEventThrottle={16}
+                                // Inverted: the visual top is the END of the data, so
+                                // this fires when the user nears the oldest message.
+                                onEndReached={(): void =>
+                                    conversation.loadOlder()
+                                }
+                                onEndReachedThreshold={0.4}
+                                onScrollToIndexFailed={(info): void => {
+                                    // Variable row heights: jump approximately, then
+                                    // retry the exact target once rows are measured.
+                                    listRef.current?.scrollToOffset({
+                                        offset:
+                                            info.averageItemLength * info.index,
+                                        animated: false,
+                                    });
+                                    setTimeout((): void => {
+                                        listRef.current?.scrollToIndex({
+                                            index: info.index,
+                                            viewPosition: 0.5,
+                                            animated: true,
                                         });
-                                    }}
-                                    selectionMode={selecting}
-                                    selected={
-                                        message.id !== null &&
-                                        selectedIds.has(message.id)
+                                    }, 120);
+                                }}
+                                ListFooterComponent={
+                                    conversation.loadingOlder ? (
+                                        <View style={styles.olderRow}>
+                                            <ActivityIndicator
+                                                size="small"
+                                                color={palette.primary[500]}
+                                            />
+                                        </View>
+                                    ) : conversation.loadOlderError !== null ? (
+                                        <Pressable
+                                            accessibilityRole="button"
+                                            accessibilityLabel="Retry loading older messages"
+                                            style={styles.olderRow}
+                                            onPress={(): void =>
+                                                conversation.loadOlder()
+                                            }
+                                        >
+                                            <Text style={styles.olderRetryText}>
+                                                Couldn&apos;t load older
+                                                messages · Retry
+                                            </Text>
+                                        </Pressable>
+                                    ) : undefined
+                                }
+                                data={reversedListData}
+                                extraData={`${selecting}:${[...selectedIds].join(',')}`}
+                                renderItem={({ item }): React.ReactElement => {
+                                    if (item.kind === 'unread') {
+                                        return (
+                                            <View style={styles.daySlot}>
+                                                <UnreadDivider />
+                                            </View>
+                                        );
                                     }
-                                    onToggleSelect={handleToggleSelection}
-                                    highlighted={highlightedKey === message.key}
-                                    othersLastSeenId={
-                                        detail?.othersLastSeenId ?? null
+                                    if (item.kind === 'day') {
+                                        return (
+                                            <View style={styles.daySlot}>
+                                                <DateSeparator
+                                                    label={item.label}
+                                                />
+                                            </View>
+                                        );
                                     }
-                                    // Tap or hold on the bubble opens the
-                                    // floating menu; pending/failed bubbles
-                                    // keep their own retry/cancel actions.
-                                    onOpenMenu={
-                                        selecting ? undefined : openMessageMenu
-                                    }
-                                    accessibilityActions={
-                                        selecting
-                                            ? undefined
-                                            : accessibilityActionsFor(message)
-                                    }
-                                    onAccessibilityAction={
-                                        selecting
-                                            ? undefined
-                                            : (name): void =>
-                                                  handleBubbleAccessibilityAction(
-                                                      message,
-                                                      name,
-                                                  )
-                                    }
-                                    onReplyPress={
-                                        selecting ? undefined : handleReplyPress
-                                    }
-                                    onRetryFailed={
-                                        selecting
-                                            ? undefined
-                                            : (failed): void =>
-                                                  conversation.retrySend(
-                                                      failed.key,
-                                                  )
-                                    }
-                                    onRetryPending={
-                                        selecting
-                                            ? undefined
-                                            : (pending): void =>
-                                                  conversation.retrySend(
-                                                      pending.key,
-                                                  )
-                                    }
-                                    onCancelPending={
-                                        selecting
-                                            ? undefined
-                                            : (pending): void =>
-                                                  conversation.cancelSend(
-                                                      pending.key,
-                                                  )
-                                    }
-                                    onRemovePending={
-                                        selecting
-                                            ? undefined
-                                            : (pending): void =>
-                                                  conversation.cancelSend(
-                                                      pending.key,
-                                                  )
-                                    }
-                                    onOpenMedia={
-                                        selecting
-                                            ? undefined
-                                            : (source, mediaIndex): void =>
-                                                  setViewer({
-                                                      message: source,
-                                                      index: mediaIndex,
-                                                  })
-                                    }
-                                    onToggleReaction={
-                                        selecting
-                                            ? undefined
-                                            : (message, emoji): void => {
-                                                  if (message.id === null) {
-                                                      return;
-                                                  }
-                                                  void conversation.toggleReaction(
-                                                      message.id,
-                                                      emoji,
-                                                  );
-                                              }
-                                    }
-                                    onOpenReactions={
-                                        selecting
-                                            ? undefined
-                                            : openReactionsList
-                                    }
-                                />
-                            );
-                        }}
-                    />
-                    {jumpLoadingId !== null && (
-                        <View style={styles.jumpBanner} pointerEvents="none">
-                            <ActivityIndicator
-                                size="small"
-                                color={palette.primary[500]}
+                                    const message = item.message;
+                                    // Both ids normalized to numbers (a bigint-string
+                                    // id can never flip the whole history to "theirs").
+                                    const mine = isOwnMessage(
+                                        currentUserId,
+                                        message.senderId,
+                                    );
+                                    return (
+                                        <MessageBubble
+                                            message={message}
+                                            mine={mine}
+                                            isGroup={isGroup}
+                                            currentUserId={currentUserId}
+                                            showSenderName={item.showSenderName}
+                                            showAvatar={item.showAvatar}
+                                            onOpenLink={
+                                                selecting
+                                                    ? undefined
+                                                    : handleOpenLink
+                                            }
+                                            onOpenProfile={
+                                                selecting
+                                                    ? undefined
+                                                    : (sender): void => {
+                                                          openUserProfile({
+                                                              userId: sender.senderId,
+                                                              name: sender.senderName,
+                                                              avatar: sender.senderAvatarPath,
+                                                          });
+                                                      }
+                                            }
+                                            onForwardedProfilePress={(
+                                                userId,
+                                                forwardedName,
+                                            ): void => {
+                                                openUserProfile({
+                                                    userId,
+                                                    name: forwardedName,
+                                                    isSelf: isOwnMessage(
+                                                        currentUserId,
+                                                        userId,
+                                                    ),
+                                                });
+                                            }}
+                                            selectionMode={selecting}
+                                            selected={
+                                                message.id !== null &&
+                                                selectedIds.has(message.id)
+                                            }
+                                            onToggleSelect={
+                                                handleToggleSelection
+                                            }
+                                            highlighted={
+                                                highlightedKey === message.key
+                                            }
+                                            othersLastSeenId={
+                                                detail?.othersLastSeenId ?? null
+                                            }
+                                            // Tap or hold on the bubble opens the
+                                            // floating menu; pending/failed bubbles
+                                            // keep their own retry/cancel actions.
+                                            onOpenMenu={
+                                                selecting
+                                                    ? undefined
+                                                    : openMessageMenu
+                                            }
+                                            accessibilityActions={
+                                                selecting
+                                                    ? undefined
+                                                    : accessibilityActionsFor(
+                                                          message,
+                                                      )
+                                            }
+                                            onAccessibilityAction={
+                                                selecting
+                                                    ? undefined
+                                                    : (name): void =>
+                                                          handleBubbleAccessibilityAction(
+                                                              message,
+                                                              name,
+                                                          )
+                                            }
+                                            onReplyPress={
+                                                selecting
+                                                    ? undefined
+                                                    : handleReplyPress
+                                            }
+                                            onRetryFailed={
+                                                selecting
+                                                    ? undefined
+                                                    : (failed): void =>
+                                                          conversation.retrySend(
+                                                              failed.key,
+                                                          )
+                                            }
+                                            onRetryPending={
+                                                selecting
+                                                    ? undefined
+                                                    : (pending): void =>
+                                                          conversation.retrySend(
+                                                              pending.key,
+                                                          )
+                                            }
+                                            onCancelPending={
+                                                selecting
+                                                    ? undefined
+                                                    : (pending): void =>
+                                                          conversation.cancelSend(
+                                                              pending.key,
+                                                          )
+                                            }
+                                            onRemovePending={
+                                                selecting
+                                                    ? undefined
+                                                    : (pending): void =>
+                                                          conversation.cancelSend(
+                                                              pending.key,
+                                                          )
+                                            }
+                                            onOpenMedia={
+                                                selecting
+                                                    ? undefined
+                                                    : openMedia
+                                            }
+                                            onToggleReaction={
+                                                selecting
+                                                    ? undefined
+                                                    : (
+                                                          message,
+                                                          emoji,
+                                                      ): void => {
+                                                          if (
+                                                              message.id ===
+                                                              null
+                                                          ) {
+                                                              return;
+                                                          }
+                                                          void conversation.toggleReaction(
+                                                              message.id,
+                                                              emoji,
+                                                          );
+                                                      }
+                                            }
+                                            onOpenReactions={
+                                                selecting
+                                                    ? undefined
+                                                    : openReactionsList
+                                            }
+                                        />
+                                    );
+                                }}
                             />
-                            <Text style={styles.jumpBannerText}>
-                                Looking for the message…
+                        </MaskedViewSafe>
+                        {jumpLoadingId !== null && (
+                            <View
+                                style={[
+                                    styles.jumpBanner,
+                                    { top: headerHeight + spacing.xs },
+                                ]}
+                                pointerEvents="none"
+                            >
+                                <ActivityIndicator
+                                    size="small"
+                                    color={palette.primary[500]}
+                                />
+                                <Text style={styles.jumpBannerText}>
+                                    Looking for the message…
+                                </Text>
+                            </View>
+                        )}
+                    </KeyboardAvoidingView>
+                )}
+                <ScrollToBottomButton
+                    visible={scrollToLatestButton.visible}
+                    count={newMessageCount}
+                    bottomOffset={scrollButtonBottom}
+                    onPress={handleScrollToLatest}
+                />
+            </View>
+
+            {/* Floating composer: anchored above the keyboard; its measured
+                content height drives the list padding above. */}
+            <View
+                pointerEvents="box-none"
+                style={[styles.composerLayer, { bottom: composerBottom }]}
+            >
+                {hasNotices && (
+                    <View
+                        pointerEvents="none"
+                        style={styles.notices}
+                        onLayout={measureNotices}
+                    >
+                        {conversation.sendError !== null && (
+                            <Text style={styles.sendError}>
+                                {conversation.sendError}
                             </Text>
-                        </View>
-                    )}
-                    <ScrollToBottomButton
-                        visible={scrollToLatestButton.visible}
-                        count={newMessageCount}
-                        onPress={handleScrollToLatest}
-                    />
-                </KeyboardAvoidingView>
-            )}
+                        )}
+                        {conversation.reactionError !== null && (
+                            <Text style={styles.sendError}>
+                                {conversation.reactionError}
+                            </Text>
+                        )}
+                        {jumpNotice !== null && (
+                            <Text style={styles.jumpNotice}>{jumpNotice}</Text>
+                        )}
+                    </View>
+                )}
 
-            {conversation.sendError !== null && (
-                <Text style={styles.sendError}>{conversation.sendError}</Text>
-            )}
-            {conversation.reactionError !== null && (
-                <Text style={styles.sendError}>
-                    {conversation.reactionError}
-                </Text>
-            )}
-
-            {jumpNotice !== null && (
-                <Text style={styles.jumpNotice}>{jumpNotice}</Text>
-            )}
-
-            <MessageComposer
-                chatId={chatId}
-                disabled={conversation.sending !== null}
-                onSend={handleSend}
-                replyTo={replyPreview}
-                currentUserId={currentUserId}
-                onCancelReply={(): void => setReplyTarget(null)}
-                onTextChange={typing.onChangeText}
-                onBlur={typing.onBlur}
-            />
+                <MessageComposer
+                    chatId={chatId}
+                    disabled={conversation.sending !== null}
+                    onSend={handleSend}
+                    replyTo={replyPreview}
+                    currentUserId={currentUserId}
+                    onCancelReply={(): void => setReplyTarget(null)}
+                    onTextChange={typing.onChangeText}
+                    onBlur={typing.onBlur}
+                    onHeightChange={measureComposer}
+                />
+            </View>
 
             <MessageActionModal
                 visible={actionTarget !== null}
@@ -1622,21 +1875,6 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                 messageIds={selectedMessageIds(selectedIds)}
                 onClose={(): void => setForwardOpen(false)}
                 onFinished={handleForwardFinished}
-            />
-
-            <AttachmentViewer
-                visible={viewer !== null}
-                media={
-                    viewer === null
-                        ? []
-                        : viewer.message.attachments.filter(
-                              (attachment) =>
-                                  attachment.kind === 'image' ||
-                                  attachment.kind === 'video',
-                          )
-                }
-                initialIndex={viewer?.index ?? 0}
-                onClose={(): void => setViewer(null)}
             />
 
         </Screen>
@@ -1800,9 +2038,46 @@ function InvalidChat(): React.ReactElement {
 }
 
 const styles = StyleSheet.create({
-    screen: { gap: spacing.xs, paddingHorizontal: spacing.sm },
+    screen: { flex: 1 },
     center: { alignItems: 'center', justifyContent: 'center' },
-    headerBar: { marginBottom: spacing.xxs },
+    // ── Full-screen list + floating chrome ──────────────────────────────────
+    // The list paints nothing: the Screen's canvas and ambient glows show
+    // through, including in the faded strips where the chrome overlaps it.
+    listLayer: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 0,
+    },
+    headerLayer: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 2,
+    },
+    composerLayer: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        paddingHorizontal: spacing.sm,
+        zIndex: 3,
+    },
+    notices: {
+        alignItems: 'center',
+        gap: spacing.xxs,
+        paddingBottom: spacing.xxs,
+    },
+    // Mask bands for the list's edge fade (alpha mask: opaque in the middle).
+    fadeBand: { position: 'absolute', left: 0, right: 0 },
+    fadeOpaque: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        backgroundColor: 'black',
+    },
     selectionBar: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -1878,7 +2153,9 @@ const styles = StyleSheet.create({
     },
     chatArea: { flex: 1 },
     list: { flex: 1 },
-    listContent: { paddingHorizontal: spacing.xs, paddingBottom: spacing.xs },
+    // Only the horizontal gutter is fixed; the vertical padding is measured
+    // from the floating header/composer and applied per render.
+    listContent: { paddingHorizontal: spacing.xs },
     daySlot: {},
     olderRow: {
         alignItems: 'center',

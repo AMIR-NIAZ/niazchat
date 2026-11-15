@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import {
     AccessibilityInfo,
     ActivityIndicator,
-    Alert,
     FlatList,
     Image,
     Modal,
@@ -29,6 +28,7 @@ import {
     spacing,
     typography,
 } from '../../shared/components';
+import { dialog } from '../../shared/dialog';
 import type { ProfileAvatar } from './use-profile';
 
 /**
@@ -314,18 +314,18 @@ export function AvatarViewer({
             return;
         }
         const fileName = current.fileName;
-        Alert.alert(deleteConfirmTitle, deleteConfirmMessage, [
-            { text: 'Cancel', style: 'cancel' },
-            {
-                text: 'Delete',
-                style: 'destructive',
-                onPress: (): void => {
-                    if (onDelete !== undefined) {
-                        void onDelete(fileName);
-                    }
-                },
-            },
-        ]);
+        void dialog
+            .confirm({
+                title: deleteConfirmTitle,
+                message: deleteConfirmMessage,
+                confirmText: 'Delete',
+                destructive: true,
+            })
+            .then((confirmed): void => {
+                if (confirmed && onDelete !== undefined) {
+                    void onDelete(fileName);
+                }
+            });
     };
 
     const renderItem = ({

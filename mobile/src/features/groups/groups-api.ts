@@ -25,6 +25,7 @@ import { normalizeAvatarMime } from '../users/profile-service';
  *   POST   /chats/:chatId/members/:memberId/promote
  *   POST   /chats/:chatId/members/:memberId/demote
  *   DELETE /chats/:chatId/members/:memberId
+ *   POST   /chats/:chatId/members/:memberId/ban
  *   GET    /chats/:chatId/members/:memberId/permissions
  *   PUT    /chats/:chatId/members/:memberId/permissions
  *   PATCH  /chats/:chatId/group
@@ -85,6 +86,7 @@ function toGroupMember(raw: GroupMember): GroupMember {
             canDemote: raw.actions?.canDemote === true,
             canRemove: raw.actions?.canRemove === true,
             canEditPermissions: raw.actions?.canEditPermissions === true,
+            canBan: raw.actions?.canBan === true,
         },
     };
 }
@@ -198,6 +200,21 @@ export async function removeMember(
 ): Promise<MemberActionResponse> {
     const response = await httpClient.delete<MemberActionResponse>(
         `/chats/${chatId}/members/${memberId}`,
+    );
+    return toMemberActionResponse(response.data);
+}
+
+/**
+ * Ban (owner, or admin with `ban_user`/`all`): the member keeps a membership
+ * row with the `ban` role, so they cannot read/send, rejoin or be re-added
+ * until unbanned. The response has `role: null` like a removal.
+ */
+export async function banMember(
+    chatId: number,
+    memberId: number,
+): Promise<MemberActionResponse> {
+    const response = await httpClient.post<MemberActionResponse>(
+        `/chats/${chatId}/members/${memberId}/ban`,
     );
     return toMemberActionResponse(response.data);
 }

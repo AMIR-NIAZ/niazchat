@@ -27,6 +27,13 @@ import { useUserProfile } from '../../../features/users/use-user-profile';
 import { describePublicProfileError } from '../../../features/users/users-service';
 import { useCurrentUserId } from '../../../features/auth';
 import { openPrivateChat } from '../../../features/chats';
+import { toast } from '../../../shared/dialog';
+import { ApiError } from '../../../core/api';
+import {
+    useAddContact,
+    useContacts,
+} from '../../../features/contacts/use-contacts';
+import { describeSavedContactError } from '../../../features/contacts/contacts-api';
 
 /**
  * User info screen (`GET /user/:userId/profile`).
@@ -100,6 +107,10 @@ function UserProfile({
     const [viewerIndex, setViewerIndex] = useState<number | null>(null);
     const [messagePending, setMessagePending] = useState(false);
     const [messageError, setMessageError] = useState<string | null>(null);
+    const savedContacts = useContacts();
+    const addContact = useAddContact();
+    const [contactPending, setContactPending] = useState(false);
+    const [contactError, setContactError] = useState<string | null>(null);
 
     const profile = query.profile;
     const name = profile?.name ?? initialName ?? 'Profile';
@@ -107,6 +118,35 @@ function UserProfile({
     const currentAvatarPath = avatars[0]?.storedPath ?? initialAvatar;
     const presence = profile === null ? null : presenceLabel(profile);
     const bio = profile?.biografy?.trim();
+    const isSavedContact = savedContacts.contacts.some(
+        (contact) => contact.userId === userId,
+    );
+
+    const handleAddContact = async (): Promise<void> => {
+        if (contactPending) return;
+        setContactPending(true);
+        setContactError(null);
+        try {
+            await addContact.mutateAsync({
+                userId,
+                preview: {
+                    userId,
+                    name: profile?.name ?? name,
+                    username: profile?.username ?? null,
+                    avatarUrl: avatars[0]?.url ?? null,
+                },
+            });
+            toast.show('Added to contacts', { tone: 'success' });
+        } catch (error) {
+            if (error instanceof ApiError && error.statusCode === 409) {
+                toast.show('Already in your contacts');
+            } else {
+                setContactError(describeSavedContactError(error));
+            }
+        } finally {
+            setContactPending(false);
+        }
+    };
 
     const handleMessage = async (): Promise<void> => {
         if (messagePending) return;
@@ -218,6 +258,43 @@ function UserProfile({
                                 </Text>
                             )}
                         </Pressable>
+                    )}
+                    {isSavedContact ? (
+                        <AppText variant="caption">In your contacts</AppText>
+                    ) : (
+                        <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Add ${name} to contacts`}
+                            accessibilityState={{
+                                disabled: contactPending,
+                                busy: contactPending,
+                            }}
+                            disabled={contactPending}
+                            onPress={(): void => {
+                                void handleAddContact();
+                            }}
+                            style={({ pressed }) => [
+                                styles.contactButton,
+                                pressed && styles.pressed,
+                                contactPending && styles.messageButtonBusy,
+                            ]}
+                        >
+                            {contactPending ? (
+                                <ActivityIndicator
+                                    size="small"
+                                    color={palette.primary[600]}
+                                />
+                            ) : (
+                                <Text style={styles.contactButtonText}>
+                                    ＋ Add to contacts
+                                </Text>
+                            )}
+                        </Pressable>
+                    )}
+                    {contactError !== null && (
+                        <AppText style={styles.errorText}>
+                            {contactError}
+                        </AppText>
                     )}
                     {messageError !== null && (
                         <AppText style={styles.errorText}>
@@ -343,6 +420,23 @@ const styles = StyleSheet.create({
     messageButtonText: {
         color: palette.text.onAccent,
         fontSize: 15,
+        fontWeight: '700',
+    },
+    contactButton: {
+        marginTop: spacing.xxs,
+        minWidth: 128,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: radii.lg,
+        borderWidth: 1,
+        borderColor: palette.border.accent,
+        paddingHorizontal: spacing.md,
+        paddingVertical: spacing.xs,
+        backgroundColor: palette.glass.accent,
+    },
+    contactButtonText: {
+        color: palette.primary[600],
+        fontSize: 14,
         fontWeight: '700',
     },
     section: { gap: spacing.xxs },

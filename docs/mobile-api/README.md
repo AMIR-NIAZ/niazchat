@@ -10,6 +10,7 @@ Backend analysis for the **NiazChat** messaging backend (NestJS + PostgreSQL + R
 |---|---|
 | [authentication.md](./authentication.md) | OTP login, JWT tokens, guard behavior |
 | [users.md](./users.md) | Profile, avatar, user lookup |
+| [contacts.md](./contacts.md) | Saved contacts (`/contacts` CRUD) and phone-contact matching (`POST /contacts/match`) |
 | [chats.md](./chats.md) | Chats, members, management, invite links |
 | [groups.md](./groups.md) | Group/roles/permissions model |
 | [messages.md](./messages.md) | Sending/editing/deleting/history |

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, AppState, Linking } from 'react-native';
+import { AppState, Linking } from 'react-native';
 import {
     AudioQuality,
     RecordingPresets,
@@ -17,6 +17,7 @@ import {
     shouldDiscardRecording,
 } from './recording-machine';
 import { stopVoice } from './voice-playback';
+import { dialog } from '../../shared/dialog';
 import {
     getVoiceDraft,
     setVoiceDraft,
@@ -121,10 +122,12 @@ export function useVoiceRecorder(chatId: number): VoiceRecorderApi {
                 permission = await requestRecordingPermissionsAsync();
             }
             if (!permission.granted) {
-                Alert.alert(
-                    'Microphone access needed',
-                    'Allow microphone access in Settings to record voice messages.',
-                    [
+                dialog.show({
+                    title: 'Microphone access needed',
+                    message:
+                        'Allow microphone access in Settings to record voice messages.',
+                    tone: 'warning',
+                    buttons: [
                         { text: 'Not now', style: 'cancel' },
                         {
                             text: 'Open settings',
@@ -133,7 +136,7 @@ export function useVoiceRecorder(chatId: number): VoiceRecorderApi {
                             },
                         },
                     ],
-                );
+                });
                 return;
             }
 
@@ -157,10 +160,12 @@ export function useVoiceRecorder(chatId: number): VoiceRecorderApi {
                 playsInSilentMode: true,
                 shouldRouteThroughEarpiece: false,
             }).catch((): void => undefined);
-            Alert.alert(
-                'Could not start recording',
-                'The microphone is unavailable right now. Try again.',
-            );
+            dialog.show({
+                title: 'Could not start recording',
+                message:
+                    'The microphone is unavailable right now. Try again.',
+                tone: 'danger',
+            });
         }
     }, [recorder]);
 

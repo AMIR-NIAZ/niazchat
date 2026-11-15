@@ -20,6 +20,11 @@ export interface ContextMenuItem {
     icon?: LucideIcon;
     destructive?: boolean;
     disabled?: boolean;
+    /**
+     * Short right-aligned reason shown on the same row (e.g. "Download first").
+     * It never changes the fixed 44 px row height the layout engine assumes.
+     */
+    hint?: string;
     onPress: () => void;
 }
 export const ContextMenuCard = memo(function ContextMenuCard({
@@ -70,6 +75,11 @@ export const ContextMenuCard = memo(function ContextMenuCard({
                         >
                             {item.label}
                         </Text>
+                        {item.hint !== undefined && (
+                            <Text style={styles.hint} numberOfLines={1}>
+                                {item.hint}
+                            </Text>
+                        )}
                     </Pressable>
                 </View>
             ))}
@@ -111,6 +121,11 @@ const styles = StyleSheet.create({
         fontSize: 15,
         fontWeight: '600',
         color: palette.text.primary,
+    },
+    hint: {
+        fontSize: 11,
+        fontWeight: '500',
+        color: palette.text.muted,
     },
     labelDanger: { color: palette.semantic.danger },
     separator: {

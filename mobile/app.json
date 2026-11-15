@@ -29,11 +29,20 @@
       "expo-image",
       "expo-sharing",
       [
+        "expo-contacts",
+        {
+          "contactsPermission": "Allow NiazChat to find which of your contacts are already on the app. Contacts are matched on request and never stored."
+        }
+      ],
+      [
         "expo-audio",
         {
           "microphonePermission": "Allow niazchat to record voice messages"
         }
-      ]
+      ],
+      "expo-status-bar",
+      "expo-video",
+      "expo-asset"
     ]
   }
 }

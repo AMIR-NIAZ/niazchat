@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     Linking,
     Platform,
     Pressable,
@@ -22,7 +21,9 @@ import {
     radii,
     spacing,
     typography,
-} from '../../shared/components';
+} from '../../../shared/components';
+import { useTabBarInset } from '../../../shared/tab-bar';
+import { dialog } from '../../../shared/dialog';
 import {
     describeAvatarError,
     MAX_AVATARS,
@@ -32,13 +33,13 @@ import {
     useProfile,
     useSetMainAvatar,
     useUploadMyAvatar,
-} from '../../features/users';
+} from '../../../features/users';
 import {
     AvatarActionSheet,
     AvatarGallery,
     AvatarViewer,
-} from '../../features/users/avatar-gallery';
-import type { AvatarUploadAsset } from '../../features/users';
+} from '../../../features/users/avatar-gallery';
+import type { AvatarUploadAsset } from '../../../features/users';
 
 /**
  * Profile screen (GET /auth/getme).
@@ -58,6 +59,7 @@ const MAX_AVATAR_LABEL = `${Math.round(MAX_AVATAR_BYTES / (1024 * 1024))} MB`;
 
 export default function ProfileScreen(): React.ReactElement {
     const profile = useProfile();
+    const tabBarInset = useTabBarInset();
     const uploadAvatar = useUploadMyAvatar();
     const deleteAvatar = useDeleteMyAvatar();
     const setMainAvatar = useSetMainAvatar();
@@ -123,10 +125,12 @@ export default function ProfileScreen(): React.ReactElement {
             const permission =
                 await ImagePicker.requestMediaLibraryPermissionsAsync();
             if (!permission.granted) {
-                Alert.alert(
-                    'Photo access needed',
-                    'Allow photo access to add a profile photo. You can change this later in Settings.',
-                    [
+                dialog.show({
+                    title: 'Photo access needed',
+                    message:
+                        'Allow photo access to add a profile photo. You can change this later in Settings.',
+                    tone: 'warning',
+                    buttons: [
                         { text: 'Not now', style: 'cancel' },
                         {
                             text: 'Open settings',
@@ -135,7 +139,7 @@ export default function ProfileScreen(): React.ReactElement {
                             },
                         },
                     ],
-                );
+                });
                 return;
             }
         }
@@ -218,15 +222,20 @@ export default function ProfileScreen(): React.ReactElement {
         } catch (error) {
             const text = describeAvatarError(error);
             setFeedback({ kind: 'error', text });
-            Alert.alert('Could not update the photo', text, [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Retry',
-                    onPress: (): void => {
-                        void performSetMain(fileName);
+            dialog.show({
+                title: 'Could not update the photo',
+                message: text,
+                tone: 'danger',
+                buttons: [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                        text: 'Retry',
+                        onPress: (): void => {
+                            void performSetMain(fileName);
+                        },
                     },
-                },
-            ]);
+                ],
+            });
             return false;
         }
     };
@@ -242,40 +251,47 @@ export default function ProfileScreen(): React.ReactElement {
         } catch (error) {
             const text = describeAvatarError(error);
             setFeedback({ kind: 'error', text });
-            Alert.alert('Could not delete the photo', text, [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Retry',
-                    onPress: (): void => {
-                        void performDelete(fileName);
+            dialog.show({
+                title: 'Could not delete the photo',
+                message: text,
+                tone: 'danger',
+                buttons: [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                        text: 'Retry',
+                        onPress: (): void => {
+                            void performDelete(fileName);
+                        },
                     },
-                },
-            ]);
+                ],
+            });
         }
     };
 
     const confirmDeleteFromSheet = (fileName: string): void => {
-        Alert.alert(
-            'Delete this photo?',
-            'It will be removed from your profile for everyone.',
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Delete',
-                    style: 'destructive',
-                    onPress: (): void => {
-                        setSheetIndex(null);
-                        void performDelete(fileName);
-                    },
-                },
-            ],
-        );
+        void dialog
+            .confirm({
+                title: 'Delete this photo?',
+                message: 'It will be removed from your profile for everyone.',
+                confirmText: 'Delete',
+                destructive: true,
+            })
+            .then((confirmed): void => {
+                if (!confirmed) {
+                    return;
+                }
+                setSheetIndex(null);
+                void performDelete(fileName);
+            });
     };
 
     return (
         <Screen style={styles.screen} withTopInset={true}>
             <ScrollView
-                contentContainerStyle={styles.scroll}
+                contentContainerStyle={[
+                    styles.scroll,
+                    { paddingBottom: tabBarInset },
+                ]}
                 keyboardShouldPersistTaps="handled"
             >
                 <GlassHeader

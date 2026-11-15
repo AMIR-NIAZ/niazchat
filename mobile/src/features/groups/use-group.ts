@@ -483,6 +483,62 @@ export function useRemoveMember(chatId: number) {
     );
 }
 
+interface BanContext {
+    previous: Array<[readonly unknown[], MemberPages | undefined]>;
+}
+
+/**
+ * Ban one member. The row disappears from the members list immediately
+ * (optimistic) and comes back on failure. On success the group info
+ * (`membersCount`), every member page, the banned users list and the chat
+ * list are refetched, so the Banned users screen lists them right away.
+ */
+export function useBanMember(chatId: number) {
+    const queryClient = useQueryClient();
+    return useMutation<MemberActionResponse, Error, number, BanContext>({
+        mutationFn: (memberId): Promise<MemberActionResponse> =>
+            api.banMember(chatId, memberId),
+        onMutate: async (memberId): Promise<BanContext> => {
+            const filters = { queryKey: groupMembersPrefix(chatId) };
+            await queryClient.cancelQueries(filters);
+            const previous = queryClient.getQueriesData<MemberPages>(filters);
+            queryClient.setQueriesData<MemberPages>(filters, (current) =>
+                current === undefined
+                    ? current
+                    : {
+                          ...current,
+                          pages: patchMembersPages(
+                              current.pages,
+                              memberId,
+                              null,
+                          ),
+                      },
+            );
+            return { previous };
+        },
+        onError: (_error, _memberId, context): void => {
+            for (const [queryKey, data] of context?.previous ?? []) {
+                queryClient.setQueryData(queryKey, data);
+            }
+        },
+        onSuccess: async (result): Promise<void> => {
+            updateMemberCaches(queryClient, chatId, result);
+            await Promise.all([
+                queryClient.invalidateQueries({
+                    queryKey: groupInfoQueryKey(chatId),
+                }),
+                queryClient.invalidateQueries({
+                    queryKey: groupMembersPrefix(chatId),
+                }),
+                queryClient.invalidateQueries({
+                    queryKey: groupBannedQueryKey(chatId),
+                }),
+                queryClient.invalidateQueries({ queryKey: CHATS_QUERY_KEY }),
+            ]);
+        },
+    });
+}
+
 export interface GroupChangedEvent {
     chatId: number;
     reason:

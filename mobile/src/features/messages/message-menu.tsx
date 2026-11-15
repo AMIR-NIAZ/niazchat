@@ -4,6 +4,7 @@ import { normalizeEmoji } from '../reactions';
 import {
     Reply,
     Forward,
+    Copy,
     CheckSquare,
     Share2,
     Pencil,
@@ -18,6 +19,7 @@ import {
 const ACTION_ICONS = {
     reply: Reply,
     forward: Forward,
+    copy: Copy,
     select: CheckSquare,
     share: Share2,
     edit: Pencil,
@@ -27,6 +29,7 @@ const ACTION_ICONS = {
 export type MessageMenuActionId =
     | 'reply'
     | 'forward'
+    | 'copy'
     | 'select'
     | 'share'
     | 'edit'
@@ -35,6 +38,7 @@ export type MessageMenuActionId =
 export interface MessageMenuHandlers {
     onReply: () => void;
     onForward: () => void;
+    onCopy: () => void;
     onSelect: () => void;
     onShare: () => void;
     onEdit: () => void;
@@ -43,7 +47,7 @@ export interface MessageMenuHandlers {
 
 /**
  * Renders the action list from `getMessageActions` (unchanged rules) in a fixed
- * order: Reply, Forward, Select, Share, Edit, Delete.
+ * order: Reply, Forward, Copy, Select, Share, Edit, Delete.
  */
 export function buildMessageMenuItems(
     actions: MessageActions,
@@ -64,6 +68,14 @@ export function buildMessageMenuItems(
             label: 'Forward',
             icon: ACTION_ICONS.forward,
             onPress: handlers.onForward,
+        });
+    }
+    if (actions.copy) {
+        items.push({
+            id: 'copy',
+            label: 'Copy',
+            icon: ACTION_ICONS.copy,
+            onPress: handlers.onCopy,
         });
     }
     if (actions.select) {

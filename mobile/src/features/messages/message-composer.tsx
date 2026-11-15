@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import type { LayoutChangeEvent } from 'react-native';
 import {
-    Alert,
     KeyboardAvoidingView,
     Linking,
     Modal,
@@ -18,6 +18,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
 import { blur, palette, radii, spacing } from '../../shared/theme';
 import { GlassSurface } from '../../shared/components';
+import { dialog } from '../../shared/dialog';
 import { isOwnMessage } from './messages-model';
 import type { ReplyPreview } from './messages-model';
 import { attachmentPreviewLabel } from '../attachments/attachment-labels';
@@ -38,6 +39,7 @@ import type { VoiceDraft } from '../voice/voice-draft-store';
 import { useVoiceRecorder } from '../voice/use-voice-recorder';
 import { VoiceRecorderBar } from '../voice/voice-recorder-bar';
 import { formatDuration, hasDuration } from '../attachments/duration';
+import { Mic } from 'lucide-react-native';
 
 /**
  * Multiline message composer with attachments.
@@ -58,6 +60,12 @@ interface MessageComposerProps {
     /** Optional typing hooks (group chats only). */
     onTextChange?: ((text: string) => void) | undefined;
     onBlur?: (() => void) | undefined;
+    /**
+     * Reports the height of the composer's CONTENT (pill + reply/tray rows),
+     * excluding the keyboard padding its `KeyboardAvoidingView` adds. The
+     * chat screen reserves exactly that much space under the full-screen list.
+     */
+    onHeightChange?: ((height: number) => void) | undefined;
 }
 
 function replyName(
@@ -93,6 +101,15 @@ export function MessageComposer(
     const [sheetOpen, setSheetOpen] = useState(false);
     const [picking, setPicking] = useState(false);
     const inputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
+    // Only report real changes: the layout fires on every keyboard frame on
+    // Android and the parent must not re-render for each one.
+    const contentHeightRef = useRef(0);
+    const handleContentLayout = (event: LayoutChangeEvent): void => {
+        const height = Math.round(event.nativeEvent.layout.height);
+        if (height === contentHeightRef.current) return;
+        contentHeightRef.current = height;
+        props.onHeightChange?.(height);
+    };
     const canSend =
         !props.disabled && (text.trim() !== '' || selected.length > 0);
     const replyTo = props.replyTo;
@@ -141,7 +158,11 @@ export function MessageComposer(
         if (candidates.length === 0) return;
         const result = validateNewAttachments(selected, candidates);
         if (result.error !== null) {
-            Alert.alert('Cannot attach file', result.error);
+            dialog.show({
+                title: 'Cannot attach file',
+                message: result.error,
+                tone: 'warning',
+            });
             return;
         }
         setSelected((current) => [...current, ...result.accepted]);
@@ -192,18 +213,19 @@ export function MessageComposer(
             cancelRecording();
             return;
         }
-        Alert.alert(
-            'Discard recording?',
-            'This voice message will be deleted.',
-            [
-                { text: 'Keep recording', style: 'cancel' },
-                {
-                    text: 'Discard',
-                    style: 'destructive',
-                    onPress: cancelRecording,
-                },
-            ],
-        );
+        void dialog
+            .confirm({
+                title: 'Discard recording?',
+                message: 'This voice message will be deleted.',
+                confirmText: 'Discard',
+                cancelText: 'Keep recording',
+                destructive: true,
+            })
+            .then((confirmed): void => {
+                if (confirmed) {
+                    cancelRecording();
+                }
+            });
     };
 
     const handleSendDraft = (): void => {
@@ -302,19 +324,21 @@ export function MessageComposer(
 
     const pickPhotos = async (): Promise<void> => {
         if (remaining <= 0) {
-            Alert.alert(
-                'Attachment limit',
-                `You can attach up to ${MAX_ATTACHMENTS_PER_MESSAGE} files.`,
-            );
+            dialog.show({
+                title: 'Attachment limit',
+                message: `You can attach up to ${MAX_ATTACHMENTS_PER_MESSAGE} files.`,
+                tone: 'warning',
+            });
             return;
         }
         const permission =
             await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (!permission.granted) {
-            Alert.alert(
-                'Photo access needed',
-                'Allow photo access in Settings to attach photos.',
-                [
+            dialog.show({
+                title: 'Photo access needed',
+                message: 'Allow photo access in Settings to attach photos.',
+                tone: 'warning',
+                buttons: [
                     { text: 'Cancel', style: 'cancel' },
                     {
                         text: 'Open settings',
@@ -323,7 +347,7 @@ export function MessageComposer(
                         },
                     },
                 ],
-            );
+            });
             return;
         }
         const result = await ImagePicker.launchImageLibraryAsync({
@@ -356,10 +380,11 @@ export function MessageComposer(
     const takePhoto = async (): Promise<void> => {
         const permission = await ImagePicker.requestCameraPermissionsAsync();
         if (!permission.granted) {
-            Alert.alert(
-                'Camera access needed',
-                'Allow camera access in Settings to take a photo.',
-                [
+            dialog.show({
+                title: 'Camera access needed',
+                message: 'Allow camera access in Settings to take a photo.',
+                tone: 'warning',
+                buttons: [
                     { text: 'Cancel', style: 'cancel' },
                     {
                         text: 'Open settings',
@@ -368,7 +393,7 @@ export function MessageComposer(
                         },
                     },
                 ],
-            );
+            });
             return;
         }
         const result = await ImagePicker.launchCameraAsync({
@@ -398,19 +423,21 @@ export function MessageComposer(
 
     const pickVideos = async (): Promise<void> => {
         if (remaining <= 0) {
-            Alert.alert(
-                'Attachment limit',
-                `You can attach up to ${MAX_ATTACHMENTS_PER_MESSAGE} files.`,
-            );
+            dialog.show({
+                title: 'Attachment limit',
+                message: `You can attach up to ${MAX_ATTACHMENTS_PER_MESSAGE} files.`,
+                tone: 'warning',
+            });
             return;
         }
         const permission =
             await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (!permission.granted) {
-            Alert.alert(
-                'Video access needed',
-                'Allow media access in Settings to attach a video.',
-                [
+            dialog.show({
+                title: 'Video access needed',
+                message: 'Allow media access in Settings to attach a video.',
+                tone: 'warning',
+                buttons: [
                     { text: 'Cancel', style: 'cancel' },
                     {
                         text: 'Open settings',
@@ -419,7 +446,7 @@ export function MessageComposer(
                         },
                     },
                 ],
-            );
+            });
             return;
         }
         const result = await ImagePicker.launchImageLibraryAsync({
@@ -450,10 +477,11 @@ export function MessageComposer(
 
     const pickFiles = async (): Promise<void> => {
         if (remaining <= 0) {
-            Alert.alert(
-                'Attachment limit',
-                `You can attach up to ${MAX_ATTACHMENTS_PER_MESSAGE} files.`,
-            );
+            dialog.show({
+                title: 'Attachment limit',
+                message: `You can attach up to ${MAX_ATTACHMENTS_PER_MESSAGE} files.`,
+                tone: 'warning',
+            });
             return;
         }
         const result = await DocumentPicker.getDocumentAsync({
@@ -480,10 +508,12 @@ export function MessageComposer(
         try {
             await pick();
         } catch {
-            Alert.alert(
-                'Could not attach',
-                'Something went wrong while opening the picker. Try again.',
-            );
+            dialog.show({
+                title: 'Could not attach',
+                message:
+                    'Something went wrong while opening the picker. Try again.',
+                tone: 'danger',
+            });
         } finally {
             setPicking(false);
         }
@@ -503,234 +533,247 @@ export function MessageComposer(
             style={styles.avoid}
             pointerEvents="box-none"
         >
-            {replyTo !== null && (
-                <View style={styles.replyBar}>
-                    <View style={styles.replyDivider} />
-                    <View style={styles.replyTextWrap}>
-                        <Text style={styles.replyTitle} numberOfLines={1}>
-                            Replying to{' '}
-                            {replyName(replyTo, props.currentUserId)}
-                        </Text>
-                        <Text style={styles.replySnippet} numberOfLines={1}>
-                            {replySnippet(replyTo)}
-                        </Text>
+            <View onLayout={handleContentLayout}>
+                {replyTo !== null && (
+                    <View style={styles.replyBar}>
+                        <View style={styles.replyDivider} />
+                        <View style={styles.replyTextWrap}>
+                            <Text style={styles.replyTitle} numberOfLines={1}>
+                                Replying to{' '}
+                                {replyName(replyTo, props.currentUserId)}
+                            </Text>
+                            <Text style={styles.replySnippet} numberOfLines={1}>
+                                {replySnippet(replyTo)}
+                            </Text>
+                        </View>
+                        <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel="Cancel reply"
+                            style={styles.replyClose}
+                            onPress={props.onCancelReply}
+                        >
+                            <Text style={styles.replyCloseText}>✕</Text>
+                        </Pressable>
                     </View>
-                    <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Cancel reply"
-                        style={styles.replyClose}
-                        onPress={props.onCancelReply}
-                    >
-                        <Text style={styles.replyCloseText}>✕</Text>
-                    </Pressable>
-                </View>
-            )}
-
-            {recorder.phase === 'recording' && (
-                <VoiceRecorderBar
-                    durationMs={recorder.durationMs}
-                    level={recorder.level}
-                    hint={
-                        recordingMode === 'hold'
-                            ? cancelArmed
-                                ? 'Release to cancel'
-                                : (holdHint ?? 'Release to send')
-                            : 'Tap trash to cancel'
-                    }
-                    onCancel={handleCancelRecording}
-                    onSend={(): void => {
-                        void finishAndSend();
-                    }}
-                />
-            )}
-
-            {recorder.phase !== 'recording' && recorder.draft !== null && (
-                <View style={styles.draftRow}>
-                    <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`Play draft voice message, ${formatDuration(
-                            recorder.draft.duration,
-                        )}`}
-                        onPress={handleToggleDraft}
-                        style={styles.draftPlay}
-                    >
-                        <Text style={styles.draftPlayText}>
-                            {draftPlayback.attachmentId === draftPlaybackId &&
-                            draftPlayback.playing
-                                ? '❚❚'
-                                : '▶'}
-                        </Text>
-                    </Pressable>
-                    <Text style={styles.draftTime}>
-                        {hasDuration(recorder.draft.duration)
-                            ? formatDuration(recorder.draft.duration)
-                            : '0:00'}
-                    </Text>
-                    <Text style={styles.draftLabel} numberOfLines={1}>
-                        Voice draft
-                    </Text>
-                    <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Send voice message"
-                        onPress={handleSendDraft}
-                        style={styles.draftAction}
-                    >
-                        <Text style={styles.draftActionText}>Send</Text>
-                    </Pressable>
-                    <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Delete voice draft"
-                        onPress={handleDiscardDraft}
-                        style={styles.draftAction}
-                    >
-                        <Text style={styles.draftDeleteText}>Delete</Text>
-                    </Pressable>
-                </View>
-            )}
-
-            {recorderHint !== null && recorder.phase !== 'recording' && (
-                <Text style={styles.voiceHint}>{recorderHint}</Text>
-            )}
-
-            {selected.length > 0 && (
-                <View style={styles.trayWrap}>
-                    <View style={styles.trayHeader}>
-                        <Text style={styles.trayCount}>
-                            {selected.length}/{MAX_ATTACHMENTS_PER_MESSAGE}
-                        </Text>
-                    </View>
-                    <ScrollView
-                        horizontal={true}
-                        showsHorizontalScrollIndicator={false}
-                        contentContainerStyle={styles.tray}
-                    >
-                        {selected.map((item) => (
-                            <View key={item.localKey} style={styles.trayItem}>
-                                {item.kind === 'image' ? (
-                                    <Image
-                                        source={{ uri: item.uri }}
-                                        style={styles.trayImage}
-                                        contentFit="cover"
-                                        cachePolicy="memory"
-                                    />
-                                ) : item.kind === 'video' ? (
-                                    <View style={styles.trayFile}>
-                                        <Text style={styles.trayFileIcon}>
-                                            🎬
-                                        </Text>
-                                        <Text
-                                            style={styles.trayFileName}
-                                            numberOfLines={2}
-                                        >
-                                            {item.name}
-                                        </Text>
-                                    </View>
-                                ) : (
-                                    <View style={styles.trayFile}>
-                                        <Text
-                                            style={styles.trayFileIcon}
-                                            numberOfLines={1}
-                                        >
-                                            📎
-                                        </Text>
-                                        <Text
-                                            style={styles.trayFileName}
-                                            numberOfLines={2}
-                                        >
-                                            {item.name}
-                                        </Text>
-                                    </View>
-                                )}
-                                <Pressable
-                                    accessibilityRole="button"
-                                    accessibilityLabel={`Remove ${item.name}`}
-                                    hitSlop={8}
-                                    style={styles.trayRemove}
-                                    onPress={(): void =>
-                                        setSelected((current) =>
-                                            current.filter(
-                                                (entry) =>
-                                                    entry.localKey !==
-                                                    item.localKey,
-                                            ),
-                                        )
-                                    }
-                                >
-                                    <Text style={styles.trayRemoveText}>✕</Text>
-                                </Pressable>
-                            </View>
-                        ))}
-                    </ScrollView>
-                </View>
-            )}
-
-            <GlassSurface
-                tone="elevated"
-                intensity={blur.strong}
-                radius={radii.xl}
-                style={styles.composer}
-            >
-                <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Attach photo or file"
-                    accessibilityState={{ disabled: props.disabled || picking }}
-                    disabled={props.disabled || picking}
-                    onPress={(): void => setSheetOpen(true)}
-                    style={[
-                        styles.attach,
-                        props.disabled && styles.attachDisabled,
-                    ]}
-                >
-                    <Text style={styles.attachText}>＋</Text>
-                </Pressable>
-                <TextInput
-                    ref={inputRef}
-                    style={styles.input}
-                    value={text}
-                    onChangeText={(value): void => {
-                        setText(value);
-                        props.onTextChange?.(value);
-                    }}
-                    onBlur={props.onBlur}
-                    placeholder="Message…"
-                    placeholderTextColor={palette.neutral[300]}
-                    multiline={true}
-                    numberOfLines={4}
-                    editable={!props.disabled}
-                    accessibilityLabel="Message input"
-                    onSubmitEditing={submit}
-                    blurOnSubmit={false}
-                />
-                {text.trim() === '' && selected.length === 0 ? (
-                    <View
-                        {...micResponder.panHandlers}
-                        accessible={true}
-                        accessibilityRole="button"
-                        accessibilityLabel="Start recording"
-                        accessibilityState={{ disabled: !micEnabled }}
-                        onAccessibilityTap={startTapRecording}
-                        style={[
-                            styles.send,
-                            micEnabled ? styles.micActive : styles.sendInactive,
-                        ]}
-                    >
-                        <Text style={styles.micText}>🎤</Text>
-                    </View>
-                ) : (
-                    <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Send message"
-                        accessibilityState={{ disabled: !canSend }}
-                        style={[
-                            styles.send,
-                            canSend ? styles.sendActive : styles.sendInactive,
-                        ]}
-                        onPress={submit}
-                    >
-                        <Text style={styles.sendText}>➤</Text>
-                    </Pressable>
                 )}
-            </GlassSurface>
+
+                {recorder.phase === 'recording' && (
+                    <VoiceRecorderBar
+                        durationMs={recorder.durationMs}
+                        level={recorder.level}
+                        hint={
+                            recordingMode === 'hold'
+                                ? cancelArmed
+                                    ? 'Release to cancel'
+                                    : (holdHint ?? 'Release to send')
+                                : 'Tap trash to cancel'
+                        }
+                        onCancel={handleCancelRecording}
+                        onSend={(): void => {
+                            void finishAndSend();
+                        }}
+                    />
+                )}
+
+                {recorder.phase !== 'recording' && recorder.draft !== null && (
+                    <View style={styles.draftRow}>
+                        <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Play draft voice message, ${formatDuration(
+                                recorder.draft.duration,
+                            )}`}
+                            onPress={handleToggleDraft}
+                            style={styles.draftPlay}
+                        >
+                            <Text style={styles.draftPlayText}>
+                                {draftPlayback.attachmentId ===
+                                    draftPlaybackId && draftPlayback.playing
+                                    ? '❚❚'
+                                    : '▶'}
+                            </Text>
+                        </Pressable>
+                        <Text style={styles.draftTime}>
+                            {hasDuration(recorder.draft.duration)
+                                ? formatDuration(recorder.draft.duration)
+                                : '0:00'}
+                        </Text>
+                        <Text style={styles.draftLabel} numberOfLines={1}>
+                            Voice draft
+                        </Text>
+                        <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel="Send voice message"
+                            onPress={handleSendDraft}
+                            style={styles.draftAction}
+                        >
+                            <Text style={styles.draftActionText}>Send</Text>
+                        </Pressable>
+                        <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel="Delete voice draft"
+                            onPress={handleDiscardDraft}
+                            style={styles.draftAction}
+                        >
+                            <Text style={styles.draftDeleteText}>Delete</Text>
+                        </Pressable>
+                    </View>
+                )}
+
+                {recorderHint !== null && recorder.phase !== 'recording' && (
+                    <Text style={styles.voiceHint}>{recorderHint}</Text>
+                )}
+
+                {selected.length > 0 && (
+                    <View style={styles.trayWrap}>
+                        <View style={styles.trayHeader}>
+                            <Text style={styles.trayCount}>
+                                {selected.length}/{MAX_ATTACHMENTS_PER_MESSAGE}
+                            </Text>
+                        </View>
+                        <ScrollView
+                            horizontal={true}
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.tray}
+                        >
+                            {selected.map((item) => (
+                                <View
+                                    key={item.localKey}
+                                    style={styles.trayItem}
+                                >
+                                    {item.kind === 'image' ? (
+                                        <Image
+                                            source={{ uri: item.uri }}
+                                            style={styles.trayImage}
+                                            contentFit="cover"
+                                            cachePolicy="memory"
+                                        />
+                                    ) : item.kind === 'video' ? (
+                                        <View style={styles.trayFile}>
+                                            <Text style={styles.trayFileIcon}>
+                                                🎬
+                                            </Text>
+                                            <Text
+                                                style={styles.trayFileName}
+                                                numberOfLines={2}
+                                            >
+                                                {item.name}
+                                            </Text>
+                                        </View>
+                                    ) : (
+                                        <View style={styles.trayFile}>
+                                            <Text
+                                                style={styles.trayFileIcon}
+                                                numberOfLines={1}
+                                            >
+                                                📎
+                                            </Text>
+                                            <Text
+                                                style={styles.trayFileName}
+                                                numberOfLines={2}
+                                            >
+                                                {item.name}
+                                            </Text>
+                                        </View>
+                                    )}
+                                    <Pressable
+                                        accessibilityRole="button"
+                                        accessibilityLabel={`Remove ${item.name}`}
+                                        hitSlop={8}
+                                        style={styles.trayRemove}
+                                        onPress={(): void =>
+                                            setSelected((current) =>
+                                                current.filter(
+                                                    (entry) =>
+                                                        entry.localKey !==
+                                                        item.localKey,
+                                                ),
+                                            )
+                                        }
+                                    >
+                                        <Text style={styles.trayRemoveText}>
+                                            ✕
+                                        </Text>
+                                    </Pressable>
+                                </View>
+                            ))}
+                        </ScrollView>
+                    </View>
+                )}
+
+                <GlassSurface
+                    tone="elevated"
+                    intensity={blur.strong}
+                    radius={radii.xl}
+                    style={styles.composer}
+                >
+                    <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Attach photo or file"
+                        accessibilityState={{
+                            disabled: props.disabled || picking,
+                        }}
+                        disabled={props.disabled || picking}
+                        onPress={(): void => setSheetOpen(true)}
+                        style={[
+                            styles.attach,
+                            props.disabled && styles.attachDisabled,
+                        ]}
+                    >
+                        <Text style={styles.attachText}>＋</Text>
+                    </Pressable>
+                    <TextInput
+                        ref={inputRef}
+                        style={styles.input}
+                        value={text}
+                        onChangeText={(value): void => {
+                            setText(value);
+                            props.onTextChange?.(value);
+                        }}
+                        onBlur={props.onBlur}
+                        placeholder="Message…"
+                        placeholderTextColor={palette.neutral[300]}
+                        multiline={true}
+                        numberOfLines={4}
+                        editable={!props.disabled}
+                        accessibilityLabel="Message input"
+                        onSubmitEditing={submit}
+                        blurOnSubmit={false}
+                    />
+                    {text.trim() === '' && selected.length === 0 ? (
+                        <View
+                            {...micResponder.panHandlers}
+                            accessible={true}
+                            accessibilityRole="button"
+                            accessibilityLabel="Start recording"
+                            accessibilityState={{ disabled: !micEnabled }}
+                            onAccessibilityTap={startTapRecording}
+                            style={[
+                                styles.send,
+                                micEnabled
+                                    ? styles.micActive
+                                    : styles.sendInactive,
+                            ]}
+                        >
+                            <Mic size={17} />
+                        </View>
+                    ) : (
+                        <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel="Send message"
+                            accessibilityState={{ disabled: !canSend }}
+                            style={[
+                                styles.send,
+                                canSend
+                                    ? styles.sendActive
+                                    : styles.sendInactive,
+                            ]}
+                            onPress={submit}
+                        >
+                            <Text style={styles.sendText}>➤</Text>
+                        </Pressable>
+                    )}
+                </GlassSurface>
+            </View>
 
             <Modal
                 visible={sheetOpen}
@@ -897,7 +940,7 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: palette.border.subtle,
     },
-    attachDisabled: { opacity: 0.5 },
+    attachDisabled: { opacity: 0 },
     attachText: {
         color: palette.primary[600],
         fontSize: 22,

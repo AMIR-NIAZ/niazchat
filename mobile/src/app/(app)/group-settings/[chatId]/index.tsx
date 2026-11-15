@@ -1,7 +1,6 @@
 import React, { useCallback } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     FlatList,
     Pressable,
     StyleSheet,
@@ -19,6 +18,7 @@ import {
     typography,
 } from '../../../../shared/components';
 import { ApiError } from '../../../../core/api';
+import { toast } from '../../../../shared/dialog';
 import { purgeChatFromCaches } from '../../../../features/chats';
 import {
     canOpenGroupSettings,
@@ -74,7 +74,7 @@ function GroupSettings({ chatId }: { chatId: number }): React.ReactElement {
 
     const handleRemoved = useCallback((): void => {
         purgeChatFromCaches(queryClient, chatId);
-        Alert.alert('Removed from group', 'You were removed from this group');
+        toast.show('You were removed from this group');
         router.replace('/(app)');
     }, [queryClient, chatId]);
     useGroupRemovedEvent(chatId, handleRemoved);

@@ -1,12 +1,18 @@
 import { memo } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { MessageBubble } from './message-bubble';
 import type { ChatMessage } from './messages-model';
 
 /**
  * Static, non-interactive render of the SAME bubble, used as the lifted preview
- * over the popup backdrop. It shares `MessageBubble`'s markup so the lift is
- * seamless, but mounts no player, starts no download and runs no animation.
+ * over the popup backdrop. It shares `MessageBubble`'s markup — including
+ * `AttachmentGrid`, so an image/video copy uses the exact same source,
+ * `cachePolicy`, auth headers, tile size and radius as the live bubble (and the
+ * same poster for a video) — but mounts no player, starts no download and runs
+ * no animation.
+ *
+ * The box is the measured anchor (`width` × `height`): the copy is never
+ * resized, cropped or recomputed from its content.
  */
 /** Memoized: the popup must not rebuild the preview during its animation. */
 export const MessageBubblePreview = memo(function MessageBubblePreview({
@@ -17,6 +23,7 @@ export const MessageBubblePreview = memo(function MessageBubblePreview({
     showSenderName,
     showAvatar,
     width,
+    height,
 }: {
     message: ChatMessage;
     mine: boolean;
@@ -24,10 +31,13 @@ export const MessageBubblePreview = memo(function MessageBubblePreview({
     currentUserId: number | null;
     showSenderName: boolean;
     showAvatar: boolean;
+    /** Measured anchor width (window px). */
     width: number;
+    /** Measured anchor height (window px). */
+    height: number;
 }): React.ReactElement {
     return (
-        <View pointerEvents="none" style={[styles.wrap, { width }]}>
+        <View pointerEvents="none" style={[styles.wrap, { width, height }]}>
             <MessageBubble
                 message={message}
                 mine={mine}

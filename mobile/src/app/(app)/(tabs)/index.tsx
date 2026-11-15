@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type { ComponentRef } from 'react';
+import type { StyleProp, ViewStyle } from 'react-native';
 import {
     ActivityIndicator,
-    Alert,
     FlatList,
     Pressable,
     RefreshControl,
@@ -19,12 +19,18 @@ import {
     Screen,
     radii,
     spacing,
-} from '../../shared/components';
+} from '../../../shared/components';
 import { useQueryClient } from '@tanstack/react-query';
-import { palette } from '../../shared/theme';
-import { measureInWindow, useContextPopup } from '../../shared/context-popup';
-import type { PopupRect } from '../../shared/context-popup';
-import { ApiError } from '../../core/api';
+import { palette } from '../../../shared/theme';
+import {
+    measureInWindow,
+    useContextPopup,
+    usePopupHidden,
+} from '../../../shared/context-popup';
+import type { PopupRect } from '../../../shared/context-popup';
+import { useHomeTabReselect, useTabBarInset } from '../../../shared/tab-bar';
+import { dialog, toast } from '../../../shared/dialog';
+import { ApiError } from '../../../core/api';
 import {
     ChatRowContent,
     ChatRowPreview,
@@ -40,12 +46,12 @@ import {
     useChats,
     useLeaveGroup,
     usePinnedChatIds,
-} from '../../features/chats';
-import type { ChatListActionId, ChatRole } from '../../features/chats';
-import { markChatSeen } from '../../features/messages';
-import { openUserProfile } from '../../features/users';
-import { logout, useCurrentUserId } from '../../features/auth';
-import { CircleUserRound, LogOut, UserPlus } from 'lucide-react-native';
+} from '../../../features/chats';
+import type { ChatListActionId, ChatRole } from '../../../features/chats';
+import { markChatSeen } from '../../../features/messages';
+import { openUserProfile } from '../../../features/users';
+import { logout, useCurrentUserId } from '../../../features/auth';
+import { LogOut, UserPlus } from 'lucide-react-native';
 
 /**
  * Chats screen — renders the WS-provided chat list.
@@ -57,7 +63,7 @@ import { CircleUserRound, LogOut, UserPlus } from 'lucide-react-native';
  * - Search is client-side only (no server endpoint).
  */
 
-type ChatRow = import('../../features/chats').ChatPreview;
+type ChatRow = import('../../../features/chats').ChatPreview;
 
 export default function ChatsScreen(): React.ReactElement {
     const chatsQuery = useChats();
@@ -67,6 +73,15 @@ export default function ChatsScreen(): React.ReactElement {
     const currentUserId = useCurrentUserId();
     const { pinned, togglePin } = usePinnedChatIds(currentUserId);
     const leaveGroup = useLeaveGroup();
+    const tabBarInset = useTabBarInset();
+    const listRef = useRef<FlatList<ChatRow>>(null);
+
+    // Re-pressing the active Home tab scrolls the list back to the top.
+    useHomeTabReselect(
+        useCallback((): void => {
+            listRef.current?.scrollToOffset({ offset: 0, animated: true });
+        }, []),
+    );
 
     // Updates missed while this screen was unmounted: refetch on focus.
     useFocusEffect(
@@ -94,62 +109,62 @@ export default function ChatsScreen(): React.ReactElement {
         void markChatSeen(chatId, chat.lastMessage.id).catch(
             (error: unknown) => {
                 setChatUnreadCount(queryClient, chatId, previous);
-                Alert.alert(
-                    'Could not mark as read',
-                    error instanceof Error
-                        ? error.message
-                        : 'Try again in a moment.',
-                );
+                dialog.show({
+                    title: 'Could not mark as read',
+                    message:
+                        error instanceof Error
+                            ? error.message
+                            : 'Try again in a moment.',
+                    tone: 'danger',
+                });
             },
         );
     };
 
     const confirmLeaveGroup = (chat: ChatRow): void => {
         const chatId = Number(chat.id);
-        Alert.alert(
-            'Leave group?',
-            'You will be removed from this group and will no longer receive its messages. An admin will have to add you again.',
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Leave',
-                    style: 'destructive',
-                    onPress: (): void => {
-                        void leaveGroup
-                            .mutateAsync(chatId)
-                            .then((): void => {
-                                purgeChatFromCaches(queryClient, chatId);
-                                Alert.alert(
-                                    'Left group',
-                                    'You are no longer a member of this group.',
-                                );
-                            })
-                            .catch((error: unknown) => {
-                                // 403/404: membership is already gone server
-                                // side — drop local access the same way.
-                                if (
-                                    error instanceof ApiError &&
-                                    (error.statusCode === 403 ||
-                                        error.statusCode === 404)
-                                ) {
-                                    purgeChatFromCaches(queryClient, chatId);
-                                    Alert.alert(
-                                        'Left group',
-                                        'You are no longer a member of this group.',
-                                    );
-                                    return;
-                                }
-                                Alert.alert(
-                                    'Could not leave group',
-                                    error instanceof Error
-                                        ? error.message
-                                        : 'Try again in a moment.',
-                                );
-                            });
-                    },
-                },
-            ],
-        );
+        void dialog
+            .confirm({
+                title: 'Leave group?',
+                message:
+                    'You will be removed from this group and will no longer receive its messages. An admin will have to add you again.',
+                confirmText: 'Leave',
+                destructive: true,
+            })
+            .then((confirmed): void => {
+                if (!confirmed) {
+                    return;
+                }
+                void leaveGroup
+                    .mutateAsync(chatId)
+                    .then((): void => {
+                        purgeChatFromCaches(queryClient, chatId);
+                        toast.show('You are no longer a member of this group.');
+                    })
+                    .catch((error: unknown) => {
+                        // 403/404: membership is already gone server side —
+                        // drop local access the same way.
+                        if (
+                            error instanceof ApiError &&
+                            (error.statusCode === 403 ||
+                                error.statusCode === 404)
+                        ) {
+                            purgeChatFromCaches(queryClient, chatId);
+                            toast.show(
+                                'You are no longer a member of this group.',
+                            );
+                            return;
+                        }
+                        dialog.show({
+                            title: 'Could not leave group',
+                            message:
+                                error instanceof Error
+                                    ? error.message
+                                    : 'Try again in a moment.',
+                            tone: 'danger',
+                        });
+                    });
+            });
     };
 
     const runChatAction = (chat: ChatRow, action: ChatListActionId): void => {
@@ -214,6 +229,7 @@ export default function ChatsScreen(): React.ReactElement {
         popup.open({
             anchor,
             align: 'start',
+            sourceKey: `chat:${chat.id}`,
             actions: rows.map((action) => ({
                 id: action.id,
                 label: action.label,
@@ -259,32 +275,13 @@ export default function ChatsScreen(): React.ReactElement {
                         </Pressable>
                         <Pressable
                             accessibilityRole="button"
-                            accessibilityLabel="Open profile"
-                            onPress={(): void => {
-                                router.push('/(app)/profile');
-                            }}
-                            style={styles.iconButton}
-                        >
-                            <CircleUserRound
-                                size={26}
-                                color="#7e00e6"
-                                strokeWidth={2}
-                            />
-                        </Pressable>
-                        <Pressable
-                            accessibilityRole="button"
                             accessibilityLabel="Sign out"
                             onPress={(): void => {
                                 void logout('manual');
                             }}
                             style={styles.iconButton}
                         >
-                            <LogOut
-                                size={26}
-                                color="#7e00e6"
-                                strokeWidth={2}
-                            />
-
+                            <LogOut size={26} color="#7e00e6" strokeWidth={2} />
                         </Pressable>
                     </>
                 }
@@ -329,13 +326,14 @@ export default function ChatsScreen(): React.ReactElement {
                     retry={
                         search === ''
                             ? (): void => {
-                                void chatsQuery.refetch();
-                            }
+                                  void chatsQuery.refetch();
+                              }
                             : undefined
                     }
                 />
             ) : (
                 <FlatList
+                    ref={listRef}
                     data={visible}
                     keyExtractor={(item: ChatRow): string => String(item.id)}
                     refreshControl={
@@ -355,6 +353,7 @@ export default function ChatsScreen(): React.ReactElement {
                         />
                     )}
                     ItemSeparatorComponent={RowSeparator}
+                    contentContainerStyle={{ paddingBottom: tabBarInset }}
                 />
             )}
 
@@ -362,7 +361,7 @@ export default function ChatsScreen(): React.ReactElement {
                 tone="accent"
                 radius={radii.full}
                 floating={true}
-                style={styles.fabWrap}
+                style={[styles.fabWrap, { bottom: tabBarInset }]}
             >
                 <Pressable
                     accessibilityRole="button"
@@ -395,6 +394,10 @@ function ChatRowItem(props: ChatRowItemProps): React.ReactElement {
     // Releasing a hold that opened the menu must not also navigate.
     const pressStartedAtRef = useRef(0);
     const previewText = chatPreviewText(chat.lastMessage);
+    // Hidden (opacity only, UI thread) while the popup draws this row's copy on
+    // top of it. Applied to the row's own Pressable: no extra node, so the row
+    // keeps its exact layout whether the popup is open or not.
+    const hiddenStyle = usePopupHidden(`chat:${chat.id}`);
 
     return (
         <Pressable
@@ -402,6 +405,9 @@ function ChatRowItem(props: ChatRowItemProps): React.ReactElement {
             accessibilityRole="button"
             accessibilityHint="Tap to open, long press for chat actions"
             delayLongPress={LONG_PRESS_MS}
+            // Reanimated styles are plain view styles at runtime; the cast is
+            // only for Pressable's non-animated style type.
+            style={hiddenStyle as StyleProp<ViewStyle>}
             onPressIn={(): void => {
                 pressStartedAtRef.current = Date.now();
                 props.onHold(chat);
@@ -560,7 +566,6 @@ const styles = StyleSheet.create({
     fabWrap: {
         position: 'absolute',
         end: spacing.lg,
-        bottom: spacing.lg,
     },
     fab: {
         paddingHorizontal: spacing.md,

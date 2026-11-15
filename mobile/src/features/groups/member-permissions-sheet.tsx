@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     Modal,
     Pressable,
     StyleSheet,
@@ -11,6 +10,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ApiError } from '../../core/api';
+import { dialog } from '../../shared/dialog';
 import {
     UserAvatar,
     palette,
@@ -91,14 +91,19 @@ export function MemberPermissionsSheet(props: {
             props.onClose();
             return;
         }
-        Alert.alert('Discard changes?', 'Your changes will not be saved.', [
-            { text: 'Keep editing', style: 'cancel' },
-            {
-                text: 'Discard',
-                style: 'destructive',
-                onPress: props.onClose,
-            },
-        ]);
+        void dialog
+            .confirm({
+                title: 'Discard changes?',
+                message: 'Your changes will not be saved.',
+                confirmText: 'Discard',
+                cancelText: 'Keep editing',
+                destructive: true,
+            })
+            .then((confirmed): void => {
+                if (confirmed) {
+                    props.onClose();
+                }
+            });
     };
 
     const save = (): void => {

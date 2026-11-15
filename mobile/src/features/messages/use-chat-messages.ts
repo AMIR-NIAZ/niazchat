@@ -37,6 +37,7 @@ import type {
 } from './messages-model';
 import { toNumericId } from './messages-model';
 import { applyMyReaction, applyReactionUpdate } from './reaction-helpers';
+import { notifyMediaViewerMessageDeleted } from '../attachments/media-viewer-store';
 import {
     mapWithConcurrency,
     uploadAttachment,
@@ -358,6 +359,8 @@ export function useChatMessages(
                 messageId,
             ),
         );
+        // A full-screen media viewer may be showing this message's media.
+        notifyMediaViewerMessageDeleted(Number(messageId));
     };
     const onSeen = (payload: {
         chatId: number;
@@ -1195,6 +1198,9 @@ export function useChatMessages(
                     messageId,
                 ),
             );
+            // Same for the optimistic path: the viewer is not driven by the
+            // message list anymore, so it is told explicitly.
+            notifyMediaViewerMessageDeleted(messageId);
             try {
                 await deleteChatMessage(messageId, chatId);
             } catch (error: unknown) {

@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     FlatList,
     Pressable,
     RefreshControl,
@@ -20,9 +19,11 @@ import {
     typography,
 } from '../../../../shared/components';
 import { ApiError } from '../../../../core/api';
+import { dialog, toast } from '../../../../shared/dialog';
 import { openUserProfile } from '../../../../features/users';
 import type { GroupBannedUser } from '../../../../features/groups/group-model';
 import {
+    canManageBans,
     useGroupBannedUsers,
     useGroupChangedEvents,
     useGroupInfo,
@@ -69,7 +70,7 @@ export default function BannedUsersScreen(): React.ReactElement {
 function BannedUsers({ chatId }: { chatId: number }): React.ReactElement {
     const infoQuery = useGroupInfo(chatId);
     const info = infoQuery.data;
-    const allowed = info?.capabilities?.canManageBans === true;
+    const allowed = info !== undefined && canManageBans(info.capabilities);
     const bannedQuery = useGroupBannedUsers(chatId, allowed);
     const unban = useUnbanMember(chatId);
     const [pendingMemberId, setPendingMemberId] = useState<number | null>(null);
@@ -96,36 +97,39 @@ function BannedUsers({ chatId }: { chatId: number }): React.ReactElement {
         unban
             .mutateAsync(user)
             .then((): void => {
-                Alert.alert(
-                    'User unbanned',
+                toast.show(
                     `${displayName(user)} can join this group again.`,
+                    { tone: 'success' },
                 );
             })
             .catch((error: unknown): void => {
-                Alert.alert(
-                    'Could not unban user',
-                    error instanceof Error
-                        ? error.message
-                        : 'Please try again.',
-                );
+                dialog.show({
+                    title: 'Could not unban user',
+                    message:
+                        error instanceof Error
+                            ? error.message
+                            : 'Please try again.',
+                    tone: 'danger',
+                });
             })
             .finally((): void => setPendingMemberId(null));
     };
 
     const confirmUnban = (user: GroupBannedUser): void => {
         if (pendingMemberId !== null) return;
-        Alert.alert(
-            `Unban ${displayName(user)}?`,
-            'They become a regular member again and can rejoin this group. A former admin comes back as a member.',
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Unban',
-                    style: 'destructive',
-                    onPress: (): void => runUnban(user),
-                },
-            ],
-        );
+        void dialog
+            .confirm({
+                title: `Unban ${displayName(user)}?`,
+                message:
+                    'They become a regular member again and can rejoin this group. A former admin comes back as a member.',
+                confirmText: 'Unban',
+                destructive: true,
+            })
+            .then((confirmed): void => {
+                if (confirmed) {
+                    runUnban(user);
+                }
+            });
     };
 
     if (infoQuery.isPending) {

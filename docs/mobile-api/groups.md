@@ -14,7 +14,7 @@ would reject.
 | Role | Panel role | Meaning |
 |---|---|---|
 | `manager` | `owner` | Group creator. Only the owner promotes/demotes/removes admins. |
-| `admin` | `admin` | Can remove regular members only with `ban_user` or `all`. |
+| `admin` | `admin` | Can remove/ban regular members only with `ban_user` or `all`. |
 | `user` | `member` | Read-only panel. |
 | `ban` | — | Banned; never listed, never counted, cannot use the panel. |
 
@@ -27,10 +27,16 @@ runtime.
 
 | Caller | Target owner | Target admin | Target member | Self |
 |---|---|---|---|---|
-| Owner | — | edit permissions, demote, remove | promote, remove | — |
-| Admin with `ban_user`/`all` | — | — | remove | — |
+| Owner | — | edit permissions, demote, remove, **ban** | promote, remove, **ban** | — |
+| Admin with `ban_user`/`all` | — | — | remove, **ban** | — |
 | Admin without `ban_user` | — | — | — | — |
 | Member / banned / outsider | — | — | — | — |
+
+A ban sets the target's `role_chat` to `ban` (the same representation the
+banned list reads) and deletes their permission grants. The row is NOT
+deleted: this is what distinguishes a ban from "remove". Nobody can ban the
+owner or themselves, an admin can never ban another admin, and a target that
+is already banned answers 409.
 
 Every action re-checks, in one transaction: caller is a non-banned member of
 that chat, chat is a live group, target row is in the SAME chat, caller
@@ -113,7 +119,8 @@ Any non-banned member.
         "canPromote": false,
         "canDemote": true,
         "canRemove": true,
-        "canEditPermissions": true
+        "canEditPermissions": true,
+        "canBan": true
       }
     }
   ],
@@ -123,7 +130,9 @@ Any non-banned member.
 
 `actions` is computed for the CALLER with the same pure functions the action
 endpoints use. `canEditPermissions` is true only when the caller is the owner
-and the target is an ADMIN of that chat. No phone number is ever included.
+and the target is an ADMIN of that chat. `canBan` mirrors `canRemove`: owner
+for members and admins, admin with `ban_user`/`all` for members only. No phone
+number is ever included.
 
 ## `GET /chats/:chatId/banned?cursor=&limit=`
 
@@ -190,6 +199,7 @@ on their next `joinChat`. Everyone currently in the chat room receives
 POST   /chats/:chatId/members/:memberId/promote
 POST   /chats/:chatId/members/:memberId/demote
 DELETE /chats/:chatId/members/:memberId
+POST   /chats/:chatId/members/:memberId/ban
 ```
 
 Any authenticated user may call them (global auth guard); the service decides.
@@ -199,8 +209,63 @@ Ids are validated integers.
 { "memberId": 88, "role": "admin", "changed": true }
 ```
 
-`role` is `null` after removal. Per-user rate limit: 30 actions per minute
-(Redis fixed window through the existing `RateLimitService`, 429 otherwise).
+`role` is `null` after removal (and after a ban, which has no group role).
+Per-user rate limit: 30 actions per minute (Redis fixed window through the
+existing `RateLimitService`, 429 otherwise).
+
+## Ban a member
+
+```
+POST /chats/:chatId/members/:memberId/ban
+```
+
+Rules (the app's `canBan` row flag is the same pure function):
+
+| Caller | Owner | Admin | Member | Self |
+|---|---|---|---|---|
+| Owner | 403 | ban | ban | 403 |
+| Admin with `ban_user`/`all` | 403 | 403 | ban | 403 |
+| Admin without `ban_user` | 403 | 403 | 403 | 403 |
+| Member / banned / outsider | 403 | 403 | 403 | 403 |
+
+One transaction locks the caller and every `chat_members` row of the target
+user, re-checks the live group (private chats answer 400), the caller's role
+and permissions, self/owner protection and the target's locked role. Every
+duplicate row of the target becomes `ban`; all their `permission_admin` grants
+are deleted. The membership rows are kept (that IS the ban); the user
+disappears from `GET /chats/:chatId/members` and `membersCount`, and appears
+in `GET /chats/:chatId/banned` immediately.
+
+Response:
+
+```json
+{ "memberId": 88, "role": null, "changed": true }
+```
+
+Errors:
+
+| Status | Meaning |
+|---|---|
+| 400 | private chat (`This action is only available in groups`), invalid ids |
+| 403 | `You don't have permission to do this` — no capability, self, or owner target |
+| 404 | member not found in this group |
+| 409 | `user is already banned`, or `cannot ban this user` when the role changed before the lock |
+| 429 | `Too many group actions, please try again later` |
+
+The global filter rewrites every 403 body to `user not access`; clients branch
+on the status code. A ban is reversible only through unban; the other paths
+that would restore access already reject a `ban` row: invite-link join answers
+403 `You can't join this group`, adding by phone answers 409 `user is banned
+from this group and cannot be added`, and the message/room guards (`wsIsBanMember`,
+`ChatAccessService`) reject reads and sends.
+
+Realtime after commit: the banned user's `user:<id>` room receives
+`group:removed { chatId, reason: 'banned' }`, every socket of theirs leaves
+`chat:<chatId>` (chat list, open chat and typing state are dropped client
+side), and the chat room receives
+`group:changed { chatId, reason: 'member_banned', userId }` followed by
+`chat:members { chatId, membersCount }`. The legacy owner-only
+`POST /chats/manage/ban/:memberId` is unchanged.
 
 ## Admin permissions (owner only)
 
@@ -252,7 +317,7 @@ role change between the pre-check and the lock answers 409.
 
 | Permission | Enforced where | Enforced? |
 |---|---|---|
-| `ban_user` | New panel `DELETE /chats/:chatId/members/:memberId` and `GET /chats/:chatId/banned`; legacy kick, ban-list and unban routes | Yes |
+| `ban_user` | New panel `DELETE /chats/:chatId/members/:memberId`, `POST /chats/:chatId/members/:memberId/ban` and `GET /chats/:chatId/banned`; legacy kick, ban-list and unban routes | Yes |
 | `change_info_chat` | New `PATCH /chats/:chatId/group` + group avatar routes (`GroupInfoService`); legacy `/chats/manage/*` | Yes |
 | `delete_message` | No route checks it; message deletion allows the sender or group owner only | **No** |
 | `all` | `ChatPermissionService.canEditInfo` / `ChatAccessService.assertPermissions` / legacy `ManagerChatGuard` bypass | Yes |
@@ -349,10 +414,10 @@ After commit (never blocking the response):
 
 | Event | Room | Payload |
 |---|---|---|
-| `group:changed` | `chat:<chatId>` | `{ chatId, reason: 'role_changed' \| 'member_removed' \| 'permissions_changed' \| 'info_changed' \| 'avatars_changed', userId }` |
+| `group:changed` | `chat:<chatId>` | `{ chatId, reason: 'role_changed' \| 'member_removed' \| 'member_banned' \| 'permissions_changed' \| 'info_changed' \| 'avatars_changed', userId }` |
 | `group:updated` | every member's `user:<userId>` | `{ chatId, title, avatars }` after a committed info/photo change (FULL photo array, current first) |
-| `group:removed` | `user:<userId>` | `{ chatId, reason: 'kicked' }` |
-| `chat:members` | `chat:<chatId>` | `{ chatId, membersCount }` after removal |
+| `group:removed` | `user:<userId>` | `{ chatId, reason: 'kicked' \| 'banned' }` |
+| `chat:members` | `chat:<chatId>` | `{ chatId, membersCount }` after removal or ban |
 
 A committed permission save emits `group:changed` with
 `reason: 'permissions_changed'` and the target `userId`; it is sent after commit

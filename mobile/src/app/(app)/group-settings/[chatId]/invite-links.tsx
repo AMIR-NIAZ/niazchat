@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     FlatList,
     Modal,
     Pressable,
@@ -15,6 +14,7 @@ import * as Clipboard from 'expo-clipboard';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Screen, palette, radii, spacing } from '../../../../shared/components';
+import { dialog, toast } from '../../../../shared/dialog';
 import { purgeChatFromCaches } from '../../../../features/chats';
 import { describeInviteLinkError } from '../../../../features/groups/group-errors';
 import { openMessageLink } from '../../../../features/groups/open-invite-link';
@@ -139,7 +139,7 @@ function InviteLinksPanel({ chatId }: { chatId: number }): React.ReactElement {
 
     const handleRemoved = useCallback((): void => {
         purgeChatFromCaches(queryClient, chatId);
-        Alert.alert('Removed from group', 'You were removed from this group');
+        toast.show('You were removed from this group');
         router.replace('/(app)');
     }, [queryClient, chatId]);
     useGroupRemovedEvent(chatId, handleRemoved);
@@ -152,10 +152,11 @@ function InviteLinksPanel({ chatId }: { chatId: number }): React.ReactElement {
     useEffect((): void => {
         if (info === undefined || canManage || accessLost) return;
         setAccessLost(true);
-        Alert.alert(
-            'Access changed',
-            'You can no longer manage invite links for this group.',
-        );
+        dialog.show({
+            title: 'Access changed',
+            message: 'You can no longer manage invite links for this group.',
+            tone: 'warning',
+        });
         router.replace('/(app)');
     }, [canManage, accessLost]);
 
@@ -188,7 +189,11 @@ function InviteLinksPanel({ chatId }: { chatId: number }): React.ReactElement {
                 COPIED_MS,
             );
         } catch {
-            Alert.alert('Could not copy', 'Try sharing the link instead.');
+            dialog.show({
+                title: 'Could not copy',
+                message: 'Try sharing the link instead.',
+                tone: 'danger',
+            });
         }
     };
 
@@ -203,30 +208,30 @@ function InviteLinksPanel({ chatId }: { chatId: number }): React.ReactElement {
     };
 
     const confirmRevoke = (link: InviteLinkDto): void => {
-        Alert.alert(
-            'Revoke this link?',
-            'People who already joined stay in the group.',
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Revoke',
-                    style: 'destructive',
-                    onPress: (): void => {
-                        revokeLink.mutate(link.id, {
-                            onSuccess: (): void => {
-                                showNotice('Link revoked');
-                            },
-                            onError: (error): void => {
-                                Alert.alert(
-                                    'Could not revoke link',
-                                    describeInviteLinkError(error),
-                                );
-                            },
+        void dialog
+            .confirm({
+                title: 'Revoke this link?',
+                message: 'People who already joined stay in the group.',
+                confirmText: 'Revoke',
+                destructive: true,
+            })
+            .then((confirmed): void => {
+                if (!confirmed) {
+                    return;
+                }
+                revokeLink.mutate(link.id, {
+                    onSuccess: (): void => {
+                        showNotice('Link revoked');
+                    },
+                    onError: (error): void => {
+                        dialog.show({
+                            title: 'Could not revoke link',
+                            message: describeInviteLinkError(error),
+                            tone: 'danger',
                         });
                     },
-                },
-            ],
-        );
+                });
+            });
     };
 
     const openSheet = (): void => {
@@ -254,10 +259,11 @@ function InviteLinksPanel({ chatId }: { chatId: number }): React.ReactElement {
                 4000,
             );
         } catch (error) {
-            Alert.alert(
-                'Could not create link',
-                describeInviteLinkError(error),
-            );
+            dialog.show({
+                title: 'Could not create link',
+                message: describeInviteLinkError(error),
+                tone: 'danger',
+            });
         }
     };
 

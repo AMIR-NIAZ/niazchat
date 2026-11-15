@@ -41,6 +41,7 @@ function member(overrides: Partial<GroupMember> = {}): GroupMember {
             canDemote: false,
             canRemove: true,
             canEditPermissions: false,
+            canBan: false,
         },
         ...overrides,
     };
@@ -91,6 +92,7 @@ describe('action visibility', () => {
                 canDemote: false,
                 canRemove: true,
                 canEditPermissions: false,
+                canBan: false,
             }),
         ).toEqual(['promote', 'remove']);
         expect(
@@ -99,6 +101,7 @@ describe('action visibility', () => {
                 canDemote: true,
                 canRemove: true,
                 canEditPermissions: true,
+                canBan: false,
             }),
         ).toEqual(['permissions', 'demote', 'remove']);
         expect(
@@ -107,6 +110,7 @@ describe('action visibility', () => {
                 canDemote: false,
                 canRemove: true,
                 canEditPermissions: false,
+                canBan: false,
             }),
         ).toEqual(['remove']);
         expect(
@@ -115,6 +119,7 @@ describe('action visibility', () => {
                 canDemote: false,
                 canRemove: false,
                 canEditPermissions: false,
+                canBan: false,
             }),
         ).toEqual([]);
     });
@@ -126,6 +131,7 @@ describe('action visibility', () => {
                 canDemote: false,
                 canRemove: false,
                 canEditPermissions: false,
+                canBan: false,
             }),
         ).toBe(false);
         expect(
@@ -134,6 +140,7 @@ describe('action visibility', () => {
                 canDemote: false,
                 canRemove: true,
                 canEditPermissions: false,
+                canBan: false,
             }),
         ).toBe(true);
         expect(
@@ -142,6 +149,7 @@ describe('action visibility', () => {
                 canDemote: false,
                 canRemove: false,
                 canEditPermissions: true,
+                canBan: false,
             }),
         ).toBe(true);
     });
@@ -151,9 +159,42 @@ describe('action visibility', () => {
         expect(memberActionLabel('promote')).toBe('Make admin');
         expect(memberActionLabel('demote')).toBe('Remove admin');
         expect(memberActionLabel('remove')).toBe('Remove from group');
+        expect(memberActionLabel('ban')).toBe('Ban');
         expect(roleBadgeLabel('owner')).toBe('Owner');
         expect(roleBadgeLabel('admin')).toBe('Admin');
         expect(roleBadgeLabel('member')).toBeNull();
+    });
+});
+
+describe('ban action visibility', () => {
+    it('lists Ban last, after Remove', () => {
+        expect(
+            visibleMemberActions({
+                canPromote: false,
+                canDemote: false,
+                canRemove: true,
+                canEditPermissions: false,
+                canBan: true,
+            }),
+        ).toEqual(['remove', 'ban']);
+        expect(
+            visibleMemberActions({
+                canPromote: false,
+                canDemote: false,
+                canRemove: false,
+                canEditPermissions: false,
+                canBan: true,
+            }),
+        ).toEqual(['ban']);
+        expect(
+            hasMemberActions({
+                canPromote: false,
+                canDemote: false,
+                canRemove: false,
+                canEditPermissions: false,
+                canBan: true,
+            }),
+        ).toBe(true);
     });
 });
 

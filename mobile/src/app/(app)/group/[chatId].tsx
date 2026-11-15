@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     FlatList,
     Pressable,
     RefreshControl,
@@ -22,6 +21,7 @@ import {
     typography,
 } from '../../../shared/components';
 import { useDebouncedValue } from '../../../shared/hooks/use-debounced-value';
+import { dialog, toast } from '../../../shared/dialog';
 import { ApiError } from '../../../core/api';
 import { useCurrentUserId } from '../../../features/auth';
 import { purgeChatFromCaches } from '../../../features/chats';
@@ -46,6 +46,7 @@ import type {
 import {
     describeMemberActionError,
     groupAvatarItems,
+    useBanMember,
     useDeleteGroupAvatar,
     useDemoteMember,
     useGroupChangedEvents,
@@ -108,6 +109,7 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
     const promote = usePromoteMember(chatId);
     const demote = useDemoteMember(chatId);
     const remove = useRemoveMember(chatId);
+    const ban = useBanMember(chatId);
     const deleteAvatar = useDeleteGroupAvatar(chatId);
     const setMainAvatar = useSetMainGroupAvatar(chatId);
 
@@ -136,7 +138,7 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
 
     const handleRemoved = useCallback((): void => {
         purgeChatFromCaches(queryClient, chatId);
-        Alert.alert('Removed from group', 'You were removed from this group');
+        toast.show('You were removed from this group');
         router.replace('/(app)');
     }, [queryClient, chatId]);
     useGroupRemovedEvent(chatId, handleRemoved);
@@ -182,7 +184,9 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
                 ? promote
                 : action === 'demote'
                     ? demote
-                    : remove;
+                    : action === 'ban'
+                      ? ban
+                      : remove;
         mutation
             .mutateAsync(member.memberId)
             .then((result): void => {
@@ -192,15 +196,18 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
                     showNotice(`${member.name || 'Member'} is now an admin`);
                 } else if (action === 'demote') {
                     showNotice(`${member.name || 'Member'} is now a member`);
+                } else if (action === 'ban') {
+                    showNotice(`${member.name || 'Member'} was banned`);
                 } else {
                     showNotice(`${member.name || 'Member'} was removed`);
                 }
             })
             .catch((error: unknown): void => {
-                Alert.alert(
-                    'Could not update member',
-                    describeMemberActionError(error),
-                );
+                dialog.show({
+                    title: 'Could not update member',
+                    message: describeMemberActionError(error),
+                    tone: 'danger',
+                });
             })
             .finally((): void => setPendingMemberId(null));
     };
@@ -211,46 +218,63 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
     ): void => {
         const name = member.name || member.username || 'This member';
         if (action === 'promote') {
-            Alert.alert(
-                `Make ${name} an admin?`,
-                'They will be able to manage members according to their permissions.',
-                [
-                    { text: 'Cancel', style: 'cancel' },
-                    {
-                        text: 'Make admin',
-                        onPress: (): void => runAction(action, member),
-                    },
-                ],
-            );
+            void dialog
+                .confirm({
+                    title: `Make ${name} an admin?`,
+                    message:
+                        'They will be able to manage members according to their permissions.',
+                    confirmText: 'Make admin',
+                })
+                .then((confirmed): void => {
+                    if (confirmed) {
+                        runAction(action, member);
+                    }
+                });
             return;
         }
         if (action === 'demote') {
-            Alert.alert(
-                `Remove ${name} as admin?`,
-                'They will become a regular member.',
-                [
-                    { text: 'Cancel', style: 'cancel' },
-                    {
-                        text: 'Remove admin',
-                        style: 'destructive',
-                        onPress: (): void => runAction(action, member),
-                    },
-                ],
-            );
+            void dialog
+                .confirm({
+                    title: `Remove ${name} as admin?`,
+                    message: 'They will become a regular member.',
+                    confirmText: 'Remove admin',
+                    destructive: true,
+                })
+                .then((confirmed): void => {
+                    if (confirmed) {
+                        runAction(action, member);
+                    }
+                });
             return;
         }
-        Alert.alert(
-            `Remove ${name} from this group?`,
-            'They can be added again later.',
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Remove',
-                    style: 'destructive',
-                    onPress: (): void => runAction(action, member),
-                },
-            ],
-        );
+        if (action === 'ban') {
+            void dialog
+                .confirm({
+                    title: `Ban ${name}?`,
+                    message:
+                        'They will be removed from the group and cannot rejoin until you unban them.',
+                    confirmText: 'Ban',
+                    destructive: true,
+                })
+                .then((confirmed): void => {
+                    if (confirmed) {
+                        runAction(action, member);
+                    }
+                });
+            return;
+        }
+        void dialog
+            .confirm({
+                title: `Remove ${name} from this group?`,
+                message: 'They can be added again later.',
+                confirmText: 'Remove',
+                destructive: true,
+            })
+            .then((confirmed): void => {
+                if (confirmed) {
+                    runAction(action, member);
+                }
+            });
     };
 
     if (infoQuery.isPending) {
@@ -288,10 +312,11 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
             const result = await setMainAvatar.mutateAsync(fileName);
             return result.changed;
         } catch (error) {
-            Alert.alert(
-                'Could not set group photo',
-                describeGroupAvatarError(error),
-            );
+            dialog.show({
+                title: 'Could not set group photo',
+                message: describeGroupAvatarError(error),
+                tone: 'danger',
+            });
             return false;
         }
     };
@@ -301,10 +326,11 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
             await deleteAvatar.mutateAsync(fileName);
             setNotice('Group photo deleted');
         } catch (error) {
-            Alert.alert(
-                'Could not delete group photo',
-                describeGroupAvatarError(error),
-            );
+            dialog.show({
+                title: 'Could not delete group photo',
+                message: describeGroupAvatarError(error),
+                tone: 'danger',
+            });
         }
     };
 
@@ -517,6 +543,7 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
                         canDemote: false,
                         canRemove: false,
                         canEditPermissions: false,
+                        canBan: false,
                     }
                 }
                 busy={pendingMemberId !== null}

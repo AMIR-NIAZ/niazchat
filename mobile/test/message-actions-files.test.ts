@@ -95,11 +95,12 @@ function message(over: Partial<ChatMessage> = {}): ChatMessage {
 
 const ctx = { currentUserId: 1, canDeleteOthers: false };
 
-test('own text offers reply/forward/select/edit/delete', () => {
+test('own text offers reply/forward/copy/select/edit/delete', () => {
     const actions = getMessageActions(message(), ctx);
     assertEqual(actions, {
         reply: true,
         forward: true,
+        copy: true,
         select: true,
         edit: true,
         editLabel: 'Edit message',

@@ -36,6 +36,12 @@ import {
     normalizeUserSearch,
     userSearchRateKey,
 } from '../utils/user-search.util';
+import {
+    CONTACTS_MATCH_RATE_LIMIT,
+    CONTACTS_MATCH_RATE_WINDOW_SECONDS,
+    contactsMatchRateKey,
+    normalizeContactPhones,
+} from '../utils/contacts-match.util';
 
 /** Row shape of the locked profile inside an avatar transaction. */
 interface LockedProfileRow {
@@ -126,6 +132,55 @@ export class UserService {
                 // Current photo only (backend convention: `avatars[0]`).
                 avatars:
                     profile.avatars?.length > 0 ? [profile.avatars[0]] : [],
+            })),
+        };
+    }
+
+    /**
+     * `POST /contacts/match`: the active users whose phone is among the
+     * uploaded (normalized) numbers, never the caller.
+     *
+     * The response carries a phone only because the caller already uploaded
+     * that exact number; nothing else about the account leaks. Uploaded numbers
+     * are never persisted or logged. One indexed `phone IN (...)` query, no
+     * per-row lookups.
+     */
+    async matchContacts(callerId: number, rawPhones: unknown) {
+        const phones = normalizeContactPhones(rawPhones);
+
+        await this.rateLimit.consume(
+            contactsMatchRateKey(callerId),
+            CONTACTS_MATCH_RATE_LIMIT,
+            CONTACTS_MATCH_RATE_WINDOW_SECONDS,
+            'Too many contact matches, try again later',
+        );
+
+        if (phones.length === 0) {
+            return { items: [] };
+        }
+
+        const rows = await this.userRepository
+            .createQueryBuilder('user')
+            .leftJoinAndSelect('user.profile', 'profile')
+            .where('user.phone IN (:...phones)', { phones })
+            .andWhere('user.status = :status', {
+                status: UserStatusEnum.ACTIVE,
+            })
+            .andWhere('user.id != :callerId', { callerId })
+            .orderBy('user.phone', 'ASC')
+            .getMany();
+
+        return {
+            items: rows.map((user) => ({
+                userId: Number(user.id),
+                name: user.profile?.name ?? 'بدون نام',
+                username: user.profile?.username ?? null,
+                // Same convention as the user search: current photo only.
+                avatars:
+                    user.profile?.avatars?.length > 0
+                        ? [user.profile.avatars[0]]
+                        : [],
+                phone: user.phone,
             })),
         };
     }

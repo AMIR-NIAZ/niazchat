@@ -23,6 +23,12 @@ interface ScrollToBottomButtonProps {
     visible: boolean;
     /** New messages from other members while scrolled up (0 = no badge). */
     count: number;
+    /**
+     * Distance from the bottom of the list container: the measured composer
+     * stack, so the button floats exactly above the input bar (and follows the
+     * keyboard with it).
+     */
+    bottomOffset?: number;
     onPress: () => void;
 }
 
@@ -102,6 +108,7 @@ export function ScrollToBottomButton(
             pointerEvents={interactive ? 'auto' : 'none'}
             style={[
                 styles.wrap,
+                { bottom: props.bottomOffset ?? spacing.sm },
                 {
                     opacity: progress,
                     transform: [

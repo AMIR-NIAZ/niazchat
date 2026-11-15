@@ -1,61 +1,342 @@
-import { Component, useEffect, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
+    AccessibilityInfo,
+    BackHandler,
     FlatList,
-    Modal,
-    PanResponder,
-    Pressable,
     StyleSheet,
-    Text,
     View,
     useWindowDimensions,
 } from 'react-native';
 import type { ListRenderItemInfo } from 'react-native';
-import { Image } from 'expo-image';
-import { useVideoPlayer, VideoView } from 'expo-video';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { palette, radii, spacing } from '../../shared/theme';
-import type { AttachmentView } from '../messages/messages-model';
-import { attachmentPreviewUrl, attachmentUrl } from './attachment-url';
-import { useAttachmentAuth } from './auth-headers';
-import { downloadAttachment, shareLocalFile } from './file-download';
-import { fetchVideoStreamUrl } from './stream-url';
-import { formatDuration, hasDuration } from './attachment-grid';
+import { LinearGradient } from 'expo-linear-gradient';
+import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
+import type { PanGestureConfig } from 'react-native-gesture-handler';
+import { scheduleOnRN } from 'react-native-worklets';
+import Animated, {
+    Easing,
+    interpolate,
+    useAnimatedStyle,
+    useSharedValue,
+    withDelay,
+    withSpring,
+    withTiming,
+} from 'react-native-reanimated';
+import * as Haptics from 'expo-haptics';
+import { palette, spacing } from '../../shared/theme';
+import { useReducedMotion } from '../../shared/hooks/use-reduced-motion';
+import { measureInWindow, useContextPopup } from '../../shared/context-popup';
+import type { ViewInstance } from '../../shared/context-popup';
+import { getLocalVideoUri } from '../../shared/media-cache';
+import type { ChatMessage } from '../messages/messages-model';
+import { ViewerImagePage } from './viewer/image-page';
+import { ViewerVideoPage, CHROME_IDLE_MS } from './viewer/video-page';
+import {
+    ViewerCaptionFooter,
+    ViewerCaptionSheet,
+    ViewerCounter,
+    ViewerHeader,
+} from './viewer/viewer-chrome';
+import { buildViewerMenuItems } from './viewer/viewer-menu';
+import { viewerPageLabel } from './viewer/viewer-model';
+import type { ViewerItem, ViewerRect } from './viewer/viewer-model';
+import { registerMediaViewerCloser } from './media-viewer-store';
 
 /**
- * Full-screen viewer shared by images and videos of ONE message: swipe between
- * all media, "2 of 4" counter, tap/close-button/swipe-down to dismiss.
+ * Telegram-style full-screen media viewer for one conversation.
  *
- * Images load the original through the authenticated download route. Videos
- * are fetched ONLY while their page is active, via a fresh short-lived signed
- * URL, and only one player exists at a time (swiping away unmounts it).
+ * It is a plain overlay mounted at the root of the app (no `Modal`), inside
+ * `MediaViewerProvider`, so it covers the whole screen while the shared context
+ * popup host and the dialog host still paint above it — and the hero
+ * transition starts from the real bubble rect.
+ *
+ * - Dark purple background with a near-black bottom gradient; no white anywhere.
+ * - Horizontal pager over EVERY image and video of the chat, 12 px page gap,
+ *   only the current ±1 pages mounted.
+ * - Hero OPEN from the tapped tile; ONE dismiss animation (drag down/up, header
+ *   close, hardware back) is played by `animateDismiss`. Single tap toggles the
+ *   chrome, pinch/double-tap zoom on images (UI thread).
+ * - Header (sender + date + ⋯ menu + close), counter pill and a caption footer
+ *   that only exists when the message has text.
+ * - Video pages play only verified local files and drive their own controls.
+ *
+ * The viewer never starts a video download by itself, never touches the cache
+ * or download state machine, and closes itself when the picked action needs the
+ * conversation (Forward, Go to message, Delete).
  */
 
-interface AttachmentViewerProps {
-    visible: boolean;
-    media: readonly AttachmentView[];
+export interface AttachmentViewerProps {
+    /** Every image/video page of the conversation, oldest first (snapshot). */
+    items: readonly ViewerItem[];
+    /** Page to show first, already resolved by the opener. */
     initialIndex: number;
+    /** Tapped tile rect in window coordinates, for the hero OPEN transition. */
+    origin?: ViewerRect | null;
     onClose: () => void;
+    onForward?: ((message: ChatMessage) => void) | undefined;
+    onGoToMessage?: ((message: ChatMessage) => void) | undefined;
+    onDelete?: ((message: ChatMessage) => void) | undefined;
+    canDelete?: ((message: ChatMessage) => boolean) | undefined;
 }
 
+/** Drag distance / velocity that dismisses instead of springing back. */
+const DISMISS_DISTANCE = 120;
+const DISMISS_VELOCITY = 900;
+/** Drag distance that corresponds to a fully faded backdrop. */
+const DISMISS_FADE = 300;
+/** Session-only mute memory (the app's other players do not share it). */
+let sessionMuted = false;
+
 export function AttachmentViewer({
-    visible,
-    media,
+    items,
     initialIndex,
+    origin,
     onClose,
+    onForward,
+    onGoToMessage,
+    onDelete,
+    canDelete,
 }: AttachmentViewerProps): React.ReactElement {
-    const { width, height } = useWindowDimensions();
+    const window = useWindowDimensions();
     const insets = useSafeAreaInsets();
-    const { headers, refresh } = useAttachmentAuth();
-    const listRef = useRef<FlatList<AttachmentView>>(null);
-    const [index, setIndex] = useState(initialIndex);
-    const [sharing, setSharing] = useState(false);
-    const [shareError, setShareError] = useState<string | null>(null);
+    const reduceMotion = useReducedMotion();
+    const popup = useContextPopup();
 
-    const onCloseRef = useRef(onClose);
-    onCloseRef.current = onClose;
+    const startIndex = Math.min(
+        Math.max(0, initialIndex),
+        Math.max(0, items.length - 1),
+    );
 
+    const [index, setIndex] = useState(startIndex);
+    const [chromeVisible, setChromeVisible] = useState(true);
+    const [zoomed, setZoomed] = useState(false);
+    const [captionOpen, setCaptionOpen] = useState(false);
+    const [footerHeight, setFooterHeight] = useState(0);
+    const [muted, setMuted] = useState(sessionMuted);
+    const [playing, setPlaying] = useState(false);
+    /** True from the moment a close starts: pauses the video while exiting. */
+    const [dismissing, setDismissing] = useState(false);
+
+    const pagerRef = useRef<FlatList<ViewerItem>>(null);
+    const menuButtonRef = useRef<ViewInstance | null>(null);
+    const closingRef = useRef(false);
+    const openedRef = useRef(false);
+    const afterCloseRef = useRef<(() => void) | null>(null);
+
+    const current = items[index];
+    const hasCaption = (current?.message.content?.trim() ?? '') !== '';
+    const chromeShown = chromeVisible && !zoomed && !captionOpen;
+    const total = items.length;
+
+    // ── clocks ───────────────────────────────────────────────────────────
+    const hero = useSharedValue(0);
+    const chrome = useSharedValue(0);
+    const counter = useSharedValue(0);
+    const dismissY = useSharedValue(0);
+    const dismissProgress = useSharedValue(0);
+    /** 1 once the dismiss animation owns the screen (makes closes idempotent). */
+    const closing = useSharedValue(0);
+
+    /**
+     * Where the media grows from on OPEN: the tapped tile's centre and width.
+     * Without a usable origin (deleted row, off-screen bubble) it is a plain
+     * 0.96 scale.
+     */
+    const heroFrom = useMemo((): {
+        scale: number;
+        x: number;
+        y: number;
+        known: boolean;
+    } => {
+        const usable =
+            origin !== undefined &&
+            origin !== null &&
+            origin.width > 8 &&
+            origin.height > 8 &&
+            origin.y < window.height &&
+            origin.y + origin.height > 0;
+        if (!usable || origin === undefined || origin === null) {
+            return { scale: 0.96, x: 0, y: 0, known: false };
+        }
+        const scale = Math.min(
+            1.4,
+            Math.max(0.2, origin.width / window.width),
+        );
+        return {
+            scale,
+            x: origin.x + origin.width / 2 - window.width / 2,
+            y: origin.y + origin.height / 2 - window.height / 2,
+            known: true,
+        };
+    }, [origin, window.height, window.width]);
+
+    const finishClose = useCallback((): void => {
+        const after = afterCloseRef.current;
+        afterCloseRef.current = null;
+        if (after !== null) {
+            after();
+            return;
+        }
+        onClose();
+    }, [onClose]);
+
+    /**
+     * THE close animation. Every trigger — the drag gesture, the header close
+     * button, hardware back, the menu actions and a deleted last item — runs
+     * exactly this: the media slides out vertically and scales to 0.85 while
+     * the backdrop and the chrome fade to 0, then `finishClose` unmounts the
+     * overlay. `closing` makes repeat requests a no-op.
+     *
+     * `direction` is -1 for an upward swipe, 1 (down) for a programmatic close;
+     * the drag release and a button press travel the same distance with the
+     * same timing, so both look identical.
+     */
+    const animateDismiss = useCallback(
+        (direction: number = 1): void => {
+            'worklet';
+            if (closing.value === 1) return;
+            closing.value = 1;
+            const duration = reduceMotion ? 90 : 220;
+            chrome.value = withTiming(0, { duration });
+            counter.value = withTiming(0, { duration });
+            // Reduced motion: fade only, no travel.
+            if (!reduceMotion) {
+                dismissY.value = withTiming(direction * window.height, {
+                    duration,
+                    easing: Easing.out(Easing.quad),
+                });
+            }
+            dismissProgress.value = withTiming(
+                1,
+                { duration, easing: Easing.out(Easing.quad) },
+                (finished): void => {
+                    'worklet';
+                    if (finished) scheduleOnRN(finishClose);
+                },
+            );
+        },
+        [
+            chrome,
+            closing,
+            counter,
+            dismissProgress,
+            dismissY,
+            finishClose,
+            reduceMotion,
+            window.height,
+        ],
+    );
+
+    /** A playing video stops the instant the exit starts. */
+    const pauseForDismiss = useCallback((): void => {
+        setDismissing(true);
+    }, []);
+
+    /** Programmatic close: same animation, down, then runs `after` if given. */
+    const close = useCallback(
+        (after?: () => void): void => {
+            if (closingRef.current) return;
+            closingRef.current = true;
+            afterCloseRef.current = after ?? null;
+            pauseForDismiss();
+            animateDismiss(1);
+        },
+        [animateDismiss, pauseForDismiss],
+    );
+
+    const toggleChrome = useCallback((): void => {
+        setChromeVisible((visible) => !visible);
+    }, []);
+
+    // Open: grow from the tile, fade the chrome in right after.
+    useEffect((): void => {
+        if (openedRef.current) return;
+        openedRef.current = true;
+        // A fresh open starts from a clean exit state.
+        closing.value = 0;
+        closingRef.current = false;
+        dismissY.value = 0;
+        dismissProgress.value = 0;
+        hero.value = withTiming(1, {
+            duration: reduceMotion ? 90 : 260,
+            easing: Easing.out(Easing.cubic),
+        });
+        chrome.value = withDelay(
+            reduceMotion ? 0 : 90,
+            withTiming(1, { duration: reduceMotion ? 90 : 180 }),
+        );
+    }, [chrome, closing, dismissProgress, dismissY, hero, reduceMotion]);
+
+    // Chrome fade/slide on every show/hide.
+    useEffect((): void => {
+        const duration = reduceMotion ? 90 : 180;
+        chrome.value = withTiming(chromeShown ? 1 : 0, {
+            duration,
+            easing: Easing.out(Easing.quad),
+        });
+    }, [chromeShown, chrome, reduceMotion]);
+
+    // Pages can leave while the viewer is open (a deleted message): never keep
+    // an index that no longer has a page behind it.
+    useEffect((): void => {
+        setIndex((previous) =>
+            previous < items.length ? previous : Math.max(0, items.length - 1),
+        );
+    }, [items.length]);
+
+    // `closeMediaViewer()` (the module store) must run this exit, not unmount
+    // the viewer on the spot.
+    useEffect((): (() => void) => {
+        registerMediaViewerCloser(close);
+        return (): void => registerMediaViewerCloser(null);
+    }, [close]);
+
+    // Android back runs the very same dismiss as a swipe, and always consumes
+    // the event: a second press mid-animation is ignored by `close`/`closing`.
+    useEffect((): (() => void) => {
+        const subscription = BackHandler.addEventListener(
+            'hardwareBackPress',
+            (): boolean => {
+                close();
+                return true;
+            },
+        );
+        return (): void => subscription.remove();
+    }, [close]);
+
+    // Counter pill: flashes in on a page change, hides itself after 1.5 s.
+    useEffect((): (() => void) => {
+        if (total <= 1) return (): void => undefined;
+        counter.value = withTiming(1, { duration: reduceMotion ? 90 : 160 });
+        const timer = setTimeout((): void => {
+            counter.value = withTiming(0, { duration: 220 });
+        }, 1500);
+        return (): void => clearTimeout(timer);
+    }, [counter, index, reduceMotion, total]);
+
+    // Playing video: the chrome hides itself after a moment of inactivity.
+    useEffect((): (() => void) => {
+        if (!playing || !chromeVisible) return (): void => undefined;
+        const timer = setTimeout((): void => setChromeVisible(false), CHROME_IDLE_MS);
+        return (): void => clearTimeout(timer);
+    }, [playing, chromeVisible]);
+
+    const handlePageChange = useCallback(
+        (next: number): void => {
+            setIndex((previous) => {
+                if (previous === next) return previous;
+                setPlaying(false);
+                return next;
+            });
+            AccessibilityInfo.announceForAccessibility(
+                viewerPageLabel(items[next], next, items.length),
+            );
+        },
+        [items],
+    );
+
+    const onViewableItemsChangedRef = useRef(handlePageChange);
+    onViewableItemsChangedRef.current = handlePageChange;
     const viewabilityConfig = useRef({
         itemVisiblePercentThreshold: 60,
     }).current;
@@ -65,526 +346,305 @@ export function AttachmentViewer({
         }): void => {
             const first = info.viewableItems[0];
             if (typeof first?.index === 'number') {
-                setIndex(first.index);
+                onViewableItemsChangedRef.current(first.index);
             }
         },
     ).current;
 
-    useEffect((): (() => void) | void => {
-        if (!visible) return;
-        setIndex(initialIndex);
-        setShareError(null);
-        const timer = setTimeout((): void => {
-            listRef.current?.scrollToOffset({
-                offset: initialIndex * width,
-                animated: false,
-            });
-        }, 0);
-        return (): void => clearTimeout(timer);
-    }, [visible, initialIndex, width]);
+    const toggleMute = useCallback((): void => {
+        setMuted((value) => {
+            sessionMuted = !value;
+            return !value;
+        });
+    }, []);
 
-    const panResponder = useRef(
-        PanResponder.create({
-            onMoveShouldSetPanResponder: (_event, gesture): boolean =>
-                gesture.dy > 60 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
-            onPanResponderRelease: (_event, gesture): void => {
-                if (gesture.dy > 90) {
-                    onCloseRef.current();
-                }
-            },
-        }),
-    ).current;
+    const onVideoPlayingChange = useCallback((isPlaying: boolean): void => {
+        setPlaying(isPlaying);
+    }, []);
 
-    const current = media[index];
-
-    const share = async (): Promise<void> => {
-        if (current === undefined || current.id === null || sharing) return;
-        setSharing(true);
-        setShareError(null);
-        try {
-            const path = await downloadAttachment({
-                id: current.id,
-                name: current.name,
-                mimeType: current.mimeType,
-            });
-            await shareLocalFile(path, current.mimeType, current.name);
-        } catch (error) {
-            setShareError(
-                error instanceof Error ? error.message : 'Could not share.',
-            );
-        } finally {
-            setSharing(false);
-        }
-    };
-
-    const renderItem = ({
-        item,
-        index: itemIndex,
-    }: ListRenderItemInfo<AttachmentView>): React.ReactElement => {
-        // Only the visible page may mount a player: a closed viewer or a page
-        // that was swiped away must never keep one alive.
-        const active = visible && itemIndex === index;
-        if (item.kind === 'video') {
-            return (
-                <MediaPageErrorBoundary
-                    message="Can't show this video"
-                    width={width}
-                    height={height}
-                    onClose={onClose}
-                >
-                    {active ? (
-                        <VideoMediaPage
-                            attachment={item}
-                            width={width}
-                            height={height}
-                        />
-                    ) : (
-                        <VideoPosterPlaceholder
-                            attachment={item}
-                            width={width}
-                            height={height}
-                        />
-                    )}
-                </MediaPageErrorBoundary>
-            );
-        }
-        const uri = item.id !== null ? attachmentUrl(item.id) : item.localUri;
-        return (
-            <MediaPageErrorBoundary
-                message="Can't show this photo"
-                width={width}
-                height={height}
-                onClose={onClose}
-            >
-                <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`Photo ${itemIndex + 1} of ${media.length}. Tap to close`}
-                    onPress={onClose}
-                    style={[styles.page, { width, height }]}
-                >
-                    <Image
-                        source={
-                            uri === undefined
-                                ? null
-                                : {
-                                      uri,
-                                      ...(headers !== undefined
-                                          ? { headers }
-                                          : {}),
-                                  }
-                        }
-                        cachePolicy="memory-disk"
-                        contentFit="contain"
-                        transition={120}
-                        style={styles.image}
-                        onError={(): void => {
-                            void refresh();
-                        }}
-                    />
-                </Pressable>
-            </MediaPageErrorBoundary>
+    // ── menu ─────────────────────────────────────────────────────────────
+    const openMenu = useCallback((): void => {
+        const item = items[index];
+        if (item === undefined) return;
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
+            (): void => undefined,
         );
-    };
-
-    return (
-        <Modal
-            visible={visible}
-            animationType="fade"
-            transparent={false}
-            onRequestClose={onClose}
-        >
-            <View style={styles.root} {...panResponder.panHandlers}>
-                <FlatList
-                    ref={listRef}
-                    horizontal={true}
-                    pagingEnabled={true}
-                    showsHorizontalScrollIndicator={false}
-                    data={[...media]}
-                    keyExtractor={(item): string => item.key}
-                    renderItem={renderItem}
-                    viewabilityConfig={viewabilityConfig}
-                    onViewableItemsChanged={onViewableItemsChanged}
-                    getItemLayout={(
-                        _data,
-                        itemIndex,
-                    ): { length: number; offset: number; index: number } => ({
-                        length: width,
-                        offset: width * itemIndex,
-                        index: itemIndex,
-                    })}
-                />
-
-                <View
-                    style={[
-                        styles.top,
-                        { paddingTop: insets.top + spacing.sm },
-                    ]}
-                    pointerEvents="box-none"
-                >
-                    <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Close media viewer"
-                        onPress={onClose}
-                        style={styles.close}
-                    >
-                        <Text style={styles.closeText}>✕</Text>
-                    </Pressable>
-                </View>
-
-                <View
-                    style={[
-                        styles.footer,
-                        { paddingBottom: insets.bottom + spacing.md },
-                    ]}
-                >
-                    <Text
-                        style={styles.counter}
-                        accessibilityLiveRegion="polite"
-                        accessibilityLabel={`Media ${index + 1} of ${media.length}`}
-                    >
-                        {index + 1} of {media.length}
-                        {current?.kind === 'video' &&
-                        hasDuration(current.duration)
-                            ? ` · ${formatDuration(current.duration)}`
-                            : null}
-                    </Text>
-                    {shareError !== null && (
-                        <Text style={styles.error}>{shareError}</Text>
-                    )}
-                    <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Share or save file"
-                        onPress={(): void => {
-                            void share();
-                        }}
-                        style={styles.shareButton}
-                    >
-                        {sharing ? (
-                            <ActivityIndicator
-                                size="small"
-                                color={palette.text.onAccent}
-                            />
-                        ) : (
-                            <Text style={styles.shareText}>Share / Save</Text>
-                        )}
-                    </Pressable>
-                </View>
-            </View>
-        </Modal>
-    );
-}
-
-/**
- * Confines a render error to its own media page: the chat screen (and the
- * other pages) keep working, and the page shows a short message + close.
- */
-class MediaPageErrorBoundary extends Component<
-    {
-        message: string;
-        width: number;
-        height: number;
-        onClose: () => void;
-        children: ReactNode;
-    },
-    { failed: boolean }
-> {
-    state: { failed: boolean } = { failed: false };
-
-    static getDerivedStateFromError(): { failed: boolean } {
-        return { failed: true };
-    }
-
-    componentDidCatch(error: unknown): void {
-        if (__DEV__) {
-            console.warn('Media viewer page failed to render', error);
-        }
-    }
-
-    render(): ReactNode {
-        if (!this.state.failed) {
-            return this.props.children;
-        }
-        return (
-            <View
-                style={[
-                    styles.page,
-                    styles.pageFallback,
-                    { width: this.props.width, height: this.props.height },
-                ]}
-            >
-                <Text style={styles.playerError}>{this.props.message}</Text>
-                <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Close media viewer"
-                    onPress={this.props.onClose}
-                    style={styles.retryButton}
-                >
-                    <Text style={styles.shareText}>Close</Text>
-                </Pressable>
-            </View>
-        );
-    }
-}
-
-function VideoPosterPlaceholder({
-    attachment,
-    width,
-    height,
-}: {
-    attachment: AttachmentView;
-    width: number;
-    height: number;
-}): React.ReactElement {
-    const { headers } = useAttachmentAuth();
-    const uri =
-        attachment.id !== null && attachment.hasPoster === true
-            ? attachmentPreviewUrl(attachment.id, 1280)
-            : undefined;
-    return (
-        <View
-            style={[styles.page, { width, height }]}
-            accessibilityLabel="Video"
-        >
-            {uri === undefined ? (
-                <Text style={styles.videoPlaceholderIcon}>🎬</Text>
-            ) : (
-                <Image
-                    source={{
-                        uri,
-                        ...(headers !== undefined ? { headers } : {}),
-                    }}
-                    cachePolicy="memory-disk"
-                    contentFit="contain"
-                    style={styles.image}
-                />
-            )}
-        </View>
-    );
-}
-
-/**
- * One active video player. The signed URL is requested right before creating
- * the player and again after a playback error (expired URL). `key` changes on
- * refresh, releasing the old player.
- */
-function VideoMediaPage({
-    attachment,
-    width,
-    height,
-}: {
-    attachment: AttachmentView;
-    width: number;
-    height: number;
-}): React.ReactElement {
-    const [url, setUrl] = useState<string | null>(null);
-    const [generation, setGeneration] = useState(0);
-    const [attempt, setAttempt] = useState(0);
-    const [error, setError] = useState<string | null>(null);
-
-    useEffect((): (() => void) => {
-        if (attachment.id === null) {
-            setError('This video is still uploading.');
-            return (): void => undefined;
-        }
-        let cancelled = false;
-        setError(null);
-        setUrl(null);
-        void fetchVideoStreamUrl(attachment.id)
-            .then((next): void => {
-                if (!cancelled) setUrl(next);
-            })
-            .catch((caught: unknown): void => {
-                if (cancelled) return;
-                setError(
-                    caught instanceof Error
-                        ? caught.message
-                        : 'Could not load this video.',
-                );
+        const attachmentId = item.attachment.id;
+        const fileReady =
+            attachmentId === null ||
+            item.attachment.kind !== 'video' ||
+            getLocalVideoUri(attachmentId) !== null;
+        void measureInWindow(menuButtonRef).then((anchor): void => {
+            if (anchor === null) return;
+            popup.open({
+                anchor,
+                sourceKey: `viewer-${item.key}`,
+                align: 'start',
+                actions: buildViewerMenuItems(
+                    item,
+                    {
+                        canDelete:
+                            item.message.status === 'sent' &&
+                            (canDelete?.(item.message) ?? false),
+                        onForward: (target): void => {
+                            close((): void => onForward?.(target.message));
+                        },
+                        onGoToMessage: (target): void => {
+                            close((): void => onGoToMessage?.(target.message));
+                        },
+                        onDelete: (target): void => {
+                            close((): void => onDelete?.(target.message));
+                        },
+                    },
+                    fileReady,
+                ),
+                accessibilityLabel: 'Media actions',
             });
-        return (): void => {
-            cancelled = true;
+        });
+    }, [canDelete, close, index, items, onDelete, onForward, onGoToMessage, popup]);
+
+    // ── drag to dismiss (only at 1x, and not from the caption sheet) ─────
+    const dragGesture = usePanGesture(
+        useMemo<PanGestureConfig>(
+            () => ({
+                enabled: !zoomed && !captionOpen,
+                activeOffsetY: [-14, 14],
+                failOffsetX: [-24, 24],
+                onUpdate: (event): void => {
+                    'worklet';
+                    const travel = event.translationY;
+                    dismissY.value = travel;
+                    dismissProgress.value = Math.min(
+                        1,
+                        Math.abs(travel) / DISMISS_FADE,
+                    );
+                },
+                onDeactivate: (event): void => {
+                    'worklet';
+                    const shouldDismiss =
+                        Math.abs(event.translationY) > DISMISS_DISTANCE ||
+                        Math.abs(event.velocityY) > DISMISS_VELOCITY;
+                    if (!shouldDismiss) {
+                        dismissY.value = withSpring(0, {
+                            damping: 20,
+                            stiffness: 240,
+                        });
+                        dismissProgress.value = withTiming(0, {
+                            duration: 160,
+                        });
+                        return;
+                    }
+                    scheduleOnRN(pauseForDismiss);
+                    animateDismiss(event.translationY < 0 ? -1 : 1);
+                },
+            }),
+            [
+                animateDismiss,
+                captionOpen,
+                dismissProgress,
+                dismissY,
+                pauseForDismiss,
+                zoomed,
+            ],
+        ),
+    );
+
+    const backdropStyle = useAnimatedStyle(() => ({
+        opacity:
+            hero.value * (1 - dismissProgress.value * 0.9),
+    }));
+
+    const contentStyle = useAnimatedStyle(() => {
+        const progress = hero.value;
+        const scale =
+            heroFrom.scale +
+            (1 - heroFrom.scale) * progress -
+            0.15 * dismissProgress.value;
+        return {
+            opacity: heroFrom.known ? 1 : progress,
+            transform: [
+                { translateX: heroFrom.x * (1 - progress) },
+                {
+                    translateY:
+                        heroFrom.y * (1 - progress) + dismissY.value,
+                },
+                { scale },
+            ],
         };
-    }, [attachment.id, generation, attempt]);
-
-    const retry = (): void => {
-        setError(null);
-        setUrl(null);
-        setGeneration(0);
-        setAttempt((value) => value + 1);
-    };
-
-    return (
-        <View style={[styles.page, { width, height }]}>
-            {error !== null ? (
-                <View style={styles.errorState}>
-                    <Text style={styles.playerError}>{error}</Text>
-                    {attachment.id !== null && (
-                        <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel="Try loading the video again"
-                            onPress={retry}
-                            style={styles.retryButton}
-                        >
-                            <Text style={styles.shareText}>Try again</Text>
-                        </Pressable>
-                    )}
-                </View>
-            ) : url !== null ? (
-                <PlayerSurface
-                    key={`${attachment.key}-${generation}-${attempt}`}
-                    url={url}
-                    onExpired={(): void => {
-                        // One fresh URL after an expiry/error; a second failure
-                        // is reported instead of retrying forever.
-                        if (generation === 0) {
-                            setGeneration(1);
-                        } else {
-                            setError('Could not play this video.');
-                        }
-                    }}
-                />
-            ) : (
-                <ActivityIndicator size="large" color={palette.text.onAccent} />
-            )}
-        </View>
-    );
-}
-
-function PlayerSurface({
-    url,
-    onExpired,
-}: {
-    url: string;
-    onExpired: () => void;
-}): React.ReactElement {
-    const player = useVideoPlayer({ uri: url }, (instance): void => {
-        instance.loop = false;
     });
-    const expiredRef = useRef(false);
-    // Kept in a ref so a new callback identity never restarts the player.
-    const onExpiredRef = useRef(onExpired);
-    onExpiredRef.current = onExpired;
-    const [status, setStatus] = useState(player.status);
 
-    useEffect((): (() => void) => {
-        setStatus(player.status);
-        const subscription = player.addListener(
-            'statusChange',
-            (payload): void => {
-                setStatus(payload.status);
-                if (payload.status === 'error' && !expiredRef.current) {
-                    expiredRef.current = true;
-                    onExpiredRef.current();
-                }
-            },
-        );
-        player.play();
-        return (): void => {
-            subscription.remove();
-            player.pause();
-        };
-    }, [player]);
+    const headerStyle = useAnimatedStyle(() => ({
+        opacity: chrome.value,
+        transform: [
+            { translateY: interpolate(chrome.value, [0, 1], [-8, 0]) },
+        ],
+    }));
+    const footerStyle = useAnimatedStyle(() => ({
+        opacity: chrome.value,
+        transform: [
+            { translateY: interpolate(chrome.value, [0, 1], [8, 0]) },
+        ],
+    }));
+    const counterStyle = useAnimatedStyle(() => ({
+        opacity: counter.value,
+    }));
+
+    const renderItem = useCallback(
+        ({ item, index: pageIndex }: ListRenderItemInfo<ViewerItem>): React.ReactElement => {
+            const active = pageIndex === index;
+            // Only the current page and its two neighbours are mounted.
+            if (Math.abs(pageIndex - index) > 1) {
+                return <View style={{ width: window.width, height: window.height }} />;
+            }
+            if (item.attachment.kind === 'video') {
+                return (
+                    <ViewerVideoPage
+                        item={item}
+                        active={active}
+                        width={window.width}
+                        height={window.height}
+                        muted={muted}
+                        onToggleMute={toggleMute}
+                        onTap={toggleChrome}
+                        onPlayingChange={onVideoPlayingChange}
+                        paused={dismissing}
+                        controlsBottom={hasCaption ? footerHeight : insets.bottom}
+                    />
+                );
+            }
+            return (
+                <ViewerImagePage
+                    item={item}
+                    active={active}
+                    width={window.width}
+                    height={window.height}
+                    onTap={toggleChrome}
+                    onZoomChange={setZoomed}
+                />
+            );
+        },
+        [
+            dismissing,
+            footerHeight,
+            hasCaption,
+            index,
+            insets.bottom,
+            muted,
+            onVideoPlayingChange,
+            toggleChrome,
+            toggleMute,
+            window.height,
+            window.width,
+        ],
+    );
 
     return (
-        <View style={styles.playerSurface}>
-            <VideoView
-                player={player}
-                style={styles.playerVideo}
-                contentFit="contain"
-                nativeControls={true}
-                fullscreenOptions={{ enable: true }}
-            />
-            {status === 'loading' && (
-                <View style={styles.bufferingOverlay} pointerEvents="none">
-                    <ActivityIndicator
-                        size="large"
-                        color={palette.text.onAccent}
+        <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+            <Animated.View style={[StyleSheet.absoluteFill, backdropStyle]}>
+                <LinearGradient
+                    colors={[palette.background, palette.background, '#030207']}
+                    locations={[0, 0.55, 1]}
+                    style={StyleSheet.absoluteFill}
+                />
+            </Animated.View>
+
+            <GestureDetector gesture={dragGesture}>
+                <Animated.View style={[StyleSheet.absoluteFill, contentStyle]}>
+                    <FlatList
+                        ref={pagerRef}
+                        data={items}
+                        horizontal={true}
+                        pagingEnabled={true}
+                        scrollEnabled={!zoomed}
+                        showsHorizontalScrollIndicator={false}
+                        keyExtractor={(item): string => item.key}
+                        renderItem={renderItem}
+                        initialScrollIndex={startIndex}
+                        getItemLayout={(
+                            _data,
+                            pageIndex,
+                        ): { length: number; offset: number; index: number } => ({
+                            length: window.width,
+                            offset: window.width * pageIndex,
+                            index: pageIndex,
+                        })}
+                        viewabilityConfig={viewabilityConfig}
+                        onViewableItemsChanged={onViewableItemsChanged}
+                        initialNumToRender={3}
+                        maxToRenderPerBatch={3}
+                        windowSize={3}
+                        removeClippedSubviews={false}
                     />
-                </View>
+                </Animated.View>
+            </GestureDetector>
+
+            {/* top chrome */}
+            <Animated.View
+                pointerEvents={chromeShown ? 'box-none' : 'none'}
+                style={[styles.topChrome, headerStyle]}
+            >
+                {current !== undefined && (
+                    <ViewerHeader
+                        item={current}
+                        insetTop={insets.top}
+                        onClose={(): void => close()}
+                        onMenu={openMenu}
+                        menuButtonRef={menuButtonRef}
+                    />
+                )}
+                {total > 1 && (
+                    <Animated.View
+                        style={[styles.counterWrap, counterStyle]}
+                        pointerEvents="none"
+                    >
+                        <ViewerCounter
+                            label={viewerPageLabel(current, index, total)}
+                        />
+                    </Animated.View>
+                )}
+            </Animated.View>
+
+            {/* bottom chrome: caption only */}
+            {current !== undefined && hasCaption && (
+                <Animated.View
+                    pointerEvents={chromeShown ? 'box-none' : 'none'}
+                    style={[styles.bottomChrome, footerStyle]}
+                    onLayout={(event): void =>
+                        setFooterHeight(event.nativeEvent.layout.height)
+                    }
+                >
+                    <ViewerCaptionFooter
+                        item={current}
+                        insetBottom={insets.bottom}
+                        onExpand={(): void => setCaptionOpen(true)}
+                    />
+                </Animated.View>
+            )}
+
+            {captionOpen && current !== undefined && (
+                <ViewerCaptionSheet
+                    item={current}
+                    insetBottom={insets.bottom}
+                    onClose={(): void => setCaptionOpen(false)}
+                />
             )}
         </View>
     );
 }
 
 const styles = StyleSheet.create({
-    root: { flex: 1, backgroundColor: palette.neutral[900] },
-    page: { alignItems: 'center', justifyContent: 'center' },
-    image: { width: '100%', height: '80%' },
-    videoPlaceholderIcon: { fontSize: 44 },
-    playerSurface: { width: '100%', height: '80%' },
-    playerVideo: { width: '100%', height: '100%' },
-    bufferingOverlay: {
+    topChrome: {
         position: 'absolute',
         top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        alignItems: 'center',
-        justifyContent: 'center',
+        start: 0,
+        end: 0,
     },
-    errorState: {
-        alignItems: 'center',
-        gap: spacing.sm,
-        paddingHorizontal: spacing.lg,
-    },
-    pageFallback: { gap: spacing.sm, paddingHorizontal: spacing.lg },
-    retryButton: {
-        backgroundColor: palette.primary[500],
-        borderRadius: radii.sm,
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.sm,
-        minWidth: 120,
-        alignItems: 'center',
-    },
-    playerError: {
-        color: palette.neutral[100],
-        fontSize: 14,
-        textAlign: 'center',
-        paddingHorizontal: spacing.lg,
-    },
-    top: {
+    counterWrap: { alignItems: 'center', marginTop: spacing.xxs },
+    bottomChrome: {
         position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        alignItems: 'flex-end',
-        paddingHorizontal: spacing.md,
-    },
-    close: {
-        width: 40,
-        height: 40,
-        borderRadius: radii.full,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'rgba(255,255,255,0.16)',
-    },
-    closeText: {
-        color: palette.text.onAccent,
-        fontSize: 18,
-        fontWeight: '600',
-    },
-    footer: {
-        position: 'absolute',
-        left: 0,
-        right: 0,
         bottom: 0,
-        alignItems: 'center',
-        gap: spacing.sm,
-        paddingHorizontal: spacing.md,
-    },
-    counter: { color: palette.neutral[100], fontSize: 13, fontWeight: '600' },
-    error: { color: '#FF8A80', fontSize: 12 },
-    shareButton: {
-        backgroundColor: palette.primary[500],
-        borderRadius: radii.sm,
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.sm,
-        minWidth: 120,
-        alignItems: 'center',
-    },
-    shareText: {
-        color: palette.text.onAccent,
-        fontSize: 14,
-        fontWeight: '600',
+        start: 0,
+        end: 0,
     },
 });
+

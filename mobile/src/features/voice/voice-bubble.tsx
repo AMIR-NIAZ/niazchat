@@ -123,8 +123,8 @@ export function VoiceBubble({
     const timeLabel = active
         ? formatDuration(remainingSeconds(playback.position, duration))
         : hasDuration(duration)
-          ? formatDuration(duration)
-          : '0:00';
+            ? formatDuration(duration)
+            : '0:00';
 
     const playedColor = mine ? palette.neutral[0] : palette.primary[500];
     const restColor = mine ? 'rgba(255,255,255,0.45)' : palette.neutral[300];
@@ -134,11 +134,10 @@ export function VoiceBubble({
             <View style={styles.row}>
                 <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel={`Voice message, ${
-                        hasDuration(duration)
-                            ? formatDuration(duration)
-                            : '0:00'
-                    }, ${playing ? 'pause' : 'play'}`}
+                    accessibilityLabel={`Voice message, ${hasDuration(duration)
+                        ? formatDuration(duration)
+                        : '0:00'
+                        }, ${playing ? 'pause' : 'play'}`}
                     accessibilityState={{
                         disabled: attachment.status === 'failed' || loading,
                     }}
@@ -297,13 +296,19 @@ const styles = StyleSheet.create({
     errorIconMine: { color: palette.text.onAccent },
     waveform: {
         flex: 1,
-        minWidth: 96,
+        minWidth: 100,
         height: 30,
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 1.5,
+        justifyContent: 'space-between',
+        overflow: 'hidden',
     },
-    bar: { width: 2, borderRadius: 2 },
+    bar: {
+        flex: 1,
+        minWidth: 0,
+        maxWidth: 2,
+        borderRadius: 2,
+    },
     speed: {
         paddingHorizontal: 4,
         paddingVertical: 2,

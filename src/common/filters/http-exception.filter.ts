@@ -15,13 +15,28 @@ export class HttpExceptionFilter<T> implements ExceptionFilter {
         const ctx: HttpArgumentsHost = host.switchToHttp();
         const response: Response = ctx.getResponse();
         let status: number = HttpStatus.INTERNAL_SERVER_ERROR;
-        let message: string = 'Internal server error';
+        let message: string | string[] = 'Internal server error';
+        // Extra, explicit payload for errors that need one (e.g. a 409 that
+        // returns the contact already saved). Only `item` is forwarded.
+        let extra: object = {};
 
         if (exception instanceof HttpException) {
             status = exception.getStatus();
             const res: string | object = exception.getResponse();
-            message =
-                typeof res === 'string' ? res : (res as any).message || message;
+            if (typeof res === 'string') {
+                message = res;
+            } else if ('message' in res) {
+                const candidate = (res as { message?: unknown }).message;
+                if (typeof candidate === 'string' || Array.isArray(candidate)) {
+                    message = candidate as string | string[];
+                }
+            }
+            if (typeof res === 'object' && res !== null && 'item' in res) {
+                const item = (res as { item?: unknown }).item;
+                if (item !== undefined) {
+                    extra = { item };
+                }
+            }
         } else if (exception instanceof QueryFailedError) {
             status = HttpStatus.BAD_REQUEST;
             message = exception.message;
@@ -34,6 +49,7 @@ export class HttpExceptionFilter<T> implements ExceptionFilter {
             success: false,
             statusCode: status,
             message,
+            ...extra,
         };
         return response.status(status).json(errorResponse);
     }

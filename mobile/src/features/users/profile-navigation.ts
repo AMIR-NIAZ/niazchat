@@ -34,7 +34,9 @@ export function openUserProfile(params: OpenUserProfileParams): void {
         return;
     }
     if (params.isSelf === true) {
-        router.push('/(app)/profile');
+        // The profile now lives in the tab group: `navigate` switches to the
+        // existing tab instead of pushing a second copy of the tabs stack.
+        router.navigate('/(app)/profile');
         return;
     }
     if (openUserId === userId) {

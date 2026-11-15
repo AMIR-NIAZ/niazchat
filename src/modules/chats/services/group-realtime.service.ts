@@ -115,19 +115,25 @@ export class GroupRealtimeService {
     }
 
     /**
-     * A member was REMOVED (not banned). Delivers `group:removed` to every
-     * socket of that user, force-leaves the chat room, clears the socket's
-     * current-chat marker, stops their typing state and refreshes the online
-     * count for the room. Fire-and-forget; failures never affect the HTTP reply.
+     * A member was REMOVED (`kicked`) or BANNED (`banned`). Delivers
+     * `group:removed` to every socket of that user, force-leaves the chat room,
+     * clears the socket's current-chat marker, stops their typing state and
+     * refreshes the online count for the room. The remaining members get
+     * `group:changed` with `member_removed` / `member_banned` and the target
+     * `userId`. Fire-and-forget; failures never affect the HTTP reply.
      */
-    async memberRemoved(chatId: unknown, userId: unknown): Promise<void> {
+    async memberRemoved(
+        chatId: unknown,
+        userId: unknown,
+        reason: 'kicked' | 'banned' = 'kicked',
+    ): Promise<void> {
         if (!this.server) return;
         const chat = chatRoom(chatId as ChatId);
         const personal = userRoom(userId as UserId);
 
         this.server.to(personal).emit('group:removed', {
             chatId: num(chatId),
-            reason: 'kicked',
+            reason,
         });
 
         try {
@@ -160,7 +166,7 @@ export class GroupRealtimeService {
         this.server.in(personal).socketsLeave(chat);
         this.server.to(chat).emit('group:changed', {
             chatId: num(chatId),
-            reason: 'member_removed',
+            reason: reason === 'banned' ? 'member_banned' : 'member_removed',
             userId: num(userId),
         });
 

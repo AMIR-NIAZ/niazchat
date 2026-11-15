@@ -45,24 +45,14 @@ const EPSILON = 0.5;
  *
  * iOS keeps its existing `KeyboardAvoidingView` behavior: this hook is a no-op
  * there.
- *
- * @param bottomInset Bottom system-bar inset (`useSafeAreaInsets().bottom`).
- *   Only used by the development diagnostics, never by the layout math.
  */
-export function useAndroidKeyboardInset(bottomInset = 0): AndroidKeyboardState {
+export function useAndroidKeyboardInset(): AndroidKeyboardState {
     const [state, setState] = useState<AndroidKeyboardGeometry>(CLOSED);
     const committedRef = useRef<AndroidKeyboardGeometry>(CLOSED);
     const containerHeightRef = useRef<number | null>(null);
-    const closedHeightRef = useRef<number | null>(null);
     const keyboardTopRef = useRef<number | null>(null);
-    const keyboardHeightRef = useRef(0);
     const openRef = useRef(false);
     const frameRef = useRef<number | null>(null);
-    const bottomInsetRef = useRef(bottomInset);
-
-    useEffect((): void => {
-        bottomInsetRef.current = bottomInset;
-    }, [bottomInset]);
 
     const commit = useCallback((next: AndroidKeyboardGeometry): void => {
         const previous = committedRef.current;
@@ -88,22 +78,6 @@ export function useAndroidKeyboardInset(bottomInset = 0): AndroidKeyboardState {
         }
 
         const covered = Math.max(0, containerHeight - keyboardTop);
-        if (__DEV__) {
-            const closedHeight = closedHeightRef.current;
-            console.log('[kbd]', {
-                windowHeightClosed: closedHeight,
-                windowHeightOpen: containerHeight,
-                keyboardHeight: keyboardHeightRef.current,
-                keyboardTop,
-                containerBottom: containerHeight,
-                bottomSystemInset: bottomInsetRef.current,
-                nativeWindowResized:
-                    closedHeight !== null &&
-                    containerHeight < closedHeight - EPSILON,
-                extraAvoidance: covered,
-                composerBottom: containerHeight - covered,
-            });
-        }
         commit({ inset: covered, open: true });
     }, [commit]);
 
@@ -134,9 +108,6 @@ export function useAndroidKeyboardInset(bottomInset = 0): AndroidKeyboardState {
             if (openRef.current) {
                 // The window just resized under the IME: recompute the overlap.
                 update();
-            } else if (!Keyboard.isVisible()) {
-                // Only a genuinely keyboard-closed layout is a usable baseline.
-                closedHeightRef.current = height;
             }
         },
         [update],
@@ -152,7 +123,6 @@ export function useAndroidKeyboardInset(bottomInset = 0): AndroidKeyboardState {
         const metrics = Keyboard.metrics();
         if (metrics !== null && metrics !== undefined && Keyboard.isVisible()) {
             keyboardTopRef.current = metrics.screenY;
-            keyboardHeightRef.current = metrics.height;
             openRef.current = true;
         }
 
@@ -160,7 +130,6 @@ export function useAndroidKeyboardInset(bottomInset = 0): AndroidKeyboardState {
             'keyboardDidShow',
             (event) => {
                 keyboardTopRef.current = event.endCoordinates.screenY;
-                keyboardHeightRef.current = event.endCoordinates.height;
                 openRef.current = true;
                 scheduleUpdate();
             },
@@ -171,13 +140,9 @@ export function useAndroidKeyboardInset(bottomInset = 0): AndroidKeyboardState {
             (): void => {
                 openRef.current = false;
                 keyboardTopRef.current = null;
-                keyboardHeightRef.current = 0;
                 if (frameRef.current !== null) {
                     cancelAnimationFrame(frameRef.current);
                     frameRef.current = null;
-                }
-                if (__DEV__) {
-                    console.log('[kbd]', { phase: 'hide' });
                 }
                 commit(CLOSED);
             },

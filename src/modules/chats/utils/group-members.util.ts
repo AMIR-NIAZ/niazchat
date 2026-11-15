@@ -68,6 +68,7 @@ export interface GroupMemberActions {
     canDemote: boolean;
     canRemove: boolean;
     canEditPermissions: boolean;
+    canBan: boolean;
 }
 
 /**
@@ -113,7 +114,24 @@ export function canRemove(
     );
 }
 
-/** Exactly the three flags the members list exposes per row. */
+/**
+ * Ban: the owner may ban members and admins; an admin may ban members only,
+ * and only with `ban_user` or `all`. Nobody may ban the owner or themselves —
+ * the role comparison already excludes self (the caller's own row has their
+ * own role) and an owner target is rejected outright.
+ */
+export function canBan(caller: GroupCallerRules, target: GroupRole): boolean {
+    if (target === 'owner') return false;
+    if (caller.isOwner) return true;
+    if (!caller.isAdmin) return false;
+    if (target !== 'member') return false;
+    return (
+        caller.permissions.includes(PermissionChatEnum.BAN_USER) ||
+        caller.permissions.includes(PermissionChatEnum.ALL)
+    );
+}
+
+/** Exactly the flags the members list exposes per row. */
 export function memberActions(
     caller: GroupCallerRules,
     target: GroupRole,
@@ -123,6 +141,7 @@ export function memberActions(
         canDemote: canDemote(caller, target),
         canRemove: canRemove(caller, target),
         canEditPermissions: canEditPermissions(caller, target),
+        canBan: canBan(caller, target),
     };
 }
 

@@ -8,11 +8,11 @@ import {
     Text,
     View,
 } from 'react-native';
-import { Image } from 'expo-image';
+import Reanimated from 'react-native-reanimated';
 import { UserAvatar } from '../../shared/components';
 import { palette, radii, spacing } from '../../shared/theme';
 import { LONG_PRESS_DELAY_MS } from '../../shared/long-press';
-import { measureInWindow } from '../../shared/context-popup';
+import { measureInWindow, usePopupHidden } from '../../shared/context-popup';
 import type { PopupRect } from '../../shared/context-popup';
 import { formatMessageTime, isOwnMessage } from './messages-model';
 import type {
@@ -24,9 +24,9 @@ import {
     attachmentPreviewLabel,
     formatFileSize,
 } from '../attachments/attachment-labels';
-import { attachmentPreviewUrl } from '../attachments/attachment-url';
 import { fileTypeLabel } from '../attachments/file-name';
 import { formatDuration } from '../attachments/duration';
+import type { ViewerRect } from '../attachments/viewer/viewer-model';
 import { AttachmentGrid } from '../attachments/attachment-grid';
 import { AttachmentFileRow } from '../attachments/attachment-file-row';
 import { VoiceBubble } from '../voice/voice-bubble';
@@ -69,9 +69,16 @@ interface MessageBubbleProps {
     onOpenProfile?: ((message: ChatMessage) => void) | undefined;
     /** Opens a tappable link inside the message body (invite links, URLs). */
     onOpenLink?: ((url: string) => void) | undefined;
-    /** Opens the full-screen viewer at an image/video of this message. */
+    /**
+     * Opens the full-screen viewer at an image/video of this message. `origin`
+     * is the tapped tile's window rect (the viewer's hero animation start).
+     */
     onOpenMedia?:
-        | ((message: ChatMessage, mediaIndex: number) => void)
+        | ((
+              message: ChatMessage,
+              mediaIndex: number,
+              origin: ViewerRect | null,
+          ) => void)
         | undefined;
     /** Aborts the uploads of an optimistic bubble and removes it. */
     onCancelPending?: ((message: ChatMessage) => void) | undefined;
@@ -99,8 +106,6 @@ const AVATAR_SIZE = 45;
 
 /** Tap and hold both open the same floating menu. */
 const BUBBLE_LONG_PRESS_MS = 350;
-/** Height cap for the static media tile in the lifted preview. */
-const STATIC_MEDIA_HEIGHT = 180;
 
 function quoteSnippet(reply: ReplyPreview): string {
     if (reply.isDeleted) {
@@ -148,7 +153,7 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
     } = props;
     // Anchor of the lifted preview: measured in window coordinates at press
     // time so the popup lands on the bubble with the keyboard open too.
-    const bubbleRef = useRef<ComponentRef<typeof View>>(null);
+    const bubbleRef = useRef<ComponentRef<typeof Reanimated.View>>(null);
     // A child control that saw this touch start keeps its own behaviour; the
     // bubble menu is suppressed for the remainder of that gesture.
     const childPressAtRef = useRef(0);
@@ -158,6 +163,11 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
 
     const showMenu =
         !selectionMode && message.status === 'sent' && message.id !== null;
+
+    // While the popup is open it draws a copy of THIS bubble on top; the live
+    // one is hidden (opacity only) through a shared value, so the same element
+    // appears to lift. Nothing here re-renders when the popup opens or closes.
+    const hiddenStyle = usePopupHidden(message.key);
 
     const openMenu = useCallback((): void => {
         if (onOpenMenu === undefined) {
@@ -259,7 +269,11 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
 
     const forwarded = message.forwardedFrom;
     const body = (
-        <View
+        // The bubble's OWN node carries the popup hide. It is a Reanimated
+        // view only so the opacity can be animated; it has exactly the same
+        // position in the tree, so the row's layout cannot change. `isStatic`
+        // is the popup copy: it must never hide itself.
+        <Reanimated.View
             ref={bubbleRef}
             collapsable={false}
             style={[
@@ -268,6 +282,7 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                 showFailedHint && styles.failed,
                 highlighted && styles.highlighted,
                 selected && styles.selectedBubble,
+                isStatic ? null : hiddenStyle,
             ]}
         >
             {forwarded !== null && (
@@ -395,18 +410,16 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                             />
                         ),
                     )}
-                    {mediaAttachments.length > 0 &&
-                        (isStatic ? (
-                            <StaticMediaGrid attachments={mediaAttachments} />
-                        ) : (
-                            <AttachmentGrid
-                                attachments={mediaAttachments}
-                                onOpenMedia={(mediaIndex): void =>
-                                    onOpenMedia?.(message, mediaIndex)
-                                }
-                                onLongPress={childLongPress}
-                            />
-                        ))}
+                    {mediaAttachments.length > 0 && (
+                        <AttachmentGrid
+                            attachments={mediaAttachments}
+                            static={isStatic}
+                            onOpenMedia={(mediaIndex, origin): void =>
+                                onOpenMedia?.(message, mediaIndex, origin)
+                            }
+                            onLongPress={childLongPress}
+                        />
+                    )}
                     {fileAttachments.length > 0 && (
                         <View
                             style={[
@@ -571,7 +584,7 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                     </Text>
                 )}
             </Text>
-        </View>
+        </Reanimated.View>
     );
 
     if (isStatic) {
@@ -629,14 +642,22 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
     // Private chats and my own messages keep the original full-width layout.
     if (!isGroup || mine) {
         return (
-            <View style={[styles.row, mine && styles.rowMine]}>
+            <View
+                style={[
+                    styles.row,
+                    mine && styles.rowMine,
+                    isStatic && styles.rowStatic,
+                ]}
+            >
                 {withSelection}
             </View>
         );
     }
 
     return (
-        <View style={[styles.row, styles.groupRow]}>
+        <View
+            style={[styles.row, styles.groupRow, isStatic && styles.rowStatic]}
+        >
             {/* Always reserved, so a run keeps one bubble edge; only the last
                 message of the run paints the avatar (bottom aligned). */}
             <View style={styles.avatarSlot}>
@@ -874,60 +895,6 @@ function StaticVoiceRow({
     );
 }
 
-/** Media tiles for the lifted preview: cached thumbnails only, no handlers. */
-function StaticMediaGrid({
-    attachments,
-}: {
-    attachments: readonly AttachmentView[];
-}): React.ReactElement {
-    const visible = attachments.slice(0, 4);
-    const extra = attachments.length - visible.length;
-    return (
-        <View style={staticStyles.grid}>
-            {visible.map((attachment, index) => {
-                const single = visible.length === 1;
-                const width = single ? 240 : 116;
-                const height = single ? STATIC_MEDIA_HEIGHT : 116;
-                const poster =
-                    attachment.id !== null &&
-                    (attachment.kind !== 'video' ||
-                        attachment.hasPoster === true)
-                        ? attachmentPreviewUrl(attachment.id, 640)
-                        : attachment.kind === 'image'
-                          ? (attachment.localUri ?? null)
-                          : null;
-                return (
-                    <View
-                        key={attachment.key}
-                        style={[staticStyles.tile, { width, height }]}
-                    >
-                        {poster !== null && (
-                            <Image
-                                source={{ uri: poster }}
-                                cachePolicy="disk"
-                                contentFit="cover"
-                                style={staticStyles.image}
-                            />
-                        )}
-                        {attachment.kind === 'video' && (
-                            <View style={staticStyles.playBadge}>
-                                <Text style={staticStyles.playIcon}>▶</Text>
-                            </View>
-                        )}
-                        {extra > 0 && index === visible.length - 1 && (
-                            <View style={staticStyles.countOverlay}>
-                                <Text style={staticStyles.countText}>
-                                    {`+${extra}`}
-                                </Text>
-                            </View>
-                        )}
-                    </View>
-                );
-            })}
-        </View>
-    );
-}
-
 /** Document row for the lifted preview: no cache lookup, no download. */
 function StaticFileRow({
     attachment,
@@ -1010,47 +977,6 @@ const staticStyles = StyleSheet.create({
         minWidth: 30,
         textAlign: 'right',
     },
-    grid: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 4,
-        marginTop: spacing.xxs,
-    },
-    tile: {
-        borderRadius: radii.sm,
-        overflow: 'hidden',
-        backgroundColor: palette.neutral[100],
-    },
-    image: { width: '100%', height: '100%' },
-    playBadge: {
-        position: 'absolute',
-        top: '50%',
-        left: '50%',
-        width: 36,
-        height: 36,
-        marginTop: -18,
-        marginLeft: -18,
-        borderRadius: radii.full,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'rgba(28, 32, 36, 0.58)',
-    },
-    playIcon: { color: palette.text.onAccent, fontSize: 15, marginLeft: 2 },
-    countOverlay: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'rgba(28, 32, 36, 0.55)',
-    },
-    countText: {
-        color: palette.text.onAccent,
-        fontSize: 20,
-        fontWeight: '700',
-    },
     fileRow: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -1076,6 +1002,8 @@ const styles = StyleSheet.create({
         marginVertical: spacing.xxs,
     },
     rowMine: { alignSelf: 'flex-end' },
+    // Lifted copy: its wrapper is already the bubble's measured width.
+    rowStatic: { maxWidth: '100%' },
     groupRow: {
         flexDirection: 'row',
         alignItems: 'flex-end',

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Pressable,
@@ -10,6 +10,9 @@ import { Image } from 'expo-image';
 import { palette, radii, spacing } from '../../shared/theme';
 import { LONG_PRESS_DELAY_MS } from '../../shared/long-press';
 import type { AttachmentView } from '../messages/messages-model';
+import type { ViewerRect as ViewerOrigin } from './viewer/viewer-model';
+import { measureInWindow } from '../../shared/context-popup';
+import type { ViewInstance } from '../../shared/context-popup';
 import { attachmentPreviewUrl } from './attachment-url';
 import { useAttachmentAuth } from './auth-headers';
 import {
@@ -17,6 +20,8 @@ import {
     useUploadProgress,
 } from './upload-progress-store';
 import { formatDuration, hasDuration } from './duration';
+import { VideoDownloadControl } from './video-download-control';
+import { VideoPosterSurface } from './video-poster';
 
 export { formatDuration, hasDuration };
 
@@ -27,8 +32,10 @@ export { formatDuration, hasDuration };
  * - 3-4: 2x2;
  * - >4: first four with a "+N" overlay on the last.
  *
- * Videos load ONLY their poster here (never the video bytes) and show a play
- * badge + duration. A video without a poster renders a placeholder tile.
+ * Videos load ONLY their poster here (never the video bytes) and show the
+ * download/progress/play control; a fully downloaded video opens the viewer,
+ * anything else starts (or resumes/cancels) its download. A video without a
+ * poster renders a placeholder tile.
  */
 
 const LARGE_WIDTH = 240;
@@ -38,20 +45,18 @@ const GAP = 4;
 
 interface AttachmentGridProps {
     attachments: readonly AttachmentView[];
-    onOpenMedia: (mediaIndex: number) => void;
+    /** `origin` is the tile's window rect, used by the viewer's hero animation. */
+    onOpenMedia: (mediaIndex: number, origin: ViewerOrigin | null) => void;
     onLongPress?: (() => void) | undefined;
-    /**
-     * Static lifted copy (context popup preview): render-only, disk-cached
-     * images, no press handlers. Never fetches a thumbnail over the network.
-     */
-    isStatic?: boolean | undefined;
+    /** Popup copy: show the overlay state without subscribing to progress. */
+    static?: boolean | undefined;
 }
 
 export function AttachmentGrid({
     attachments,
     onOpenMedia,
     onLongPress,
-    isStatic = false,
+    static: isStatic = false,
 }: AttachmentGridProps): React.ReactElement {
     const { headers, refresh } = useAttachmentAuth();
     const visible = attachments.slice(0, 4);
@@ -80,9 +85,9 @@ export function AttachmentGrid({
                                 ? `+${extra}`
                                 : null
                         }
-                        onPress={(): void => onOpenMedia(index)}
+                        onPress={(origin): void => onOpenMedia(index, origin)}
                         onLongPress={onLongPress}
-                        isStatic={isStatic}
+                        static={isStatic}
                     />
                 );
             })}
@@ -109,9 +114,9 @@ interface MediaTileProps {
     onReloadToken: () => Promise<Record<string, string> | undefined>;
     label: string;
     overlay: string | null;
-    onPress: () => void;
+    onPress: (origin: ViewerOrigin | null) => void;
     onLongPress?: (() => void) | undefined;
-    isStatic: boolean;
+    static?: boolean | undefined;
 }
 
 function MediaTile({
@@ -123,8 +128,9 @@ function MediaTile({
     overlay,
     onPress,
     onLongPress,
-    isStatic,
+    static: isStatic = false,
 }: MediaTileProps): React.ReactElement {
+    const tileRef = useRef<ViewInstance | null>(null);
     const [reload, setReload] = useState(0);
     const [failed, setFailed] = useState(false);
     const [reloading, setReloading] = useState(false);
@@ -132,13 +138,21 @@ function MediaTile({
     const uploading = attachment.status === 'uploading';
     const isVideo = attachment.kind === 'video';
 
-    // Poster only: video bytes are fetched by the player, never by the list.
+    // Images load directly; videos render the poster surface (blur, shimmer,
+    // chips) which fetches ONLY the poster — never the video bytes.
     const posterUri =
-        attachment.id !== null && (!isVideo || attachment.hasPoster === true)
-            ? attachmentPreviewUrl(attachment.id, 640)
-            : attachment.kind === 'image'
-              ? (attachment.localUri ?? undefined)
-              : undefined;
+        attachment.kind === 'image'
+            ? attachment.id !== null
+                ? attachmentPreviewUrl(attachment.id, 640)
+                : (attachment.localUri ?? undefined)
+            : undefined;
+
+    /** Press: hand the viewer the tile's rect so it can grow from it. */
+    const handleOpen = (): void => {
+        void measureInWindow(tileRef).then((origin): void => {
+            onPress(origin);
+        });
+    };
 
     const reloadImage = (): void => {
         if (reloading) return;
@@ -152,49 +166,48 @@ function MediaTile({
 
     return (
         <Pressable
-            accessibilityRole={isStatic ? undefined : 'button'}
+            ref={tileRef}
+            accessibilityRole="button"
             accessibilityLabel={
                 failed ? `${label}, failed to load, tap to retry` : label
             }
-            disabled={isStatic}
-            onPress={failed ? reloadImage : onPress}
-            onLongPress={isStatic ? undefined : onLongPress}
+            onPress={failed ? reloadImage : handleOpen}
+            onLongPress={onLongPress}
             delayLongPress={LONG_PRESS_DELAY_MS}
             style={[styles.tile, style]}
         >
-            {posterUri !== undefined && (
-                <Image
-                    key={`${posterUri}-${reload}`}
-                    source={{
-                        uri: posterUri,
-                        ...(headers !== undefined && !isStatic
-                            ? { headers }
-                            : {}),
-                    }}
-                    // The lifted copy renders only what the list already cached.
-                    cachePolicy={isStatic ? 'disk' : 'memory-disk'}
-                    contentFit="cover"
-                    transition={150}
-                    style={styles.image}
-                    onError={(): void => setFailed(true)}
+            {isVideo ? (
+                <VideoPosterSurface
+                    attachment={attachment}
+                    previewSize={640}
+                    live={!isStatic}
                 />
-            )}
-            {isVideo && posterUri === undefined && (
-                <View style={styles.videoPlaceholder}>
-                    <Text style={styles.videoPlaceholderIcon}>🎬</Text>
-                </View>
+            ) : (
+                posterUri !== undefined && (
+                    <Image
+                        key={`${posterUri}-${reload}`}
+                        source={{
+                            uri: posterUri,
+                            ...(attachment.id !== null
+                                ? { cacheKey: `att-${attachment.id}-thumb` }
+                                : {}),
+                            ...(headers !== undefined ? { headers } : {}),
+                        }}
+                        cachePolicy="memory-disk"
+                        contentFit="cover"
+                        transition={150}
+                        style={styles.image}
+                        onError={(): void => setFailed(true)}
+                    />
+                )
             )}
             {isVideo && (
-                <View style={styles.playBadge}>
-                    <Text style={styles.playIcon}>▶</Text>
-                </View>
-            )}
-            {isVideo && hasDuration(attachment.duration) && (
-                <View style={styles.durationBadge}>
-                    <Text style={styles.durationText}>
-                        {formatDuration(attachment.duration)}
-                    </Text>
-                </View>
+                <VideoDownloadControl
+                    attachment={attachment}
+                    onOpen={handleOpen}
+                    onLongPress={onLongPress}
+                    live={!isStatic}
+                />
             )}
             {failed && (
                 <View style={styles.centerOverlay}>
@@ -256,41 +269,6 @@ const styles = StyleSheet.create({
         backgroundColor: palette.neutral[100],
     },
     image: { width: '100%', height: '100%' },
-    videoPlaceholder: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: palette.neutral[900],
-    },
-    videoPlaceholderIcon: { fontSize: 30 },
-    playBadge: {
-        position: 'absolute',
-        top: '50%',
-        left: '50%',
-        width: 36,
-        height: 36,
-        marginTop: -18,
-        marginLeft: -18,
-        borderRadius: radii.full,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'rgba(28, 32, 36, 0.58)',
-    },
-    playIcon: { color: palette.text.onAccent, fontSize: 15, marginLeft: 2 },
-    durationBadge: {
-        position: 'absolute',
-        right: 4,
-        bottom: 4,
-        borderRadius: 4,
-        paddingHorizontal: 4,
-        paddingVertical: 1,
-        backgroundColor: 'rgba(28, 32, 36, 0.7)',
-    },
-    durationText: {
-        color: palette.text.onAccent,
-        fontSize: 10,
-        fontWeight: '600',
-    },
     centerOverlay: {
         position: 'absolute',
         top: 0,

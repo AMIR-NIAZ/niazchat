@@ -1,6 +1,7 @@
 import { PermissionChatEnum } from 'src/common/enums/permissionChat.enum';
 import { RoleChatEnum } from 'src/common/enums/roleChat.enum';
 import {
+    canBan,
     canDemote,
     canEditPermissions,
     canPromote,
@@ -88,6 +89,29 @@ describe('permission matrix', () => {
         expect(canRemove(ADMIN_WITH_BAN, 'owner')).toBe(false);
     });
 
+    it('owner bans members and admins, never the owner or themselves', () => {
+        expect(canBan(OWNER, 'member')).toBe(true);
+        expect(canBan(OWNER, 'admin')).toBe(true);
+        expect(canBan(OWNER, 'owner')).toBe(false);
+        // The caller's own row carries their own role: an owner targeting
+        // themselves meets the owner rule, an admin meets the admin rule.
+        expect(canBan(ADMIN_WITH_BAN, 'admin')).toBe(false);
+    });
+
+    it('admin bans members only with ban_user or all', () => {
+        expect(canBan(ADMIN_WITH_BAN, 'member')).toBe(true);
+        expect(canBan(ADMIN_WITH_ALL, 'member')).toBe(true);
+        expect(canBan(ADMIN_WITHOUT_BAN, 'member')).toBe(false);
+        expect(canBan(ADMIN_WITH_BAN, 'owner')).toBe(false);
+        expect(canBan(ADMIN_WITH_BAN, 'admin')).toBe(false);
+    });
+
+    it('plain member can ban nobody', () => {
+        for (const target of TARGETS) {
+            expect(canBan(MEMBER, target)).toBe(false);
+        }
+    });
+
     it('admin can never promote, demote or touch another admin/owner', () => {
         for (const admin of [
             ADMIN_WITH_BAN,
@@ -117,36 +141,42 @@ describe('permission matrix', () => {
             canDemote: false,
             canRemove: true,
             canEditPermissions: false,
+            canBan: true,
         });
         expect(memberActions(OWNER, 'admin')).toEqual({
             canPromote: false,
             canDemote: true,
             canRemove: true,
             canEditPermissions: true,
+            canBan: true,
         });
         expect(memberActions(OWNER, 'owner')).toEqual({
             canPromote: false,
             canDemote: false,
             canRemove: false,
             canEditPermissions: false,
+            canBan: false,
         });
         expect(memberActions(ADMIN_WITH_BAN, 'member')).toEqual({
             canPromote: false,
             canDemote: false,
             canRemove: true,
             canEditPermissions: false,
+            canBan: true,
         });
         expect(memberActions(ADMIN_WITHOUT_BAN, 'member')).toEqual({
             canPromote: false,
             canDemote: false,
             canRemove: false,
             canEditPermissions: false,
+            canBan: false,
         });
         expect(memberActions(MEMBER, 'member')).toEqual({
             canPromote: false,
             canDemote: false,
             canRemove: false,
             canEditPermissions: false,
+            canBan: false,
         });
     });
 
@@ -178,9 +208,7 @@ describe('permission editor payloads', () => {
         expect(parseEditablePermissions(['unknown'])).toBeNull();
         expect(parseEditablePermissions([1])).toBeNull();
         expect(parseEditablePermissions('ban_user')).toBeNull();
-        expect(
-            parseEditablePermissions(['ban_user', 'ban_user']),
-        ).toBeNull();
+        expect(parseEditablePermissions(['ban_user', 'ban_user'])).toBeNull();
         expect(
             parseEditablePermissions([
                 'ban_user',

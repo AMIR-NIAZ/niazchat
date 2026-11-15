@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     BackHandler,
     KeyboardAvoidingView,
     Linking,
@@ -26,6 +25,7 @@ import {
     typography,
 } from '../../../../shared/components';
 import { ApiError } from '../../../../core/api';
+import { dialog, toast } from '../../../../shared/dialog';
 import { useSocketEvent } from '../../../../core/socket';
 import { useCurrentUserId } from '../../../../features/auth';
 import { purgeChatFromCaches } from '../../../../features/chats';
@@ -124,7 +124,7 @@ function GroupInfoEditor({ chatId }: { chatId: number }): React.ReactElement {
 
     const handleRemoved = useCallback((): void => {
         purgeChatFromCaches(queryClient, chatId);
-        Alert.alert('Removed from group', 'You were removed from this group');
+        toast.show('You were removed from this group');
         router.replace('/(app)');
     }, [queryClient, chatId]);
     useGroupRemovedEvent(chatId, handleRemoved);
@@ -167,16 +167,18 @@ function GroupInfoEditor({ chatId }: { chatId: number }): React.ReactElement {
                     result.data !== undefined &&
                     !result.data.capabilities.canEditInfo
                 ) {
-                    Alert.alert(
-                        'Permission changed',
-                        "You can no longer edit this group's info.",
-                        [
+                    dialog.show({
+                        title: 'Permission changed',
+                        message:
+                            "You can no longer edit this group's info.",
+                        tone: 'warning',
+                        buttons: [
                             {
                                 text: 'OK',
                                 onPress: (): void => router.back(),
                             },
                         ],
-                    );
+                    });
                 }
             });
         },
@@ -201,14 +203,19 @@ function GroupInfoEditor({ chatId }: { chatId: number }): React.ReactElement {
             router.back();
             return;
         }
-        Alert.alert('Discard changes?', 'Your changes will not be saved.', [
-            { text: 'Keep editing', style: 'cancel' },
-            {
-                text: 'Discard',
-                style: 'destructive',
-                onPress: (): void => router.back(),
-            },
-        ]);
+        void dialog
+            .confirm({
+                title: 'Discard changes?',
+                message: 'Your changes will not be saved.',
+                confirmText: 'Discard',
+                cancelText: 'Keep editing',
+                destructive: true,
+            })
+            .then((confirmed): void => {
+                if (confirmed) {
+                    router.back();
+                }
+            });
     }, [dirty]);
 
     useEffect((): (() => void) => {
@@ -227,11 +234,17 @@ function GroupInfoEditor({ chatId }: { chatId: number }): React.ReactElement {
             error instanceof ApiError &&
             (error.statusCode === 403 || error.statusCode === 404)
         ) {
-            Alert.alert(
-                error.statusCode === 403 ? 'Permission changed' : 'Group gone',
-                describeGroupInfoError(error),
-                [{ text: 'OK', onPress: (): void => router.back() }],
-            );
+            dialog.show({
+                title:
+                    error.statusCode === 403
+                        ? 'Permission changed'
+                        : 'Group gone',
+                message: describeGroupInfoError(error),
+                tone: error.statusCode === 403 ? 'warning' : 'danger',
+                buttons: [
+                    { text: 'OK', onPress: (): void => router.back() },
+                ],
+            });
             void queryClient.invalidateQueries({
                 queryKey: ['group', chatId],
             });
@@ -270,10 +283,12 @@ function GroupInfoEditor({ chatId }: { chatId: number }): React.ReactElement {
             const permission =
                 await ImagePicker.requestMediaLibraryPermissionsAsync();
             if (!permission.granted) {
-                Alert.alert(
-                    'Photo access needed',
-                    'Allow photo access to change the group photo. You can change this later in Settings.',
-                    [
+                dialog.show({
+                    title: 'Photo access needed',
+                    message:
+                        'Allow photo access to change the group photo. You can change this later in Settings.',
+                    tone: 'warning',
+                    buttons: [
                         { text: 'Not now', style: 'cancel' },
                         {
                             text: 'Open settings',
@@ -282,7 +297,7 @@ function GroupInfoEditor({ chatId }: { chatId: number }): React.ReactElement {
                             },
                         },
                     ],
-                );
+                });
                 return;
             }
         }
