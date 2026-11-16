@@ -21,6 +21,7 @@ function group(overrides: Partial<ChatPreview> = {}): ChatPreview {
             firstAttachmentKind: null,
             firstAttachmentDuration: null,
             firstAttachmentName: null,
+            firstAttachmentTitle: null
         },
         unreadCount: 2,
         ...overrides,

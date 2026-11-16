@@ -527,28 +527,32 @@ async function downloadAttempt(
     let responseTotal = 0;
 
     try {
-        await File.downloadFileAsync(attachmentUrl(attachment.id), destination, {
-            headers: resuming ? rangeHeaders : (headers ?? {}),
-            idempotent: true,
-            signal: controller.signal,
-            onProgress: ({
-                bytesWritten,
-                totalBytes,
-            }: {
-                bytesWritten: number;
-                totalBytes: number;
-            }): void => {
-                if (totalBytes > 0) responseTotal = totalBytes;
-                const received = offset + bytesWritten;
-                const total =
-                    expectedBytes > 0
-                        ? expectedBytes
-                        : totalBytes > 0
-                          ? offset + totalBytes
-                          : 0;
-                reportProgress(entry, received, total);
+        await File.downloadFileAsync(
+            attachmentUrl(attachment.id),
+            destination,
+            {
+                headers: resuming ? rangeHeaders : (headers ?? {}),
+                idempotent: true,
+                signal: controller.signal,
+                onProgress: ({
+                    bytesWritten,
+                    totalBytes,
+                }: {
+                    bytesWritten: number;
+                    totalBytes: number;
+                }): void => {
+                    if (totalBytes > 0) responseTotal = totalBytes;
+                    const received = offset + bytesWritten;
+                    const total =
+                        expectedBytes > 0
+                            ? expectedBytes
+                            : totalBytes > 0
+                              ? offset + totalBytes
+                              : 0;
+                    reportProgress(entry, received, total);
+                },
             },
-        });
+        );
     } finally {
         if (entry.controller === controller) {
             entry.controller = null;
@@ -588,8 +592,7 @@ async function downloadAttempt(
     removeFile(destination);
     return {
         partBytes: sizeOf(part),
-        responseTotal:
-            expectedBytes > 0 ? expectedBytes : offset + downloaded,
+        responseTotal: expectedBytes > 0 ? expectedBytes : offset + downloaded,
     };
 }
 
@@ -630,7 +633,9 @@ async function downloadToPart(entry: Entry): Promise<void> {
         available > 0 &&
         available < expectedBytes - offset + FREE_SPACE_MARGIN_BYTES
     ) {
-        throw new StorageError('Not enough free storage to download this video.');
+        throw new StorageError(
+            'Not enough free storage to download this video.',
+        );
     }
 
     let authRetried = false;
@@ -731,7 +736,8 @@ async function runDownload(entry: Entry): Promise<void> {
     clearEmitTimer(entry);
     setSnapshot(entry, {
         state: 'downloading',
-        progress: entry.totalBytes > 0 ? entry.receivedBytes / entry.totalBytes : 0,
+        progress:
+            entry.totalBytes > 0 ? entry.receivedBytes / entry.totalBytes : 0,
         receivedBytes: entry.receivedBytes,
         totalBytes: entry.totalBytes,
         error: null,
@@ -765,7 +771,12 @@ async function runDownload(entry: Entry): Promise<void> {
                 localUri: null,
             });
         } else if (error instanceof SizeMismatchError) {
-            removeFile(new File(ensureMediaDirectory('video'), `${entry.attachment.id}.part`));
+            removeFile(
+                new File(
+                    ensureMediaDirectory('video'),
+                    `${entry.attachment.id}.part`,
+                ),
+            );
             setSnapshot(entry, {
                 state: 'error',
                 progress: 0,
@@ -805,7 +816,10 @@ export function startVideoDownload(
     missingProbes.delete(id);
     if (entry.snapshot.state === 'ready') {
         // Re-verify: the file may have been evicted since it became ready.
-        if (entry.snapshot.localUri !== null && fileExists(entry.snapshot.localUri)) {
+        if (
+            entry.snapshot.localUri !== null &&
+            fileExists(entry.snapshot.localUri)
+        ) {
             return Promise.resolve();
         }
         entry.snapshot = IDLE_SNAPSHOT;
@@ -948,7 +962,11 @@ function markIndexedFilesReady(): void {
     }
 }
 
-function markReadyWithoutAttachment(id: number, uri: string, size: number): void {
+function markReadyWithoutAttachment(
+    id: number,
+    uri: string,
+    size: number,
+): void {
     const entry = ensureEntry({ id, mimeType: 'video/mp4' });
     entry.receivedBytes = size;
     entry.totalBytes = size;

@@ -30,6 +30,7 @@ import { startMessagesMirror } from '../shared/local-db';
 import { ContextPopupProvider } from '../shared/context-popup';
 import { DialogProvider } from '../shared/dialog';
 import { MediaViewerProvider } from '../features/attachments';
+import { MusicPlayerProvider } from '../shared/music-player';
 
 I18nManager.allowRTL(false);
 I18nManager.forceRTL(false);
@@ -158,21 +159,24 @@ function AppTree(): React.ReactElement {
                     Each provider draws its host AFTER `children`, so the
                     nesting below is the stacking order: the viewer is the
                     innermost child (painted first, above the navigator),
-                    then the popup host, then the dialog/toast host. */}
+                    then the music bar (800)/sheet (850), then the popup host,
+                    then the dialog/toast host. */}
                 <DialogProvider>
                     <ContextPopupProvider>
                         <MediaViewerProvider>
-                            <Stack
-                                screenOptions={{
-                                    headerShown: false,
-                                    animation: 'fade',
-                                    contentStyle: {
-                                        backgroundColor: palette.background,
-                                    },
-                                }}
-                            >
-                                <Stack.Screen name="join/[code]" />
-                            </Stack>
+                            <MusicPlayerProvider>
+                                <Stack
+                                    screenOptions={{
+                                        headerShown: false,
+                                        animation: 'fade',
+                                        contentStyle: {
+                                            backgroundColor: palette.background,
+                                        },
+                                    }}
+                                >
+                                    <Stack.Screen name="join/[code]" />
+                                </Stack>
+                            </MusicPlayerProvider>
                         </MediaViewerProvider>
                     </ContextPopupProvider>
                 </DialogProvider>

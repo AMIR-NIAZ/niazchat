@@ -11,6 +11,7 @@ export type MessageTypeName =
     | 'video'
     | 'file'
     | 'voice'
+    | 'music'
     | 'ice';
 
 /**
@@ -27,9 +28,11 @@ export interface MessageReplyDto {
     type: MessageTypeName;
     attachmentsCount: number;
     /** Kind of the first attachment, when present. */
-    attachmentKind?: 'image' | 'video' | 'voice' | 'file' | null;
-    /** Duration of a voice first attachment, when known. */
+    attachmentKind?: 'image' | 'video' | 'voice' | 'music' | 'file' | null;
+    /** Duration of a voice/video first attachment, when known. */
     attachmentDuration?: number | null;
+    /** Title of a music first attachment, when known. */
+    attachmentTitle?: string | null;
     isDeleted: boolean;
 }
 
@@ -82,7 +85,7 @@ export interface MessageAttachmentDto {
     originalName: string;
     mimeType: string;
     size: number;
-    kind?: 'image' | 'video' | 'voice' | 'file';
+    kind?: 'image' | 'video' | 'voice' | 'music' | 'file';
     width?: number;
     height?: number;
     /** Videos/voice, seconds. */
@@ -91,6 +94,14 @@ export interface MessageAttachmentDto {
     hasPoster?: boolean;
     /** Voice only: 64 bars 0..100 (null when unavailable). */
     waveform?: number[] | null;
+    /** Music only: track title (tag or file name without extension). */
+    title?: string;
+    /** Music only: track artist, or null ("Unknown artist"). */
+    artist?: string | null;
+    /** Music only: duration in seconds (one decimal), or null. */
+    durationSeconds?: number | null;
+    /** Music only: server-relative cover route, or null. */
+    coverUrl?: string | null;
     createdAt: string;
 }
 

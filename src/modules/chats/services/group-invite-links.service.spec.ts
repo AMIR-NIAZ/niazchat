@@ -592,7 +592,9 @@ describe('GroupInviteLinksService join side', () => {
             avatar: 'uploads/group.jpg',
             membersCount: 0,
             alreadyMember: false,
-            chatId: null,
+            isMember: false,
+            myRole: null,
+            chatId: 1,
         });
 
         store.members.push({
@@ -602,7 +604,12 @@ describe('GroupInviteLinksService join side', () => {
         });
         await expect(
             service.preview(link.code, 99 as never),
-        ).resolves.toMatchObject({ alreadyMember: true, chatId: 1 });
+        ).resolves.toMatchObject({
+            alreadyMember: true,
+            isMember: true,
+            myRole: 'member',
+            chatId: 1,
+        });
     });
 
     it('joins a valid link with role user, one use and realtime events', async () => {
@@ -617,6 +624,7 @@ describe('GroupInviteLinksService join side', () => {
             title: 'Team',
             joined: true,
             alreadyMember: false,
+            role: 'member',
         });
         expect(store.members).toEqual([
             { chatId: 1, userId: 99, role: RoleChatEnum.USER },
@@ -644,6 +652,7 @@ describe('GroupInviteLinksService join side', () => {
         ).resolves.toMatchObject({
             alreadyMember: true,
             joined: false,
+            role: 'member',
         });
         expect(store.members).toHaveLength(2);
         expect(link.usesCount).toBe(0);

@@ -8,6 +8,26 @@ export {
 } from './cache-store';
 export { cacheImage, getCachedImageUri } from './image-cache';
 export {
+    MAX_CONCURRENT_AUDIO_DOWNLOADS,
+    cancelAudioDownload,
+    ensureAudioCached,
+    evictAudioDownload,
+    getAudioDownloadSnapshot,
+    getLocalAudioUri,
+    initAudioDownloader,
+    retryAudioDownload,
+    setAudioPlaying,
+    startAudioDownload,
+    subscribeAudioDownload,
+    useAudioDownload,
+} from './audio-downloader';
+export type {
+    AudioDownloadAttachment,
+    AudioDownloadControls,
+    AudioDownloadSnapshot,
+    AudioDownloadState,
+} from './audio-downloader';
+export {
     MAX_CONCURRENT_VIDEO_DOWNLOADS,
     cancelVideoDownload,
     getLocalVideoUri,

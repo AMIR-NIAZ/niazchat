@@ -203,3 +203,88 @@ No npm dependency was added for media processing, so the `niazchat-dev_node_modu
 
 - Upload = multipart (`POST /user/avatars` field `avatar`, legacy `PUT /user/uploade-avatar`; `POST /chats/manage/upload/avatar/:chatId` field `avatar`) → `uploads/avatars`.
 - Served **statically** under `/uploads` by `ServeStaticModule` — no auth. Deletion goes through REST per `users.md`/`chats.md`.
+
+## Music (audio) attachments
+
+Source: `attachment.service.ts` (`prepareMusic`/`writeMusicCover`), `attachment.constants.ts`, `attachment-kind.util.ts`, `ws-serializer.utils.ts`.
+
+A file uploaded **without** `voice=1` whose real container is audio becomes
+`kind: "music"` (never a generic `file`, never a voice message). Voice messages
+keep their existing path and behaviour.
+
+### Upload rules
+
+- Accepted containers (detected from magic bytes, extension must match):
+  `mp3`, `m4a`, `mp4` (audio-only), `aac`, `ogg`, `opus`, `wav`, `flac`,
+  `weba`, `webm`. The stored MIME is one of `audio/mpeg`, `audio/mp4`,
+  `audio/x-m4a`, `audio/aac`, `audio/ogg`, `audio/opus`, `audio/wav`,
+  `audio/x-wav`, `audio/flac`, `audio/webm`. Client MIME is never trusted.
+- `MAX_MUSIC_FILE_SIZE` = **100 MiB** (413 above; existing limits for images /
+  files / voice / video are unchanged; the request total stays 200 MiB).
+- `mp4`/`webm` are probed as video first: only audio-only files fall through to
+  the music path.
+- Metadata is parsed with the pure-JS `music-metadata` package:
+  `title` (tag, else the file name without extension), `artist` (tag, else
+  `null`), `durationSeconds` (one decimal, `null` when unparsable) and the first
+  embedded picture, re-encoded with `sharp` to a square-ish WebP ≤ 256 px.
+  **Metadata failures never fail the upload** — the file is stored with the
+  defaults.
+- A non-audio/renamed `.mp3` file → 400 `This file is not a valid audio track`.
+  Blocked extensions (`.exe`, scripts, …) → 400 as for any upload.
+
+### Upload response item
+
+```json
+{
+  "id": 21,
+  "originalName": "track.mp3",
+  "mimeType": "audio/mpeg",
+  "size": 4812033,
+  "kind": "music",
+  "title": "Test Track",
+  "artist": "Test Artist",
+  "durationSeconds": 212.4,
+  "coverUrl": "/attachments/21/cover"
+}
+```
+
+`title` is always a non-empty string, `artist` may be `null` ("Unknown
+artist" in the app), `durationSeconds` may be `null`, `coverUrl` is
+server-relative (the app absolutizes it as `<apiUrl>/attachments/<id>/cover`)
+and is `null` when the file carried no cover. `size` is the server-measured
+byte size. No storage key/path is exposed.
+
+### Cover — `GET /attachments/:id/cover`
+
+Same authorization as `/download` (one 404 for every failure). Returns the
+stored WebP (`image/webp`, inline, immutable private cache). 404 when the row is
+not a music attachment or has no cover.
+
+### Message type
+
+`sendMessage` accepts `type: "music"`. A music message carries **exactly one**
+music attachment and optional text (the caption); any other composition is
+rejected with 400 `a music message must have exactly one attachment` /
+`a music message must reference an audio track`. Forwarding a music message
+copies the attachment file **and its cover** into the target chat, keeping the
+title/artist/duration metadata.
+
+### Wire shape (history, ack echo, room broadcast, forwards, chat-list preview)
+
+```ts
+{
+  id, originalName, mimeType, size,
+  kind: 'music',
+  title: string,
+  artist: string | null,
+  durationSeconds: number | null,
+  coverUrl: string | null,
+  createdAt
+}
+```
+
+Reply previews additionally carry `attachmentKind: "music"` and
+`attachmentTitle` (the track title) so the quoted block can print
+"🎵 Title". Download keeps the same headers as other attachments; music is
+served `inline` with its audio MIME and **`Accept-Ranges: bytes`**, so range
+requests answer `206`.

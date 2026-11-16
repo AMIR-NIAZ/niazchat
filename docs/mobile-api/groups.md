@@ -504,20 +504,29 @@ Errors: 400 private chat / invalid body; 403 not a member or no capability;
   "avatar": "uploads/avatars/group.jpg",
   "membersCount": 8,
   "alreadyMember": false,
-  "chatId": null
+  "isMember": false,
+  "myRole": null,
+  "chatId": 3
 }
 ```
 
-`chatId` is only set when `alreadyMember` is true. `avatar` is the current
-group photo path or `null`.
+`avatar` is the current group photo path or `null`. `chatId` is ALWAYS set (it
+used to be `null` for non-members) so the app can open a group it already
+belongs to without a second request. `isMember` duplicates `alreadyMember` as
+an explicit membership flag; `myRole` is the caller's wire role (`owner`,
+`admin`, `member`) or `null` for a non-member. A banned caller still gets 403,
+so `myRole: "banned"` is never delivered.
 
-`POST /invites/:code/join` → `{ "chatId": 3, "title": "Team", "joined": true, "alreadyMember": false }`.
+`POST /invites/:code/join` →
+`{ "chatId": 3, "title": "Team", "joined": true, "alreadyMember": false, "role": "member" }`.
 
 Rules:
 
 - New members get role `user`; one row only (duplicate membership rows are
-  deduped by user). An existing member answers `alreadyMember: true`, inserts
-  nothing and consumes no use.
+  deduped by user). An existing member (any role except `ban`) gets **200**
+  `alreadyMember: true`, `joined: false`, their current `role`, inserts
+  nothing, changes no role and consumes no use — so the app can treat a join as
+  idempotent and go straight to the chat.
 - A user with a `ban` row in that chat always gets **403**
   `You can't join this group`.
 - Every other invalid state — unknown code, malformed code, revoked, expired,
@@ -542,7 +551,8 @@ After commit (never blocking the response): create/revoke emits
 ### Legacy routes
 
 `POST /chats/join/:code` delegates to the new join service (same checks, same
-404/403 behavior), so banned users cannot re-join and duplicate rows are never
+404/403 behavior and the same idempotent answer `{ chatId, title,
+ alreadyMember, role }`), so banned users cannot re-join and duplicate rows are never
 created. The legacy manage routes (`POST|GET /chats/manage/:chatId/link`,
 `DELETE /chats/manage/:chatId/link/:linkId`) delegate to the new service too
 (used by `scripts/private-chat.js`): revoke now verifies the link belongs to the

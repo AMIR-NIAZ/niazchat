@@ -60,6 +60,12 @@ export class ChatsController {
     @Role([RoleEnum.ALL])
     async joinToChat(@Param('code') code: string, @Req() req: RequestAuth) {
         const result = await this.inviteLinks.joinByCode(code, req.user.sub);
-        return { chatId: result.chatId, title: result.title };
+        // Additive: same idempotent contract as `POST /invites/:code/join`.
+        return {
+            chatId: result.chatId,
+            title: result.title,
+            alreadyMember: result.alreadyMember,
+            role: result.role,
+        };
     }
 }

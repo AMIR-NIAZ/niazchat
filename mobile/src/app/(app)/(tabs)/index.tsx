@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentRef } from 'react';
 import type { StyleProp, ViewStyle } from 'react-native';
 import {
@@ -10,19 +10,21 @@ import {
     Text,
     View,
 } from 'react-native';
+import type { LayoutChangeEvent } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import {
     AppText,
     GlassHeader,
-    GlassInput,
     GlassSurface,
     OfflineCaption,
     Screen,
     radii,
     spacing,
 } from '../../../shared/components';
+import { EdgeFadeView, FADE_EXTRA } from '../../../shared/edge-fade';
 import { useQueryClient } from '@tanstack/react-query';
-import { palette } from '../../../shared/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { FILL_ABSOLUTE, palette, shadows } from '../../../shared/theme';
 import {
     measureInWindow,
     useContextPopup,
@@ -36,7 +38,6 @@ import {
     ChatRowContent,
     ChatRowPreview,
     chatPreviewText,
-    filterChats,
     getChatListActions,
     invalidateChats,
     myChatRoleQuery,
@@ -51,31 +52,50 @@ import {
 import type { ChatListActionId, ChatRole } from '../../../features/chats';
 import { markChatSeen } from '../../../features/messages';
 import { openUserProfile } from '../../../features/users';
-import { logout, useCurrentUserId } from '../../../features/auth';
-import { LogOut, UserPlus } from 'lucide-react-native';
+import { useCurrentUserId } from '../../../features/auth';
+import { Search } from 'lucide-react-native';
+import {
+    MUSIC_BAR_LIFT,
+    useMiniPlayerAnchor,
+    useMusicBarShown,
+} from '../../../shared/music-player';
+import Animated, {
+    useAnimatedStyle,
+    useSharedValue,
+    withSpring,
+} from 'react-native-reanimated';
+import * as Haptics from 'expo-haptics';
 
 /**
  * Chats screen — renders the WS-provided chat list.
  *
+ * The list runs edge to edge behind the floating header and the pill tab bar,
+ * with a soft alpha fade at both edges (`EdgeFadeView`, same look as the
+ * message list in the chat screen). The header only holds the title and one
+ * search button that opens the dedicated search screen.
+ *
  * Unread counts come from `getAllChats` (authoritative) and are incremented
  * locally by live `chatlist:updated` events; reading a chat resets them.
- * Remaining limitations surfaced here (do NOT fake them):
- * - Private chats have no title server-side; rows show a neutral label.
- * - Search is client-side only (no server endpoint).
  */
 
 type ChatRow = import('../../../features/chats').ChatPreview;
+
+/** Created ONCE at module scope: creating it inside a component remounts the button on every render. */
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 export default function ChatsScreen(): React.ReactElement {
     const chatsQuery = useChats();
     const queryClient = useQueryClient();
     const popup = useContextPopup();
-    const [search, setSearch] = useState('');
     const currentUserId = useCurrentUserId();
     const { pinned, togglePin } = usePinnedChatIds(currentUserId);
     const leaveGroup = useLeaveGroup();
     const tabBarInset = useTabBarInset();
     const listRef = useRef<FlatList<ChatRow>>(null);
+    const insets = useSafeAreaInsets();
+    // Measured header layer (safe-area top + glass pill + optional offline
+    // caption): the list clears exactly this space and the fade starts there.
+    const [headerHeight, setHeaderHeight] = useState(0);
 
     // Re-pressing the active Home tab scrolls the list back to the top.
     useHomeTabReselect(
@@ -95,9 +115,45 @@ export default function ChatsScreen(): React.ReactElement {
     // Cached rows always render, even while a background refetch is failing.
     const hasCachedChats = chatsQuery.data !== undefined;
     const visible = useMemo(
-        () => sortPinnedFirst(filterChats(chats, search), pinned),
-        [chats, search, pinned],
+        () => sortPinnedFirst(chats, pinned),
+        [chats, pinned],
     );
+
+    const measureHeader = useCallback((event: LayoutChangeEvent): void => {
+        const height = event.nativeEvent.layout.height;
+        if (height <= 0) {
+            return;
+        }
+        setHeaderHeight((previous): number =>
+            Math.abs(previous - height) < 0.5 ? previous : height,
+        );
+    }, []);
+
+    // This screen owns the mini bar's top edge: while it is focused and its
+    // header layer is measured, the bar sits directly under it.
+    useMiniPlayerAnchor(headerHeight > 0 ? headerHeight : null);
+    // The bar only takes list space while it is actually shown here; when it
+    // is hidden the list does not know about it (one state flip per change).
+    const musicBarShown = useMusicBarShown();
+    const barLift = musicBarShown ? MUSIC_BAR_LIFT : 0;
+    const scrollOffsetRef = useRef(0);
+    const barLiftRef = useRef(0);
+
+    // The list is NOT inverted: growing its top padding would pull the visible
+    // rows down, so keep the scroll position when the user is not at the top.
+    useEffect((): void => {
+        const delta = barLift - barLiftRef.current;
+        if (delta === 0) {
+            return;
+        }
+        barLiftRef.current = barLift;
+        if (scrollOffsetRef.current > 0) {
+            listRef.current?.scrollToOffset({
+                offset: scrollOffsetRef.current + delta,
+                animated: false,
+            });
+        }
+    }, [barLift]);
 
     /// Floating chat-list popup ------------------------------------------------
 
@@ -252,115 +308,119 @@ export default function ChatsScreen(): React.ReactElement {
         });
     };
 
+    // ── Full-screen list geometry ────────────────────────────────────────────
+    // The header and the pill tab bar float over the list; the list only
+    // clears them, and the edge fade runs exactly past their edges so the
+    // first row (at rest) and the last row (scrolled to the end) are fully
+    // visible while rows in motion dissolve under the chrome.
+    const listPaddingTop = Math.round(headerHeight + spacing.xs + barLift);
+    const listPaddingBottom = Math.round(tabBarInset + spacing.sm);
+    const topFade = Math.round(headerHeight + FADE_EXTRA + barLift);
+    const bottomFade = Math.round(tabBarInset + FADE_EXTRA);
+
     return (
-        <Screen style={styles.screen} withTopInset={true}>
-            <GlassHeader
-                leading={
-                    <View style={styles.brand}>
-                        <Text style={styles.brandText}>N</Text>
-                    </View>
-                }
-                trailing={
-                    <>
-                        <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel="New chat"
-                            onPress={(): void => {
-                                router.push('/(app)/new-chat');
-                            }}
-                            style={styles.iconButton}
-                        >
-                            <UserPlus
-                                size={26}
-                                color="#7e00e6"
-                                strokeWidth={2}
+        <Screen
+            style={styles.screen}
+            withTopInset={false}
+            withBottomInset={false}
+        >
+            {hasCachedChats && visible.length > 0 ? (
+                <EdgeFadeView
+                    style={styles.listLayer}
+                    topFade={topFade}
+                    bottomFade={bottomFade}
+                >
+                    <FlatList
+                        ref={listRef}
+                        style={styles.list}
+                        data={visible}
+                        keyExtractor={(item: ChatRow): string =>
+                            String(item.id)
+                        }
+                        refreshControl={
+                            <RefreshControl
+                                refreshing={chatsQuery.isRefetching}
+                                // The spinner must clear the floating header.
+                                progressViewOffset={headerHeight}
+                                onRefresh={(): void => {
+                                    void chatsQuery.refetch();
+                                }}
                             />
-                        </Pressable>
-                        <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel="Sign out"
-                            onPress={(): void => {
-                                void logout('manual');
-                            }}
-                            style={styles.iconButton}
-                        >
-                            <LogOut size={26} color="#7e00e6" strokeWidth={2} />
-                        </Pressable>
-                    </>
-                }
-            >
-                <AppText variant="heading">Chats</AppText>
-                <AppText variant="caption" style={styles.headerCaption}>
-                    Your conversations
-                </AppText>
-            </GlassHeader>
-
-            <GlassInput
-                placeholder="Search chats"
-                value={search}
-                onChangeText={setSearch}
-                accessibilityLabel="Search chats"
-                leading={<Text style={styles.searchGlyph}>⌕</Text>}
-            />
-
-            {hasCachedChats && <OfflineCaption />}
-
-            {!hasCachedChats && chatsQuery.isPending ? (
-                <View style={styles.center}>
-                    <ActivityIndicator
-                        size="large"
-                        color={palette.primary[500]}
+                        }
+                        renderItem={({ item }): React.ReactElement => (
+                            <ChatRowItem
+                                chat={item}
+                                pinned={pinned.has(Number(item.id))}
+                                onHold={prefetchRole}
+                                onLongPress={openChatMenu}
+                            />
+                        )}
+                        ItemSeparatorComponent={RowSeparator}
+                        contentContainerStyle={{
+                            paddingTop: listPaddingTop,
+                            paddingBottom: listPaddingBottom,
+                        }}
+                        onScroll={(event): void => {
+                            scrollOffsetRef.current =
+                                event.nativeEvent.contentOffset.y;
+                        }}
+                        scrollEventThrottle={16}
+                        scrollIndicatorInsets={{
+                            top: Math.round(headerHeight),
+                            bottom: Math.round(tabBarInset),
+                        }}
                     />
-                </View>
-            ) : !hasCachedChats && chatsQuery.isError ? (
-                <StateBlock
-                    title="Could not load chats"
-                    detail={chatsQuery.error.message}
-                    retry={(): void => {
-                        void chatsQuery.refetch();
-                    }}
-                />
-            ) : visible.length === 0 ? (
-                <StateBlock
-                    title={search === '' ? 'No chats yet' : 'No matching chats'}
-                    detail={
-                        search === ''
-                            ? 'Start a private chat with "New chat" or create a group with "+ Group".'
-                            : 'Try a different search term.'
-                    }
-                    retry={
-                        search === ''
-                            ? (): void => {
-                                  void chatsQuery.refetch();
-                              }
-                            : undefined
-                    }
-                />
+                </EdgeFadeView>
             ) : (
-                <FlatList
-                    ref={listRef}
-                    data={visible}
-                    keyExtractor={(item: ChatRow): string => String(item.id)}
-                    refreshControl={
-                        <RefreshControl
-                            refreshing={chatsQuery.isRefetching}
-                            onRefresh={(): void => {
+                <View
+                    style={[
+                        styles.center,
+                        headerHeight > 0 && {
+                            paddingTop: listPaddingTop + spacing.sm,
+                        },
+                    ]}
+                >
+                    {!hasCachedChats && chatsQuery.isPending ? (
+                        <ActivityIndicator
+                            size="large"
+                            color={palette.primary[500]}
+                        />
+                    ) : !hasCachedChats && chatsQuery.isError ? (
+                        <StateBlock
+                            title="Could not load chats"
+                            detail={chatsQuery.error.message}
+                            retry={(): void => {
                                 void chatsQuery.refetch();
                             }}
                         />
-                    }
-                    renderItem={({ item }): React.ReactElement => (
-                        <ChatRowItem
-                            chat={item}
-                            pinned={pinned.has(Number(item.id))}
-                            onHold={prefetchRole}
-                            onLongPress={openChatMenu}
+                    ) : (
+                        <StateBlock
+                            title="No chats yet"
+                            detail='Start a private chat with "New chat" or create a group with "+ Group".'
+                            retry={(): void => {
+                                void chatsQuery.refetch();
+                            }}
                         />
                     )}
-                    ItemSeparatorComponent={RowSeparator}
-                    contentContainerStyle={{ paddingBottom: tabBarInset }}
-                />
+                </View>
             )}
+
+            <View
+                pointerEvents="box-none"
+                style={[
+                    styles.headerLayer,
+                    {
+                        paddingTop: insets.top + spacing.md,
+                        paddingHorizontal: spacing.sm,
+                    },
+                ]}
+                onLayout={measureHeader}
+            >
+                <GlassHeader layout="row" trailing={<SearchIconButton />}>
+                    <AppText variant="heading">Chats</AppText>
+                </GlassHeader>
+                <OfflineCaption />
+            </View>
 
             <GlassSurface
                 tone="accent"
@@ -380,6 +440,38 @@ export default function ChatsScreen(): React.ReactElement {
                 </Pressable>
             </GlassSurface>
         </Screen>
+    );
+}
+
+/** One search button in the header's trailing slot — no other header controls. */
+function SearchIconButton(): React.ReactElement {
+    const scale = useSharedValue(1);
+    const animatedStyle = useAnimatedStyle(() => ({
+        transform: [{ scale: scale.value }],
+    }));
+    return (
+        <AnimatedPressable
+            accessibilityRole="button"
+            accessibilityLabel="Search"
+            style={[styles.searchButton, shadows.glass, animatedStyle]}
+            hitSlop={2}
+            onPressIn={(): void => {
+                scale.value = withSpring(0.92, { damping: 20, stiffness: 300 });
+                try {
+                    void Haptics.selectionAsync();
+                } catch {
+                    // Haptics are unavailable on some devices / simulators.
+                }
+            }}
+            onPressOut={(): void => {
+                scale.value = withSpring(1, { damping: 20, stiffness: 300 });
+            }}
+            onPress={(): void => {
+                router.push('/(app)/search');
+            }}
+        >
+            <Search size={20} color="rgba(255,255,255,0.92)" strokeWidth={2} />
+        </AnimatedPressable>
     );
 }
 
@@ -475,39 +567,28 @@ function RetryButton({ onPress }: { onPress: () => void }): React.ReactElement {
 }
 
 const styles = StyleSheet.create({
-    screen: { gap: spacing.sm },
-    brand: {
-        width: 40,
-        height: 40,
-        borderRadius: 14,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: palette.glass.accent,
-        borderWidth: 1,
-        borderColor: palette.border.accent,
+    screen: { flex: 1 },
+    headerLayer: {
+        position: 'absolute',
+        top: 0,
+        start: 0,
+        end: 0,
+        gap: spacing.xxs,
     },
-    brandText: {
-        color: palette.highlight,
-        fontSize: 19,
-        fontWeight: '700',
-    },
-    headerCaption: { color: palette.text.muted },
-    iconButton: {
+    searchButton: {
         width: 40,
         height: 40,
         borderRadius: 20,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: palette.glass.highlight,
+        backgroundColor: 'rgba(20,10,40,0.55)',
         borderWidth: 1,
-        borderColor: palette.border.subtle,
+        borderColor: 'rgba(255,255,255,0.14)',
     },
-    iconText: {
-        color: palette.primary[700],
-        fontSize: 18,
-        fontWeight: '600',
-    },
-    searchGlyph: { color: palette.text.muted, fontSize: 20 },
+    // Explicit fill: `StyleSheet.absoluteFillObject` is gone in RN 0.88 and
+    // spreading it left this layer without any position or size.
+    listLayer: FILL_ABSOLUTE,
+    list: { flex: 1 },
     center: {
         flex: 1,
         alignItems: 'center',
@@ -515,58 +596,6 @@ const styles = StyleSheet.create({
         gap: spacing.xs,
     },
     stateDetail: { textAlign: 'center', color: palette.neutral[500] },
-    row: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.sm,
-        paddingVertical: spacing.xs,
-        paddingHorizontal: spacing.xxs,
-        borderRadius: radii.sm,
-    },
-    rowSelected: {
-        backgroundColor: palette.glass.elevated,
-        borderWidth: 1,
-        borderColor: palette.border.subtle,
-    },
-    titleRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.xxs,
-    },
-    titleText: { flexShrink: 1 },
-    pinGlyph: { fontSize: 11 },
-    avatar: { width: 44, height: 44, borderRadius: radii.full / 2 },
-    avatarFallback: {
-        width: 44,
-        height: 44,
-        borderRadius: radii.full / 2,
-        backgroundColor: palette.primary[100],
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    avatarFallbackText: {
-        color: palette.primary[700],
-        fontSize: 16,
-        fontWeight: '700',
-    },
-    rowBody: { flex: 1, gap: 2 },
-    rowMeta: { alignItems: 'flex-end', gap: 2 },
-    unreadPreview: { color: palette.text.primary, fontWeight: '700' },
-    unreadBadge: {
-        minWidth: 18,
-        paddingHorizontal: 5,
-        paddingVertical: 1,
-        borderRadius: radii.full / 2,
-        backgroundColor: palette.primary[500],
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    unreadBadgeText: {
-        color: palette.text.onAccent,
-        fontSize: 10,
-        fontWeight: '700',
-    },
-    banBadge: { color: palette.semantic.danger, fontSize: 10 },
     separator: { height: 1, backgroundColor: palette.border.subtle },
     fabWrap: {
         position: 'absolute',

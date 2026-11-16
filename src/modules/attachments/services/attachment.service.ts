@@ -38,33 +38,49 @@ import {
     MAX_ATTACHMENTS_PER_MESSAGE,
     MAX_ATTACHMENT_MESSAGE_SIZE,
     MAX_CONCURRENT_UPLOADS_PER_USER,
+    MAX_MUSIC_FILE_SIZE,
     MAX_VIDEO_FILE_SIZE,
     MAX_VOICE_FILE_SIZE,
+    MUSIC_COVER_MAX_SIZE,
+    MUSIC_COVER_WEBP_QUALITY,
+    MUSIC_EXTENSIONS,
+    MUSIC_MIME_TYPES,
     VIDEO_EXTENSIONS,
     VOICE_EXTENSIONS,
 } from '../attachment.constants';
-import { attachmentKindOf } from 'src/common/utils/attachment-kind.util';
+import {
+    attachmentKindOf,
+    type AttachmentKind,
+} from 'src/common/utils/attachment-kind.util';
+import { detectAudioMimeType } from '../utils/file-signature.util';
 import {
     MediaProcessorService,
     VideoValidationError,
     VoiceValidationError,
 } from './media-processor.service';
+import { parseFile } from 'music-metadata';
 
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
 const VIDEO_EXTENSION_SET = new Set(VIDEO_EXTENSIONS);
 const VOICE_EXTENSION_SET = new Set(VOICE_EXTENSIONS);
+const MUSIC_EXTENSION_SET = new Set(MUSIC_EXTENSIONS);
+const MUSIC_MIME_SET = new Set(MUSIC_MIME_TYPES);
 
 export interface StoredAttachment {
     id: number;
     originalName: string;
     mimeType: string;
     size: number;
-    kind: 'image' | 'video' | 'voice' | 'file';
+    kind: AttachmentKind;
     width?: number;
     height?: number;
     duration?: number;
     hasPoster?: boolean;
     waveform?: number[];
+    title?: string;
+    artist?: string | null;
+    durationSeconds?: number | null;
+    coverUrl?: string | null;
 }
 
 interface PreparedFile {
@@ -72,13 +88,65 @@ interface PreparedFile {
     originalName: string;
     extension: string;
     mimeType: string;
-    kind: 'image' | 'video' | 'voice' | 'file';
+    kind: AttachmentKind;
     storageKey: string;
     width?: number;
     height?: number;
     duration?: number;
     voice?: boolean;
     waveform?: number[] | null;
+    title?: string;
+    artist?: string | null;
+    durationSeconds?: number | null;
+    coverKey?: string | null;
+}
+
+/** Reads at most `bytes` from the start of a file (magic-byte probe). */
+async function readFileHead(filePath: string, bytes: number): Promise<Buffer> {
+    const handle = await fs.open(filePath, 'r');
+    try {
+        const buffer = Buffer.alloc(bytes);
+        const { bytesRead } = await handle.read(buffer, 0, bytes, 0);
+        return buffer.subarray(0, bytesRead);
+    } finally {
+        await handle.close();
+    }
+}
+
+/**
+ * Canonical wire MIME for a music upload, or null when the magic-byte
+ * container does not match the declared extension (or the MIME is not in the
+ * accepted audio list).
+ */
+function musicMimeFor(extension: string, detected: string | null): string | null {
+    if (detected === null) return null;
+    const expected: Record<string, string[]> = {
+        mp3: ['audio/mpeg'],
+        m4a: ['audio/mp4'],
+        mp4: ['audio/mp4'],
+        aac: ['audio/aac'],
+        ogg: ['audio/ogg'],
+        opus: ['audio/ogg', 'audio/opus'],
+        wav: ['audio/wav'],
+        flac: ['audio/flac'],
+        weba: ['audio/webm'],
+        webm: ['audio/webm'],
+    };
+    const candidates = expected[extension];
+    if (candidates === undefined || !candidates.includes(detected)) {
+        return null;
+    }
+    // `audio/ogg` is the detected container for both ogg and opus files.
+    if (extension === 'opus') return 'audio/opus';
+    return MUSIC_MIME_SET.has(detected) ? detected : null;
+}
+
+/** Display title fallback: the file name without its extension. */
+function titleFromFileName(name: string): string {
+    const base = name.split(/[\\/]/).pop() ?? name;
+    const dot = base.lastIndexOf('.');
+    const title = (dot > 0 ? base.slice(0, dot) : base).trim();
+    return (title === '' ? 'Music' : title).slice(0, 255);
 }
 
 @Injectable()
@@ -161,14 +229,18 @@ export class AttachmentService {
             for (const file of files) {
                 const tempPath = await this.ensureTempPath(file);
                 tempPaths.add(tempPath);
-                prepared.push(
-                    await this.prepareFile(
-                        file,
-                        tempPath,
-                        chatId,
-                        voiceRequested,
-                    ),
+                const item = await this.prepareFile(
+                    file,
+                    tempPath,
+                    chatId,
+                    voiceRequested,
                 );
+                prepared.push(item);
+                // A music cover is written straight to its final storage path
+                // during validation; it must be removed on any later failure.
+                if (item.coverKey) {
+                    finalPaths.add(this.storagePath(item.coverKey));
+                }
             }
 
             await fs.mkdir(this.config.storageDir, { recursive: true });
@@ -224,6 +296,14 @@ export class AttachmentService {
                             item.voice === true
                                 ? (item.waveform ?? null)
                                 : null,
+                        title: item.title ?? null,
+                        artist: item.artist ?? null,
+                        durationSeconds:
+                            item.durationSeconds === undefined ||
+                            item.durationSeconds === null
+                                ? null
+                                : item.durationSeconds.toFixed(1),
+                        coverPath: item.coverKey ?? null,
                     })),
                 );
             } catch (error) {
@@ -257,6 +337,17 @@ export class AttachmentService {
                         : {}),
                     ...(file.kind === 'voice'
                         ? { duration: file.duration }
+                        : {}),
+                    ...(file.kind === 'music'
+                        ? {
+                              title: file.title,
+                              artist: file.artist ?? null,
+                              durationSeconds:
+                                  file.durationSeconds ?? null,
+                              coverUrl: file.coverKey
+                                  ? `/attachments/${Number(row.id)}/cover`
+                                  : null,
+                          }
                         : {}),
                 };
             });
@@ -453,8 +544,19 @@ export class AttachmentService {
                     duration: probe.result.duration,
                 };
             }
-            // Audio-only files (including cover art) and unsupported
-            // containers stay regular files.
+            // Audio-only files (including cover art) fall through to the
+            // music path below; unsupported containers stay regular files.
+        }
+
+        if (MUSIC_EXTENSION_SET.has(extension)) {
+            return this.prepareMusic(
+                tempPath,
+                originalName,
+                extension,
+                storageKey,
+                size,
+                chatId,
+            );
         }
 
         if (size > this.config.maxFileSize) {
@@ -539,6 +641,114 @@ export class AttachmentService {
     }
 
     /**
+     * Music upload path. The real container is detected from magic bytes (the
+     * client MIME is never trusted) and parsed with the pure-JS
+     * `music-metadata`: title, artist, duration and an optional embedded cover
+     * (re-encoded to a small WebP). Metadata failures never fail the upload —
+     * the file is accepted with the title defaulted to its name.
+     */
+    private async prepareMusic(
+        tempPath: string,
+        originalName: string,
+        extension: string,
+        storageKey: string,
+        size: number,
+        chatId: ChatId,
+    ): Promise<PreparedFile> {
+        if (size > MAX_MUSIC_FILE_SIZE) {
+            throw new PayloadTooLargeException(
+                `music track exceeds the maximum allowed size of ${MAX_MUSIC_FILE_SIZE} bytes`,
+            );
+        }
+
+        const head = await readFileHead(tempPath, 16);
+        const detected = detectAudioMimeType(head);
+        const mimeType = musicMimeFor(extension, detected);
+        if (mimeType === null) {
+            throw new BadRequestException('This file is not a valid audio track');
+        }
+
+        const fallbackTitle = titleFromFileName(originalName);
+        let title = fallbackTitle;
+        let artist: string | null = null;
+        let durationSeconds: number | null = null;
+        let coverKey: string | null = null;
+
+        try {
+            // Pinned CommonJS `music-metadata` 7.x: a plain import keeps the
+            // tsc→CommonJS build working (newer 8.x/9.x are ESM-only and would
+            // throw ERR_REQUIRE_ESM when tsc compiles `await import()` to
+            // `require()`). Metadata failures never fail the upload.
+            const metadata = await parseFile(tempPath, { duration: true });
+            const common = metadata.common;
+            const taggedTitle = common.title?.trim();
+            if (taggedTitle) title = taggedTitle.slice(0, 255);
+            const taggedArtist = common.artist?.trim();
+            artist = taggedArtist ? taggedArtist.slice(0, 255) : null;
+            const duration = Number(metadata.format?.duration);
+            if (Number.isFinite(duration) && duration > 0) {
+                durationSeconds = Math.round(duration * 10) / 10;
+            }
+            const picture = common.picture?.[0];
+            if (picture !== undefined) {
+                coverKey = await this.writeMusicCover(
+                    Buffer.from(picture.data),
+                    chatId,
+                );
+            }
+        } catch (error) {
+            this.logger.warn(
+                `music metadata unavailable for ${originalName}: ${
+                    error instanceof Error ? error.message : String(error)
+                }`,
+            );
+        }
+
+        return {
+            tempPath,
+            originalName,
+            extension,
+            mimeType,
+            kind: 'music',
+            storageKey,
+            title,
+            artist,
+            durationSeconds,
+            coverKey,
+        };
+    }
+
+    /**
+     * Re-encodes an embedded cover to a <=256 px WebP in the attachment
+     * storage. Returns the relative key, or null when the image is unusable
+     * (the track is still accepted without a cover).
+     */
+    private async writeMusicCover(
+        data: Buffer,
+        chatId: ChatId,
+    ): Promise<string | null> {
+        const coverKey = `${chatId}/${crypto.randomUUID()}.cover.webp`;
+        const target = this.storagePath(coverKey);
+        if (target === '') return null;
+        try {
+            await fs.mkdir(path.dirname(target), { recursive: true });
+            await sharp(data, { limitInputPixels: 40_000_000, failOn: 'error' })
+                .resize({
+                    width: MUSIC_COVER_MAX_SIZE,
+                    height: MUSIC_COVER_MAX_SIZE,
+                    fit: 'inside',
+                    withoutEnlargement: true,
+                })
+                .webp({ quality: MUSIC_COVER_WEBP_QUALITY })
+                .toFile(target);
+            return coverKey;
+        } catch {
+            await removeQuietly(target);
+            return null;
+        }
+    }
+
+    /**
      * Streams an attachment after authorization. Content is located through
      * the DB row only; internal filesystem paths stay server-side.
      */
@@ -564,8 +774,41 @@ export class AttachmentService {
                     ? 'application/octet-stream'
                     : attachment.mimeType,
             dispositionName: attachment.originalName,
-            inline: isVoice || (isVideo ? !forceDownload : kind === 'image'),
+            inline:
+                isVoice ||
+                kind === 'music' ||
+                (isVideo ? !forceDownload : kind === 'image'),
             allowRanges: true,
+        });
+    }
+
+    /**
+     * Embedded music cover, re-encoded to a small WebP at upload time. Only
+     * the owner (pending) or chat members (attached) can read it.
+     */
+    async cover(
+        id: AttachmentId,
+        user: JwtPayload,
+        req: Request,
+        res: Response,
+    ): Promise<void> {
+        const attachment = await this.loadReadable(id, user);
+        if (
+            attachmentKindOf(attachment.mimeType, attachment.voice) !==
+                'music' ||
+            !attachment.coverPath
+        ) {
+            throw new NotFoundException('cover not found');
+        }
+        const cover = this.storagePath(attachment.coverPath);
+        if (!fsSync.existsSync(cover)) {
+            throw new NotFoundException('cover not found');
+        }
+        await this.streamFile(req, res, cover, {
+            contentType: 'image/webp',
+            dispositionName: `${attachment.originalName}.cover.webp`,
+            inline: true,
+            allowRanges: false,
         });
     }
 
@@ -1028,6 +1271,7 @@ export class AttachmentService {
     async deleteFile(
         storageKey: string,
         posterPath?: string | null,
+        coverPath?: string | null,
     ): Promise<void> {
         const storagePath = this.storagePath(storageKey);
         if (storagePath !== '') {
@@ -1037,6 +1281,12 @@ export class AttachmentService {
             const poster = this.storagePath(posterPath);
             if (poster !== '') {
                 await removeQuietly(poster);
+            }
+        }
+        if (coverPath) {
+            const cover = this.storagePath(coverPath);
+            if (cover !== '') {
+                await removeQuietly(cover);
             }
         }
         await Promise.all(
@@ -1066,9 +1316,13 @@ export class AttachmentService {
      * The caller owns the returned keys and must remove them on rollback.
      */
     async copyFilesForForward(
-        source: Pick<Attachment, 'storageKey' | 'posterPath'>,
+        source: Pick<Attachment, 'storageKey' | 'posterPath' | 'coverPath'>,
         targetChatId: ChatId,
-    ): Promise<{ storageKey: string; posterPath: string | null }> {
+    ): Promise<{
+        storageKey: string;
+        posterPath: string | null;
+        coverPath: string | null;
+    }> {
         const sourcePath = this.storagePath(source.storageKey);
         if (
             sourcePath === '' ||
@@ -1116,7 +1370,37 @@ export class AttachmentService {
             }
         }
 
-        return { storageKey, posterPath };
+        let coverPath: string | null = null;
+        if (source.coverPath) {
+            const sourceCover = this.storagePath(source.coverPath);
+            if (
+                sourceCover === '' ||
+                !fsSync.existsSync(sourceCover) ||
+                !fsSync.statSync(sourceCover).isFile()
+            ) {
+                await removeQuietly(targetPath);
+                if (posterPath !== null) {
+                    await removeQuietly(this.storagePath(posterPath));
+                }
+                throw new BadRequestException(
+                    'An attachment is no longer available',
+                );
+            }
+            coverPath = `${targetChatId}/${crypto.randomUUID()}.cover.webp`;
+            const targetCover = this.storagePath(coverPath);
+            try {
+                await fs.mkdir(path.dirname(targetCover), { recursive: true });
+                await this.linkOrCopy(sourceCover, targetCover);
+            } catch (error) {
+                await removeQuietly(targetPath);
+                if (posterPath !== null) {
+                    await removeQuietly(this.storagePath(posterPath));
+                }
+                throw error;
+            }
+        }
+
+        return { storageKey, posterPath, coverPath };
     }
 
     private async linkOrCopy(source: string, target: string): Promise<void> {
@@ -1135,11 +1419,16 @@ export class AttachmentService {
                 status: AttachmentStatus.PENDING,
                 createdAt: LessThan(cutoff),
             },
-            select: { id: true, storageKey: true, posterPath: true },
+            select: {
+                id: true,
+                storageKey: true,
+                posterPath: true,
+                coverPath: true,
+            },
         });
         let removed = 0;
         for (const row of rows) {
-            await this.deleteFile(row.storageKey, row.posterPath);
+            await this.deleteFile(row.storageKey, row.posterPath, row.coverPath);
             await this.attachmentRepository.delete(row.id);
             removed += 1;
         }
@@ -1160,12 +1449,13 @@ export class AttachmentService {
                 'attachment.id',
                 'attachment.storageKey',
                 'attachment.posterPath',
+                'attachment.coverPath',
             ])
             .getMany();
 
         let removed = 0;
         for (const row of rows) {
-            await this.deleteFile(row.storageKey, row.posterPath);
+            await this.deleteFile(row.storageKey, row.posterPath, row.coverPath);
             await this.attachmentRepository.delete(row.id);
             removed += 1;
         }

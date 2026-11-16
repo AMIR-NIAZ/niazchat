@@ -71,7 +71,8 @@ jest.mock('expo-file-system', () => {
                 }) => void;
             },
         ): Promise<string> {
-            if (plan === null) return Promise.reject(new Error('no download plan'));
+            if (plan === null)
+                return Promise.reject(new Error('no download plan'));
             for (const step of plan.steps) {
                 options?.onProgress?.({
                     bytesWritten: step.written,

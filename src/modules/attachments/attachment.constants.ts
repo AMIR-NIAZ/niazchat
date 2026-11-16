@@ -33,6 +33,45 @@ export const VIDEO_MIME_BY_EXT: Record<string, string> = {
 export const MAX_VIDEO_DIMENSION = 8192;
 export const MAX_VIDEO_DURATION_SECONDS = 2 * 60 * 60;
 
+/** 100 MiB per music track (mirrored in the mobile app). */
+export const MAX_MUSIC_FILE_SIZE = 100 * 1024 * 1024;
+
+/**
+ * Containers accepted as music after music-metadata parsed them. `mp4` and
+ * `webm` are also video containers: the video probe runs first, so only
+ * audio-only files reach the music path.
+ */
+export const MUSIC_EXTENSIONS: readonly string[] = [
+    'mp3',
+    'm4a',
+    'mp4',
+    'aac',
+    'ogg',
+    'opus',
+    'wav',
+    'flac',
+    'weba',
+    'webm',
+];
+
+/** MIME accepted for a music track, keyed by the detected container. */
+export const MUSIC_MIME_TYPES: readonly string[] = [
+    'audio/mpeg',
+    'audio/mp4',
+    'audio/x-m4a',
+    'audio/aac',
+    'audio/ogg',
+    'audio/opus',
+    'audio/wav',
+    'audio/x-wav',
+    'audio/flac',
+    'audio/webm',
+];
+
+/** Embedded cover art is re-encoded to a square WebP no larger than this. */
+export const MUSIC_COVER_MAX_SIZE = 256;
+export const MUSIC_COVER_WEBP_QUALITY = 80;
+
 /** 15 MiB per voice message (mirrored in the mobile app). */
 export const MAX_VOICE_FILE_SIZE = 15 * 1024 * 1024;
 /** Recording limit; the server tolerates container overhead up to 11 minutes. */
@@ -125,12 +164,15 @@ export const ALLOWED_EXTENSIONS: readonly string[] = [
     '7z',
     'tar',
     'gz',
-    // audio
+    // audio (music tracks; content verified with music-metadata)
     'mp3',
     'wav',
     'ogg',
     'm4a',
     'opus',
+    'aac',
+    'flac',
+    'weba',
     // video (content probed; mkv/avi stay generic files)
     'mp4',
     'm4v',

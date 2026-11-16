@@ -8,7 +8,7 @@ import type { MessageTypeName } from '../../core/api/dto/message.dto';
 /** Server-confirmed messages plus one optimistic entry per in-flight send. */
 export type MessageStatus = 'pending' | 'sent' | 'failed';
 
-export type AttachmentKind = 'image' | 'video' | 'voice' | 'file';
+export type AttachmentKind = 'image' | 'video' | 'voice' | 'music' | 'file';
 export type AttachmentUploadStatus = 'uploading' | 'uploaded' | 'failed';
 
 /** One attachment of a message (server metadata + local upload state). */
@@ -29,6 +29,14 @@ export interface AttachmentView {
     /** Voice only, optimistic bubble: duration/waveform recorded locally. */
     localDuration?: number;
     localWaveform?: number[];
+    /** Music only: track title (tag or file name without extension). */
+    title?: string;
+    /** Music only: track artist; null/absent means "Unknown artist". */
+    artist?: string | null;
+    /** Music only: container duration in seconds, or null when unknown. */
+    durationSeconds?: number | null;
+    /** Music only: absolute cover URL, or null when the file has no cover. */
+    coverUrl?: string | null;
     /** Videos only: the server stored a poster (false -> placeholder tile). */
     hasPoster?: boolean;
     /** Local file URI for optimistic previews (pending messages only). */
@@ -52,6 +60,8 @@ export interface ReplyPreview {
     attachmentKind: AttachmentKind | null;
     /** Duration of a voice first attachment, when known. */
     attachmentDuration: number | null;
+    /** Title of a music first attachment, when known. */
+    attachmentTitle?: string | null;
     isDeleted: boolean;
 }
 

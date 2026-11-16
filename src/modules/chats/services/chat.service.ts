@@ -41,6 +41,10 @@ export type ChatWithUnread = Chat & {
     peerName?: string | null;
     /** Other participant (never a phone number) on private chats. */
     peer?: PeerDto | null;
+    /** Caller's own role in this chat (chat-list membership flag). */
+    myRole?: string | null;
+    /** Always true on chat-list rows: the caller is a non-banned member. */
+    isMember?: boolean;
 };
 
 /** Server-side cap for `unreadCount`; the app renders "99+" above 99. */
@@ -213,7 +217,13 @@ export class ChatService {
             .getMany();
 
         const byId = new Map<string, Chat>();
-        for (const m of memberships) byId.set(String(m.chat.id), m.chat);
+        // Per-row membership answer, so the app never has to ask again before
+        // deciding between "open the chat" and "show the join flow".
+        const roleById = new Map<string, string | null>();
+        for (const m of memberships) {
+            byId.set(String(m.chat.id), m.chat);
+            roleById.set(String(m.chat.id), m.role?.name ?? null);
+        }
 
         const activity = (c: Chat): number =>
             new Date(c.lastMessage?.createdAt ?? c.createdAt).getTime();
@@ -252,6 +262,8 @@ export class ChatService {
                     ),
                     peer,
                     peerName: peer?.name ?? null,
+                    myRole: roleById.get(String(chat.id)) ?? null,
+                    isMember: true,
                 });
             });
     }

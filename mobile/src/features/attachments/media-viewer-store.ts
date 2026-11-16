@@ -85,9 +85,7 @@ export function getMediaViewerSession(): MediaViewerSession | null {
     return session;
 }
 
-export function registerMediaViewerCloser(
-    close: (() => void) | null,
-): void {
+export function registerMediaViewerCloser(close: (() => void) | null): void {
     requestClose = close;
 }
 
@@ -153,9 +151,7 @@ export function notifyMediaViewerMessageDeleted(
     if (session === null || messageId === null) {
         return;
     }
-    const items = session.items.filter(
-        (item) => item.message.id !== messageId,
-    );
+    const items = session.items.filter((item) => item.message.id !== messageId);
     if (items.length === session.items.length) {
         return;
     }

@@ -11,20 +11,20 @@ export type UserStatus = 'active' | 'deleted' | 'baned';
  * `avatars` are server-relative paths ("uploads/avatars/…") — resolve with `absoluteUploadUrl`.
  */
 export interface UserDto {
-  id: number;
-  createdAt: string;
-  updatedAt: string;
-  phone: string;
-  /** Defaults to 'بدون نام' when the profile has no name. */
-  name: string;
-  biografy: string | null;
-  username: string | null;
-  avatars: string[];
-  isOnline: boolean;
-  lastSeen: string | null;
-  status: UserStatus;
-  /** Only present when the backend loaded the role relation (e.g. `getme`). */
-  role?: { id: number; name: string };
+    id: number;
+    createdAt: string;
+    updatedAt: string;
+    phone: string;
+    /** Defaults to 'بدون نام' when the profile has no name. */
+    name: string;
+    biografy: string | null;
+    username: string | null;
+    avatars: string[];
+    isOnline: boolean;
+    lastSeen: string | null;
+    status: UserStatus;
+    /** Only present when the backend loaded the role relation (e.g. `getme`). */
+    role?: { id: number; name: string };
 }
 
 /**
@@ -33,8 +33,8 @@ export interface UserDto {
  * photo first in `avatars`, so the client can seed its cache from the response.
  */
 export interface AvatarMutationResponseDto {
-  message: string;
-  user: UserDto;
+    message: string;
+    user: UserDto;
 }
 
 /**
@@ -43,13 +43,13 @@ export interface AvatarMutationResponseDto {
  * `avatars` are ALL photos, current first; non-active users 404.
  */
 export interface PublicUserProfileDto {
-  id: number;
-  name: string;
-  username: string | null;
-  biografy: string | null;
-  avatars: string[];
-  isOnline: boolean;
-  lastSeen: string | null;
+    id: number;
+    name: string;
+    username: string | null;
+    biografy: string | null;
+    avatars: string[];
+    isOnline: boolean;
+    lastSeen: string | null;
 }
 
 /**
@@ -57,19 +57,19 @@ export interface PublicUserProfileDto {
  * timestamps. `avatars` holds at most the CURRENT photo (server-relative).
  */
 export interface UserSearchItemDto {
-  id: number;
-  name: string;
-  username: string;
-  avatars: string[];
+    id: number;
+    name: string;
+    username: string;
+    avatars: string[];
 }
 
 /** `GET /chats/manage/:chatId/bans` → `{ data: [...] }` item (docs/mobile-api/groups.md). */
 export interface BannedChatMemberDto {
-  id: number;
-  createdAt: string;
-  updatedAt: string;
-  chatId: number;
-  userId: number;
-  roleId: number;
-  user: UserDto;
+    id: number;
+    createdAt: string;
+    updatedAt: string;
+    chatId: number;
+    userId: number;
+    roleId: number;
+    user: UserDto;
 }

@@ -58,6 +58,9 @@ export function Screen({
 const styles = StyleSheet.create({
     screen: {
         flex: 1,
+        // Explicit containing block for the absolutely positioned layers
+        // (list layer, floating chrome) that screens place on top of it.
+        position: 'relative',
         backgroundColor: palette.background,
         overflow: 'hidden',
     },

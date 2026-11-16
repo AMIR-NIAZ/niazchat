@@ -25,8 +25,6 @@ import type {
 } from 'react-native';
 import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import MaskedView from '@react-native-masked-view/masked-view';
-import { LinearGradient } from 'expo-linear-gradient';
 import * as Clipboard from 'expo-clipboard';
 import {
     AppText,
@@ -39,8 +37,19 @@ import {
     spacing,
     typography,
 } from '../../../shared/components';
+import { EdgeFadeView, FADE_EXTRA } from '../../../shared/edge-fade';
 import { useSocketConnectionState } from '../../../core/socket';
 import type { ReactionUserDto } from '../../../core/api';
+import {
+    MUSIC_BAR_LIFT,
+    consumeMusicJumpRequest,
+    registerMusicJumpHandler,
+    syncMusicQueue,
+    useMiniPlayerAnchor,
+    useMusicBarShown,
+} from '../../../shared/music-player';
+import type { MusicTrack } from '../../../shared/music-player';
+import { evictAudioDownload } from '../../../shared/media-cache';
 import { useAndroidKeyboardInset } from '../../../shared/hooks/use-android-keyboard-inset';
 import {
     DateSeparator,
@@ -55,6 +64,7 @@ import {
     useChatMessages,
     useMarkSeen,
     useScrollToBottomButton,
+    chatListGeometry,
     useTypingEmitter,
     useTypingUsers,
     NO_MORE_SAVED_MESSAGES,
@@ -142,38 +152,14 @@ import type {
 
 type ChatDetailRouteParams = { chatId?: string | string[] };
 
-/**
- * `@react-native-masked-view/masked-view` still ships React-18 class typings
- * (`React.Component<P>` without a context argument), which React 19's JSX
- * rejects. The component is a normal View-like host component at runtime, so
- * the cast only repairs the type surface.
- */
-const MaskedViewSafe = MaskedView as unknown as React.ComponentType<{
-    style?: StyleProp<ViewStyle>;
-    maskElement?: React.ReactElement;
-    children?: React.ReactNode;
-    pointerEvents?: 'auto' | 'none' | 'box-none' | 'box-only';
-}>;
-
-/** Extra height added on top of the header/composer height for the edge fades. */
-const FADE_EXTRA = 100;
-/** Gradient stops for the edge fade mask, shared (mirrored) by top and bottom. */
-const FADE_STOPS = {
-    colors: [
-        'rgba(0,0,0,0)',
-        'rgba(0, 0, 0, 0.15)',
-        'rgba(0, 0, 0, 0.82)',
-        'rgba(0,0,0,1)',
-    ] as [string, string, string, string],
-    locations: [0, 0.35, 0.7, 1] as [number, number, number, number],
-};
-
 /** Inverted list: offset 0 is the newest message; below it counts as "scrolled up". */
 const NEAR_BOTTOM_OFFSET = 80;
 /** Jump-to-original cap: 10 pages × 30 messages = 300 messages. */
 const JUMP_MAX_PAGES = 10;
 const HIGHLIGHT_MS = 1000;
 const JUMP_NOTICE_MS = 3000;
+/** Breathing room between the list content and the floating chrome. */
+const LIST_GAP = 12;
 
 type ListChunk =
     | {
@@ -211,6 +197,14 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     const currentUserId = useCurrentUserId();
     const socketState = useSocketConnectionState();
     const conversation = useChatMessages(chatId, true, currentUserId);
+    // The mini player is global: it shows here (and only here or on the chat
+    // list) while it sits BELOW the floating chat header, and the list clears
+    // the extra strip.
+    //
+    // The screen subscribes to that ONE boolean only (a stable primitive): the
+    // player's position/status churn must never re-render the chat screen or
+    // its message rows.
+    const musicBarShown = useMusicBarShown();
     const reactionEmojis = useReactionEmojis();
     const [actionTarget, setActionTarget] = useState<ChatMessage | null>(null);
     const [actionDraft, setActionDraft] = useState('');
@@ -229,6 +223,8 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     const [headerHeight, setHeaderHeight] = useState(0);
     const [composerHeight, setComposerHeight] = useState(0);
     const [noticesHeight, setNoticesHeight] = useState(0);
+    /** Measured list viewport: the chrome may never reserve more than half. */
+    const [listHeight, setListHeight] = useState(0);
     const [keyboardVisible, setKeyboardVisible] = useState(false);
     const [keyboardHeight, setKeyboardHeight] = useState(0);
 
@@ -251,6 +247,11 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         const height = Math.round(event.nativeEvent.layout.height);
         setHeaderHeight((current) => (current === height ? current : height));
     }, []);
+    // This screen owns the mini bar's top edge: while it is focused and its
+    // header layer is measured, it registers `headerHeight + gap` and unregisters
+    // on blur. The list clears the same strip (visual bottom of the inverted
+    // list is the composer side, so the bar grows `paddingBottom`).
+    useMiniPlayerAnchor(headerHeight > 0 ? headerHeight : null);
     const measureNotices = useCallback((event: LayoutChangeEvent): void => {
         const height = Math.round(event.nativeEvent.layout.height);
         setNoticesHeight((current) => (current === height ? current : height));
@@ -348,9 +349,51 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         [replyTarget],
     );
 
+    /** This chat's playable tracks in ASCENDING order (the player's queue). */
+    const musicQueue = useMemo<MusicTrack[]>(() => {
+        const ordered = [...messages].sort((a, b) => {
+            const byTime = a.createdAtIso.localeCompare(b.createdAtIso);
+            if (byTime !== 0) return byTime;
+            return (
+                (a.id ?? Number.MAX_SAFE_INTEGER) -
+                (b.id ?? Number.MAX_SAFE_INTEGER)
+            );
+        });
+        const tracks: MusicTrack[] = [];
+        for (const message of ordered) {
+            for (const attachment of message.attachments) {
+                if (attachment.kind !== 'music' || attachment.id === null) {
+                    continue;
+                }
+                tracks.push({
+                    attachmentId: attachment.id,
+                    messageKey: message.key,
+                    chatId,
+                    title: attachment.title ?? attachment.name,
+                    artist: attachment.artist ?? null,
+                    coverUrl: attachment.coverUrl ?? null,
+                    localUri: attachment.localUri ?? null,
+                    mimeType: attachment.mimeType,
+                    name: attachment.name,
+                    size: attachment.size,
+                    durationSeconds: attachment.durationSeconds ?? null,
+                });
+            }
+        }
+        return tracks;
+    }, [chatId, messages]);
+
+    // Live queue: appends and deletions update the player without touching
+    // playback (the store ignores this while another chat is playing).
+    useEffect((): void => {
+        syncMusicQueue(chatId, musicQueue);
+    }, [chatId, musicQueue]);
+
     const listRef = useRef<FlatList<List>>(null);
     const atBottomRef = useRef(true);
     const initialScrollDoneRef = useRef(false);
+    /** True while the user's finger/momentum owns the list. */
+    const userScrollingRef = useRef(false);
     const jumpInProgressRef = useRef(false);
     const jumpAbortRef = useRef<AbortController | null>(null);
     const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -429,6 +472,8 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         atBottomRef.current = true;
         setAtBottom(true);
         initialScrollDoneRef.current = false;
+        userScrollingRef.current = false;
+        lastNewestIdRef.current = null;
     }, [chatId]);
 
     // Live arrival/deletion never invalidates the id-based selection: only ids
@@ -591,11 +636,6 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         };
     }, [popup, chatId]);
 
-    const newestKey =
-        messages.length > 0
-            ? (messages[messages.length - 1]?.key ?? null)
-            : null;
-
     const newestConfirmedId = useMemo((): number | null => {
         for (let index = messages.length - 1; index >= 0; index -= 1) {
             const id = messages[index]?.id ?? null;
@@ -627,27 +667,31 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         return (): void => setActiveChat(null, false);
     }, [chatId]);
 
-    // Auto-scroll ONLY when already at the newest message (first load, own send,
-    // or a live message while near the bottom). Reading old history is never
-    // yanked, and a live message never hijacks an in-progress jump.
+    // Auto-scroll runs ONLY when the newest CONFIRMED id actually advances:
+    //   (a) once when the chat opens (previous id null → instant, invisible),
+    //   (b) when a new message arrives while the user sits at the live edge.
+    // Re-merges of the same page, edits, reactions, pagination of older pages,
+    // image/music layout and padding changes all keep the same newest id, so
+    // they can never move the list. A drag in progress is never overridden.
     //
     // The same effect feeds the button badge: a newest id that jumps forward
     // (a live message, never an older `loadOlder` page) from another member
     // while scrolled up counts once. Own and pending/failed messages have no
     // confirmed id newer than the previous newest, so they never count.
     useEffect((): void => {
-        if (newestKey === null) {
+        const newestId = newestConfirmedId;
+        if (newestId === null) {
             return;
         }
-        const newest = messages[messages.length - 1];
         const previousId = lastNewestIdRef.current;
-        lastNewestIdRef.current = newest?.id ?? null;
+        lastNewestIdRef.current = newestId;
+        const newest = messages[messages.length - 1];
         const liveFromOther =
             newest !== undefined &&
-            newest.id !== null &&
+            newest.id === newestId &&
             newest.status === 'sent' &&
             previousId !== null &&
-            newest.id > previousId &&
+            newestId > previousId &&
             !isOwnMessage(currentUserId, newest.senderId);
         if (liveFromOther && !atBottomRef.current) {
             newMessageCountRef.current = Math.min(
@@ -656,13 +700,43 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
             );
             setNewMessageCount(newMessageCountRef.current);
         }
-        if (jumpInProgressRef.current) {
+        if (newestId === previousId) {
             return;
         }
-        if (atBottomRef.current) {
-            listRef.current?.scrollToOffset({ offset: 0, animated: true });
+        if (
+            jumpInProgressRef.current ||
+            userScrollingRef.current ||
+            !atBottomRef.current
+        ) {
+            return;
         }
-    }, [newestKey, messages, currentUserId]);
+        listRef.current?.scrollToOffset({
+            offset: 0,
+            animated: previousId !== null,
+        });
+    }, [newestConfirmedId, messages, currentUserId]);
+
+    // The keyboard opening/closing resizes the list frame. While the user is at
+    // the live edge they must stay there: re-anchor on the newest row (offset 0
+    // on an inverted list) once the new frame has laid out, so the latest
+    // message always ends up just above the composer. Scrolled-up users keep
+    // their own offset untouched, and a drag in progress is never overridden.
+    const keyboardAnchorReadyRef = useRef(false);
+    useEffect((): (() => void) | undefined => {
+        if (!keyboardAnchorReadyRef.current) {
+            keyboardAnchorReadyRef.current = true;
+            return undefined;
+        }
+        const frame = requestAnimationFrame((): void => {
+            if (atBottomRef.current && !userScrollingRef.current) {
+                listRef.current?.scrollToOffset({
+                    offset: 0,
+                    animated: false,
+                });
+            }
+        });
+        return (): void => cancelAnimationFrame(frame);
+    }, [keyboardVisible, keyboardHeight]);
 
     const scrollToBottom = (): void => {
         atBottomRef.current = true;
@@ -724,6 +798,34 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
             }, HIGHLIGHT_MS);
         }, 50);
     };
+
+    // "Go to message" from the full player: jump to the track's bubble. The
+    // handler lives in a ref so the registration survives message updates.
+    const musicJumpRef = useRef<(messageKey: string) => void>(() => undefined);
+    musicJumpRef.current = (messageKey: string): void => {
+        const target = messages.find((message) => message.key === messageKey);
+        if (target?.id !== null && target?.id !== undefined) {
+            performJump(target.id);
+            return;
+        }
+        showJumpNotice('This message is no longer available');
+    };
+    useEffect(
+        (): (() => void) =>
+            registerMusicJumpHandler(chatId, (messageKey): void => {
+                musicJumpRef.current(messageKey);
+            }),
+        [chatId],
+    );
+    // A request left while another chat was open is consumed once this chat
+    // has its messages (the player navigated here).
+    useEffect((): void => {
+        if (messages.length === 0) return;
+        const messageKey = consumeMusicJumpRequest(chatId);
+        if (messageKey !== null) {
+            musicJumpRef.current(messageKey);
+        }
+    }, [chatId, messages.length]);
 
     const handleReplyPress = (replyId: number): void => {
         cancelJump();
@@ -917,6 +1019,13 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                     )
                 ) {
                     stopVoice();
+                }
+                // Music: deleting the playing track does not stop playback —
+                // the live queue sync skips to the next track in the order.
+                for (const attachment of target.attachments) {
+                    if (attachment.kind === 'music' && attachment.id !== null) {
+                        evictAudioDownload(attachment.id);
+                    }
                 }
                 void conversation
                     .remove(messageId)
@@ -1166,6 +1275,15 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         }
     };
 
+    const handleListLayout = useCallback(
+        (event: LayoutChangeEvent): void => {
+            const height = Math.round(event.nativeEvent.layout.height);
+            setListHeight((current) => (current === height ? current : height));
+            scrollToLatestButton.onLayout(event);
+        },
+        [scrollToLatestButton.onLayout],
+    );
+
     const handleListScroll = (
         event: NativeSyntheticEvent<NativeScrollEvent>,
     ): void => {
@@ -1248,6 +1366,112 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         }, 700);
     };
 
+    // ── Stable FlatList identity ────────────────────────────────────────────
+    // FlatList re-renders every visible cell when `renderItem`, `keyExtractor`
+    // or `extraData` changes identity. These are therefore created once (or
+    // memoized on their real inputs) and the row renderer is read through a
+    // ref, so unrelated re-renders never touch the message rows.
+    const rowRendererRef = useRef<(info: { item: List }) => React.ReactElement>(
+        () => null as unknown as React.ReactElement,
+    );
+    const renderItem = useCallback(
+        (info: { item: List }): React.ReactElement =>
+            rowRendererRef.current(info),
+        [],
+    );
+    const keyExtractor = useCallback(
+        (chunk: List): string =>
+            chunk.kind === 'message'
+                ? `m-${chunk.message.key}`
+                : chunk.kind === 'unread'
+                  ? `u-${chunk.key}`
+                  : `d-${chunk.key}`,
+        [],
+    );
+    const listExtraData = useMemo(
+        (): string => `${selecting}:${[...selectedIds].join(',')}`,
+        [selecting, selectedIds],
+    );
+
+    // ── Full-screen list geometry ────────────────────────────────────────────
+    // The header and the composer float over the list, so the list only needs
+    // to keep its content clear of them:
+    //   · `headerHeight`    = measured header layer (safe-area top + pill)
+    //   · `bottomMargin`    = where the composer layer is anchored above the
+    //     window bottom, i.e. the part of the composer stack that is inside the
+    //     list frame
+    //   · `composerBottom`  = the same anchor plus the Android keyboard inset,
+    //     which only positions the composer layer (the list frame is already
+    //     shortened by that inset)
+    //
+    // `chatListGeometry` derives the padding/fade values from the OVERLAP of
+    // the composer stack with the list frame. The keyboard moves the composer
+    // up and shortens the frame by the same amount, so the overlap — and every
+    // value below — stays identical whether the keyboard is open or closed.
+    // Counting the keyboard a second time here is what used to make the padding
+    // fill the whole frame (and the fade mask every message out) when the IME
+    // opened.
+    const bottomMargin = Math.max(insets.bottom, spacing.xs);
+    const composerBottom = bottomMargin + (keyboard.open ? keyboard.inset : 0);
+    const geometry = chatListGeometry({
+        headerHeight,
+        composerHeight,
+        noticesHeight,
+        bottomMargin,
+        musicBarStrip: musicBarShown ? MUSIC_BAR_LIFT : 0,
+        fadeExtra: FADE_EXTRA,
+        gap: LIST_GAP,
+        listHeight,
+    });
+    /** `geometry.headerStrip` is the VISUAL top edge (header + mini bar). */
+    const listPaddingTop = geometry.listPaddingTop;
+    /** Inverse: paddingBottom is the VISUAL top (header/mini-bar side). While
+     * the mini bar shows, that strip grows by exactly the bar's lift — as ONE
+     * discrete, rounded value, never per animation frame (the bar animates
+     * with transforms/opacity in its own layer). It sits on the far end of an
+     * inverted list, so the change cannot move the visible content and needs
+     * no scroll-offset compensation. */
+    const listPaddingBottom = geometry.listPaddingBottom;
+    const topFade = geometry.topFade;
+    const bottomFade = geometry.bottomFade;
+    // Memoized style object: same identity until a measured value really
+    // changes, so FlatList is never asked to re-measure the content because of
+    // an unrelated render.
+    const listContentStyle = useMemo(
+        (): StyleProp<ViewStyle> => [
+            styles.listContent,
+            {
+                paddingTop: listPaddingTop,
+                paddingBottom: listPaddingBottom,
+            },
+        ],
+        [listPaddingTop, listPaddingBottom],
+    );
+    // Native scrollbar stays between the header/bar strip and the composer.
+    const indicatorInsets = useMemo(
+        (): { top: number; bottom: number } => ({
+            top: geometry.indicatorTop,
+            bottom: geometry.indicatorBottom,
+        }),
+        [geometry.indicatorTop, geometry.indicatorBottom],
+    );
+    const hasNotices =
+        conversation.sendError !== null ||
+        conversation.reactionError !== null ||
+        jumpNotice !== null ||
+        socketState === 'disconnected';
+    // The scroll-to-latest button lives in the full-screen list layer, so its
+    // bottom offset is measured from the window edge: on iOS the list frame is
+    // lifted by the keyboard while the layer is not, on Android the resized
+    // window already moves that edge.
+    const scrollButtonBottom =
+        (Platform.OS === 'ios' && keyboardVisible
+            ? keyboardHeight
+            : composerBottom) +
+        composerHeight +
+        noticesHeight +
+        spacing.sm;
+
     // Without a session user id nothing can be classified as mine: wait for it
     // instead of rendering every bubble on the wrong side. This is session
     // state (not the profile query), so a profile/me refetch never returns here.
@@ -1306,50 +1530,116 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         </>
     );
 
-    // ── Full-screen list geometry ────────────────────────────────────────────
-    // The header and the composer float over the list, so the list only needs
-    // to keep its content clear of them:
-    //   · `headerHeight`   = measured header layer (safe-area top + pill)
-    //   · `composerReach`  = measured composer + notices + the bottom inset it
-    //     floats above (that inset is already outside the list frame while the
-    //     keyboard lifts it)
-    //   · `composerBottom` = where the composer layer is anchored; it follows
-    //     the keyboard exactly like the old Screen padding did (the Android
-    //     `keyboard.inset` is the part the native window did not already
-    //     shrink by, so it is never applied twice).
-    const composerBottom =
-        Math.max(insets.bottom, spacing.xs) +
-        (keyboard.open ? keyboard.inset : 0);
-    // On iOS the list's KeyboardAvoidingView lifts the frame's bottom to the
-    // keyboard, so the bottom inset/margin under the composer is already
-    // outside it. On Android the frame's bottom stays the window edge (the
-    // native resize only moves that edge), so the composer's own bottom offset
-    // is still inside and must be cleared.
-    const keyboardLifted = keyboardVisible && Platform.OS === 'ios';
-    const composerReach =
-        composerHeight + noticesHeight + (keyboardLifted ? 0 : composerBottom);
-    /** Inverted list: paddingTop is the VISUAL bottom (composer side). */
-    const listPaddingTop = Math.round(composerReach + 12);
-    /** Inverse: paddingBottom is the VISUAL top (header side). */
-    const listPaddingBottom = Math.round(headerHeight + 12);
-    const topFade = Math.round(headerHeight + FADE_EXTRA);
-    const bottomFade = Math.round(composerReach + FADE_EXTRA);
-    const hasNotices =
-        conversation.sendError !== null ||
-        conversation.reactionError !== null ||
-        jumpNotice !== null ||
-        socketState === 'disconnected';
-    // The scroll-to-latest button lives in the full-screen list layer, so its
-    // bottom offset is measured from the window edge: on iOS the list frame is
-    // lifted by the keyboard while the layer is not, on Android the resized
-    // window already moves that edge.
-    const scrollButtonBottom =
-        (Platform.OS === 'ios' && keyboardVisible
-            ? keyboardHeight
-            : composerBottom) +
-        composerHeight +
-        noticesHeight +
-        spacing.sm;
+    // Row renderer kept OUT of the list props: it is read through a ref by a
+    // permanently stable `renderItem`, so a re-render of this screen can
+    // never hand FlatList a new renderer (that re-renders every visible row).
+    const renderRow = ({ item }: { item: List }): React.ReactElement => {
+        if (item.kind === 'unread') {
+            return (
+                <View style={styles.daySlot}>
+                    <UnreadDivider />
+                </View>
+            );
+        }
+        if (item.kind === 'day') {
+            return (
+                <View style={styles.daySlot}>
+                    <DateSeparator label={item.label} />
+                </View>
+            );
+        }
+        const message = item.message;
+        // Both ids normalized to numbers (a bigint-string
+        // id can never flip the whole history to "theirs").
+        const mine = isOwnMessage(currentUserId, message.senderId);
+        return (
+            <MessageBubble
+                message={message}
+                mine={mine}
+                isGroup={isGroup}
+                musicQueue={musicQueue}
+                currentUserId={currentUserId}
+                showSenderName={item.showSenderName}
+                showAvatar={item.showAvatar}
+                onOpenLink={selecting ? undefined : handleOpenLink}
+                onOpenProfile={
+                    selecting
+                        ? undefined
+                        : (sender): void => {
+                              openUserProfile({
+                                  userId: sender.senderId,
+                                  name: sender.senderName,
+                                  avatar: sender.senderAvatarPath,
+                              });
+                          }
+                }
+                onForwardedProfilePress={(userId, forwardedName): void => {
+                    openUserProfile({
+                        userId,
+                        name: forwardedName,
+                        isSelf: isOwnMessage(currentUserId, userId),
+                    });
+                }}
+                selectionMode={selecting}
+                selected={message.id !== null && selectedIds.has(message.id)}
+                onToggleSelect={handleToggleSelection}
+                highlighted={highlightedKey === message.key}
+                othersLastSeenId={detail?.othersLastSeenId ?? null}
+                // Tap or hold on the bubble opens the
+                // floating menu; pending/failed bubbles
+                // keep their own retry/cancel actions.
+                onOpenMenu={selecting ? undefined : openMessageMenu}
+                accessibilityActions={
+                    selecting ? undefined : accessibilityActionsFor(message)
+                }
+                onAccessibilityAction={
+                    selecting
+                        ? undefined
+                        : (name): void =>
+                              handleBubbleAccessibilityAction(message, name)
+                }
+                onReplyPress={selecting ? undefined : handleReplyPress}
+                onRetryFailed={
+                    selecting
+                        ? undefined
+                        : (failed): void => conversation.retrySend(failed.key)
+                }
+                onRetryPending={
+                    selecting
+                        ? undefined
+                        : (pending): void => conversation.retrySend(pending.key)
+                }
+                onCancelPending={
+                    selecting
+                        ? undefined
+                        : (pending): void =>
+                              conversation.cancelSend(pending.key)
+                }
+                onRemovePending={
+                    selecting
+                        ? undefined
+                        : (pending): void =>
+                              conversation.cancelSend(pending.key)
+                }
+                onOpenMedia={selecting ? undefined : openMedia}
+                onToggleReaction={
+                    selecting
+                        ? undefined
+                        : (message, emoji): void => {
+                              if (message.id === null) {
+                                  return;
+                              }
+                              void conversation.toggleReaction(
+                                  message.id,
+                                  emoji,
+                              );
+                          }
+                }
+                onOpenReactions={selecting ? undefined : openReactionsList}
+            />
+        );
+    };
+    rowRendererRef.current = renderRow;
 
     return (
         <Screen
@@ -1479,79 +1769,43 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                         {/* Soft edge fade at both ends. MaskedView (not overlay
                         gradients) because the Screen background is painted
                         with ambient shapes that must show through the fade. */}
-                        <MaskedViewSafe
+                        <EdgeFadeView
                             style={styles.list}
-                            maskElement={
-                                <View style={StyleSheet.absoluteFill}>
-                                    <LinearGradient
-                                        colors={FADE_STOPS.colors}
-                                        locations={FADE_STOPS.locations}
-                                        style={[
-                                            styles.fadeBand,
-                                            { top: 0, height: topFade },
-                                        ]}
-                                    />
-                                    <View
-                                        style={[
-                                            styles.fadeOpaque,
-                                            {
-                                                top: topFade,
-                                                bottom: bottomFade,
-                                            },
-                                        ]}
-                                    />
-                                    <LinearGradient
-                                        colors={FADE_STOPS.colors}
-                                        locations={FADE_STOPS.locations}
-                                        start={{ x: 0.5, y: 1 }}
-                                        end={{ x: 0.5, y: 0 }}
-                                        style={[
-                                            styles.fadeBand,
-                                            { bottom: 0, height: bottomFade },
-                                        ]}
-                                    />
-                                </View>
-                            }
+                            topFade={topFade}
+                            bottomFade={bottomFade}
                         >
                             <FlatList
                                 ref={listRef}
                                 inverted={true}
                                 style={styles.list}
-                                contentContainerStyle={[
-                                    styles.listContent,
-                                    {
-                                        paddingTop: listPaddingTop,
-                                        paddingBottom: listPaddingBottom,
-                                    },
-                                ]}
-                                // Native scrollbar stays between header and composer.
-                                scrollIndicatorInsets={{
-                                    top: Math.round(headerHeight),
-                                    bottom: Math.round(composerReach),
-                                }}
-                                keyExtractor={(chunk): string =>
-                                    chunk.kind === 'message'
-                                        ? `m-${chunk.message.key}`
-                                        : chunk.kind === 'unread'
-                                          ? `u-${chunk.key}`
-                                          : `d-${chunk.key}`
-                                }
+                                contentContainerStyle={listContentStyle}
+                                scrollIndicatorInsets={indicatorInsets}
+                                keyExtractor={keyExtractor}
                                 keyboardShouldPersistTaps="handled"
+                                // Scrolling or tapping the list never closes the
+                                // keyboard: only the system back gesture (or an
+                                // explicit action) does.
+                                keyboardDismissMode="none"
                                 onScrollBeginDrag={(): void => {
+                                    userScrollingRef.current = true;
                                     cancelJump();
                                     scrollToLatestButton.cancelScrollToBottom();
-                                    // The popup was measured against the current
-                                    // layout: dismissing the keyboard mid-gesture would
-                                    // relayout the list under a fresh anchor. Once the
-                                    // overlay is up the list cannot scroll anyway.
-                                    if (!popup.isOpen()) {
-                                        Keyboard.dismiss();
-                                    }
+                                }}
+                                // The user owns the list until the gesture (and
+                                // its momentum) is over; auto-scroll stays out.
+                                onScrollEndDrag={(): void => {
+                                    userScrollingRef.current = false;
+                                }}
+                                onMomentumScrollBegin={(): void => {
+                                    userScrollingRef.current = true;
+                                }}
+                                onMomentumScrollEnd={(): void => {
+                                    userScrollingRef.current = false;
                                 }}
                                 onScroll={handleListScroll}
                                 onViewableItemsChanged={onViewableItemsChanged}
                                 viewabilityConfig={viewabilityConfig}
-                                onLayout={scrollToLatestButton.onLayout}
+                                onLayout={handleListLayout}
                                 onContentSizeChange={
                                     scrollToLatestButton.onContentSizeChange
                                 }
@@ -1579,208 +1833,52 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                                     }, 120);
                                 }}
                                 ListFooterComponent={
-                                    conversation.loadingOlder ? (
-                                        <View style={styles.olderRow}>
-                                            <ActivityIndicator
-                                                size="small"
-                                                color={palette.primary[500]}
-                                            />
-                                        </View>
-                                    ) : conversation.loadOlderError ===
-                                      NO_MORE_SAVED_MESSAGES ? (
-                                        <View style={styles.olderRow}>
-                                            <Text style={styles.olderRetryText}>
-                                                No more saved messages
-                                            </Text>
-                                        </View>
-                                    ) : conversation.loadOlderError !== null ? (
-                                        <Pressable
-                                            accessibilityRole="button"
-                                            accessibilityLabel="Retry loading older messages"
-                                            style={styles.olderRow}
-                                            onPress={(): void =>
-                                                conversation.loadOlder()
-                                            }
-                                        >
-                                            <Text style={styles.olderRetryText}>
-                                                Couldn&apos;t load older
-                                                messages · Retry
-                                            </Text>
-                                        </Pressable>
-                                    ) : undefined
-                                }
-                                data={reversedListData}
-                                extraData={`${selecting}:${[...selectedIds].join(',')}`}
-                                renderItem={({ item }): React.ReactElement => {
-                                    if (item.kind === 'unread') {
-                                        return (
-                                            <View style={styles.daySlot}>
-                                                <UnreadDivider />
-                                            </View>
-                                        );
-                                    }
-                                    if (item.kind === 'day') {
-                                        return (
-                                            <View style={styles.daySlot}>
-                                                <DateSeparator
-                                                    label={item.label}
+                                    <>
+                                        {conversation.loadingOlder ? (
+                                            <View style={styles.olderRow}>
+                                                <ActivityIndicator
+                                                    size="small"
+                                                    color={palette.primary[500]}
                                                 />
                                             </View>
-                                        );
-                                    }
-                                    const message = item.message;
-                                    // Both ids normalized to numbers (a bigint-string
-                                    // id can never flip the whole history to "theirs").
-                                    const mine = isOwnMessage(
-                                        currentUserId,
-                                        message.senderId,
-                                    );
-                                    return (
-                                        <MessageBubble
-                                            message={message}
-                                            mine={mine}
-                                            isGroup={isGroup}
-                                            currentUserId={currentUserId}
-                                            showSenderName={item.showSenderName}
-                                            showAvatar={item.showAvatar}
-                                            onOpenLink={
-                                                selecting
-                                                    ? undefined
-                                                    : handleOpenLink
-                                            }
-                                            onOpenProfile={
-                                                selecting
-                                                    ? undefined
-                                                    : (sender): void => {
-                                                          openUserProfile({
-                                                              userId: sender.senderId,
-                                                              name: sender.senderName,
-                                                              avatar: sender.senderAvatarPath,
-                                                          });
-                                                      }
-                                            }
-                                            onForwardedProfilePress={(
-                                                userId,
-                                                forwardedName,
-                                            ): void => {
-                                                openUserProfile({
-                                                    userId,
-                                                    name: forwardedName,
-                                                    isSelf: isOwnMessage(
-                                                        currentUserId,
-                                                        userId,
-                                                    ),
-                                                });
-                                            }}
-                                            selectionMode={selecting}
-                                            selected={
-                                                message.id !== null &&
-                                                selectedIds.has(message.id)
-                                            }
-                                            onToggleSelect={
-                                                handleToggleSelection
-                                            }
-                                            highlighted={
-                                                highlightedKey === message.key
-                                            }
-                                            othersLastSeenId={
-                                                detail?.othersLastSeenId ?? null
-                                            }
-                                            // Tap or hold on the bubble opens the
-                                            // floating menu; pending/failed bubbles
-                                            // keep their own retry/cancel actions.
-                                            onOpenMenu={
-                                                selecting
-                                                    ? undefined
-                                                    : openMessageMenu
-                                            }
-                                            accessibilityActions={
-                                                selecting
-                                                    ? undefined
-                                                    : accessibilityActionsFor(
-                                                          message,
-                                                      )
-                                            }
-                                            onAccessibilityAction={
-                                                selecting
-                                                    ? undefined
-                                                    : (name): void =>
-                                                          handleBubbleAccessibilityAction(
-                                                              message,
-                                                              name,
-                                                          )
-                                            }
-                                            onReplyPress={
-                                                selecting
-                                                    ? undefined
-                                                    : handleReplyPress
-                                            }
-                                            onRetryFailed={
-                                                selecting
-                                                    ? undefined
-                                                    : (failed): void =>
-                                                          conversation.retrySend(
-                                                              failed.key,
-                                                          )
-                                            }
-                                            onRetryPending={
-                                                selecting
-                                                    ? undefined
-                                                    : (pending): void =>
-                                                          conversation.retrySend(
-                                                              pending.key,
-                                                          )
-                                            }
-                                            onCancelPending={
-                                                selecting
-                                                    ? undefined
-                                                    : (pending): void =>
-                                                          conversation.cancelSend(
-                                                              pending.key,
-                                                          )
-                                            }
-                                            onRemovePending={
-                                                selecting
-                                                    ? undefined
-                                                    : (pending): void =>
-                                                          conversation.cancelSend(
-                                                              pending.key,
-                                                          )
-                                            }
-                                            onOpenMedia={
-                                                selecting
-                                                    ? undefined
-                                                    : openMedia
-                                            }
-                                            onToggleReaction={
-                                                selecting
-                                                    ? undefined
-                                                    : (
-                                                          message,
-                                                          emoji,
-                                                      ): void => {
-                                                          if (
-                                                              message.id ===
-                                                              null
-                                                          ) {
-                                                              return;
-                                                          }
-                                                          void conversation.toggleReaction(
-                                                              message.id,
-                                                              emoji,
-                                                          );
-                                                      }
-                                            }
-                                            onOpenReactions={
-                                                selecting
-                                                    ? undefined
-                                                    : openReactionsList
-                                            }
-                                        />
-                                    );
-                                }}
+                                        ) : conversation.loadOlderError ===
+                                          NO_MORE_SAVED_MESSAGES ? (
+                                            <View style={styles.olderRow}>
+                                                <Text
+                                                    style={
+                                                        styles.olderRetryText
+                                                    }
+                                                >
+                                                    No more saved messages
+                                                </Text>
+                                            </View>
+                                        ) : conversation.loadOlderError !==
+                                          null ? (
+                                            <Pressable
+                                                accessibilityRole="button"
+                                                accessibilityLabel="Retry loading older messages"
+                                                style={styles.olderRow}
+                                                onPress={(): void =>
+                                                    conversation.loadOlder()
+                                                }
+                                            >
+                                                <Text
+                                                    style={
+                                                        styles.olderRetryText
+                                                    }
+                                                >
+                                                    Couldn&apos;t load older
+                                                    messages · Retry
+                                                </Text>
+                                            </Pressable>
+                                        ) : undefined}
+                                    </>
+                                }
+                                data={reversedListData}
+                                extraData={listExtraData}
+                                renderItem={renderItem}
                             />
-                        </MaskedViewSafe>
+                        </EdgeFadeView>
                         {jumpLoadingId !== null && (
                             <View
                                 style={[
@@ -1891,7 +1989,6 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                 onClose={(): void => setForwardOpen(false)}
                 onFinished={handleForwardFinished}
             />
-
         </Screen>
     );
 }
@@ -2084,14 +2181,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         gap: spacing.xxs,
         paddingBottom: spacing.xxs,
-    },
-    // Mask bands for the list's edge fade (alpha mask: opaque in the middle).
-    fadeBand: { position: 'absolute', left: 0, right: 0 },
-    fadeOpaque: {
-        position: 'absolute',
-        left: 0,
-        right: 0,
-        backgroundColor: 'black',
     },
     selectionBar: {
         flexDirection: 'row',

@@ -86,6 +86,14 @@ export async function revokeInviteLink(
     };
 }
 
+function toInviteRole(
+    role: string | null | undefined,
+): InvitePreview['myRole'] {
+    return role === 'owner' || role === 'admin' || role === 'member'
+        ? role
+        : null;
+}
+
 export async function previewInvite(code: string): Promise<InvitePreview> {
     const response = await httpClient.get<InvitePreview>(
         `/invites/${encodeURIComponent(code)}`,
@@ -96,6 +104,10 @@ export async function previewInvite(code: string): Promise<InvitePreview> {
         avatar: response.data.avatar ?? null,
         membersCount: number(response.data.membersCount) || 0,
         alreadyMember: response.data.alreadyMember === true,
+        isMember:
+            response.data.isMember === true ||
+            response.data.alreadyMember === true,
+        myRole: toInviteRole(response.data.myRole),
         chatId:
             response.data.chatId === null || response.data.chatId === undefined
                 ? null
@@ -112,5 +124,6 @@ export async function joinInvite(code: string): Promise<JoinInviteResult> {
         title: response.data.title ?? '',
         joined: response.data.joined === true,
         alreadyMember: response.data.alreadyMember === true,
+        role: toInviteRole(response.data.role),
     };
 }

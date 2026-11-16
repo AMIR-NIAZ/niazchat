@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Pressable,
@@ -16,9 +16,13 @@ import {
     radii,
     spacing,
 } from '../../shared/components';
+import { toast } from '../../shared/dialog';
+import { ApiError } from '../../core/api';
 import { useAuthStore } from '../../features/auth';
 import { CHATS_QUERY_KEY } from '../../features/chats/use-chats';
 import { describeInviteJoinError } from '../../features/groups/group-errors';
+import { useGroupMembership } from '../../features/groups/use-group-membership';
+import { groupInfoQueryKey } from '../../features/groups/group-model';
 import {
     isInviteCode,
     type InvitePreview,
@@ -77,6 +81,18 @@ function JoinPanel({ code }: { code: string }): React.ReactElement {
     const joinInvite = useJoinInvite(code);
     const [joinError, setJoinError] = useState<string | null>(null);
 
+    const preview = previewQuery.data;
+    // The preview already carries the caller's server answer, so a member is
+    // decided before any join UI renders; the cached chat list is the offline
+    // fallback for a cold preview.
+    const membership = useGroupMembership(preview?.chatId ?? null, {
+        hint:
+            preview === undefined
+                ? null
+                : { isMember: preview.isMember, myRole: preview.myRole },
+    });
+    const redirectedRef = useRef(false);
+
     const openChat = (chatId: number | null): void => {
         if (chatId === null) return;
         router.replace({
@@ -85,21 +101,60 @@ function JoinPanel({ code }: { code: string }): React.ReactElement {
         });
     };
 
+    // Members go straight into the chat: no join screen, no dialog.
+    useEffect((): void => {
+        if (
+            redirectedRef.current ||
+            membership !== 'member' ||
+            preview === undefined ||
+            preview.chatId === null
+        ) {
+            return;
+        }
+        redirectedRef.current = true;
+        toast.show("You're already a member");
+        router.replace({
+            pathname: '/(app)/chat/[chatId]',
+            params: { chatId: String(preview.chatId) },
+        });
+    }, [membership, preview]);
+
     const join = async (): Promise<void> => {
         if (joinInvite.isPending) return;
         setJoinError(null);
         try {
             const result = await joinInvite.mutateAsync();
-            await queryClient.invalidateQueries({
-                queryKey: CHATS_QUERY_KEY,
-            });
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: CHATS_QUERY_KEY }),
+                queryClient.invalidateQueries({
+                    queryKey: groupInfoQueryKey(result.chatId),
+                }),
+            ]);
+            if (result.alreadyMember) {
+                toast.show("You're already a member");
+            }
             openChat(result.chatId);
         } catch (error) {
+            // Defensive: an older backend may answer "already a member" as an
+            // error. Treat it as success and open the chat (idempotent join).
+            if (isAlreadyMemberError(error) && preview?.chatId != null) {
+                const chatId = preview.chatId;
+                await queryClient.invalidateQueries({
+                    queryKey: CHATS_QUERY_KEY,
+                });
+                toast.show("You're already a member");
+                openChat(chatId);
+                return;
+            }
             setJoinError(describeInviteJoinError(error));
         }
     };
 
-    const preview = previewQuery.data;
+    const banned =
+        membership === 'banned' ||
+        (previewQuery.isError &&
+            previewQuery.error instanceof ApiError &&
+            previewQuery.error.statusCode === 403);
 
     return (
         <Screen style={styles.screen} withTopInset={true}>
@@ -116,13 +171,34 @@ function JoinPanel({ code }: { code: string }): React.ReactElement {
                 <View style={styles.topBarSpacer} />
             </View>
 
-            {previewQuery.isPending ? (
+            {previewQuery.isPending ||
+            membership === 'unknown' ||
+            membership === 'member' ? (
                 <View style={styles.centered}>
                     <ActivityIndicator
                         size="large"
                         color={palette.primary[500]}
                     />
                     <AppText variant="caption">Opening invite link…</AppText>
+                </View>
+            ) : banned ? (
+                <View style={styles.centered}>
+                    <Text style={styles.stateTitle}>
+                        You can't join this group
+                    </Text>
+                    <Text style={styles.stateDetail}>
+                        Ask an admin to unban you before you try again.
+                    </Text>
+                    <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Back to chats"
+                        style={styles.primaryButton}
+                        onPress={(): void => router.replace('/(app)')}
+                    >
+                        <Text style={styles.primaryButtonText}>
+                            Back to chats
+                        </Text>
+                    </Pressable>
                 </View>
             ) : previewQuery.isError || preview === undefined ? (
                 <View style={styles.centered}>
@@ -159,10 +235,17 @@ function JoinPanel({ code }: { code: string }): React.ReactElement {
                     onJoin={(): void => {
                         void join();
                     }}
-                    onOpenChat={(): void => openChat(preview.chatId)}
                 />
             )}
         </Screen>
+    );
+}
+
+function isAlreadyMemberError(error: unknown): boolean {
+    return (
+        error instanceof ApiError &&
+        (error.statusCode === 400 || error.statusCode === 409) &&
+        /already a member/i.test(error.message)
     );
 }
 
@@ -171,7 +254,6 @@ function JoinPreviewCard(props: {
     busy: boolean;
     error: string | null;
     onJoin: () => void;
-    onOpenChat: () => void;
 }): React.ReactElement {
     const { preview } = props;
     const memberLabel = `${preview.membersCount} member${
@@ -210,45 +292,28 @@ function JoinPreviewCard(props: {
                     </Text>
                 )}
 
-                {preview.alreadyMember ? (
-                    <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Open chat"
-                        onPress={props.onOpenChat}
-                        style={({ pressed }) => [
-                            styles.primaryButton,
-                            styles.wideButton,
-                            pressed && styles.primaryButtonPressed,
-                        ]}
-                    >
-                        <Text style={styles.primaryButtonText}>Open chat</Text>
-                    </Pressable>
-                ) : (
-                    <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Join group"
-                        accessibilityState={{ disabled: props.busy }}
-                        disabled={props.busy}
-                        onPress={props.onJoin}
-                        style={({ pressed }) => [
-                            styles.primaryButton,
-                            styles.wideButton,
-                            pressed && styles.primaryButtonPressed,
-                            props.busy && styles.primaryButtonDisabled,
-                        ]}
-                    >
-                        {props.busy ? (
-                            <ActivityIndicator
-                                size="small"
-                                color={palette.text.onAccent}
-                            />
-                        ) : (
-                            <Text style={styles.primaryButtonText}>
-                                Join group
-                            </Text>
-                        )}
-                    </Pressable>
-                )}
+                <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Join group"
+                    accessibilityState={{ disabled: props.busy }}
+                    disabled={props.busy}
+                    onPress={props.onJoin}
+                    style={({ pressed }) => [
+                        styles.primaryButton,
+                        styles.wideButton,
+                        pressed && styles.primaryButtonPressed,
+                        props.busy && styles.primaryButtonDisabled,
+                    ]}
+                >
+                    {props.busy ? (
+                        <ActivityIndicator
+                            size="small"
+                            color={palette.text.onAccent}
+                        />
+                    ) : (
+                        <Text style={styles.primaryButtonText}>Join group</Text>
+                    )}
+                </Pressable>
             </View>
         </View>
     );

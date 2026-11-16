@@ -15,12 +15,17 @@ export interface UploadedAttachment {
     originalName: string;
     mimeType: string;
     size: number;
-    kind: 'image' | 'video' | 'voice' | 'file';
+    kind: 'image' | 'video' | 'voice' | 'music' | 'file';
     width?: number;
     height?: number;
     duration?: number;
     hasPoster?: boolean;
     waveform?: number[];
+    /** Music only. */
+    title?: string;
+    artist?: string | null;
+    durationSeconds?: number | null;
+    coverUrl?: string | null;
 }
 
 interface UploadEnvelope {
@@ -48,11 +53,13 @@ function serverMessageOf(body: UploadEnvelope | null): string | null {
 export function uploadFailureReason(
     status: number,
     body: UploadEnvelope | null,
-    kind?: 'image' | 'video' | 'voice' | 'file',
+    kind?: 'image' | 'video' | 'voice' | 'music' | 'file',
 ): string {
     const server = serverMessageOf(body);
     if (status === 413) {
-        return kind === 'voice' ? 'Voice message too large' : 'File too large';
+        if (kind === 'voice') return 'Voice message too large';
+        if (kind === 'music') return 'Music file too large';
+        return 'File too large';
     }
     if (status === 401) return 'Session expired';
     if (status === 403 || status === 404)

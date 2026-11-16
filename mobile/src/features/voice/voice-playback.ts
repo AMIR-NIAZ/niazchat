@@ -8,6 +8,11 @@ import {
 } from 'expo-audio';
 import { nextSpeed } from './playback-model';
 import { registerSessionCleanup } from '../../core/session/cleanup-registry';
+import {
+    claimAudioFocus,
+    registerAudioFocusOwner,
+    releaseAudioFocus,
+} from '../../shared/audio-focus';
 
 /**
  * One global voice player. Starting another voice pauses/releases the previous
@@ -97,6 +102,7 @@ function release(): void {
 /** Stops playback and releases the native player (no listeners left behind). */
 export function stopVoice(): void {
     release();
+    releaseAudioFocus('voice');
     state = { ...IDLE };
     emit();
 }
@@ -139,6 +145,8 @@ export async function playVoiceMessage(
         return;
     }
 
+    // Voice and music never play together: claim the focus first.
+    claimAudioFocus('voice');
     release();
     await playbackMode();
     const next = createAudioPlayer({ uri }, { updateInterval: 200 });
@@ -186,6 +194,9 @@ export function cycleVoiceSpeed(): void {
     player.setPlaybackRate(next, 'low');
     set({ rate: next });
 }
+
+// The music player takes the focus by pausing music; voice wins outright.
+registerAudioFocusOwner('voice', stopVoice);
 
 // Calls and other apps take the audio session: stop instead of playing on.
 AppState.addEventListener('change', (next): void => {

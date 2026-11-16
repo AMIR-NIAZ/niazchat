@@ -8,6 +8,10 @@ import { BLOCKED_EXTENSIONS } from '../attachment.constants';
  */
 
 export const MIME_BY_EXT: Record<string, string> = {
+    // audio-only containers (music tracks)
+    aac: 'audio/aac',
+    flac: 'audio/flac',
+    weba: 'audio/webm',
     // images
     png: 'image/png',
     jpg: 'image/jpeg',
@@ -61,6 +65,51 @@ export function extensionOf(name: string | undefined): string {
 
 export function isBlockedExtension(name: string | undefined): boolean {
     return BLOCKED_EXTENSIONS.includes(extensionOf(name));
+}
+
+/**
+ * Detects an audio container from magic bytes, or null. Only containers whose
+ * signature is unambiguous are recognised here: the client MIME type is never
+ * trusted, and an extension that does not match the real container is
+ * rejected by the upload service.
+ */
+export function detectAudioMimeType(buffer: Buffer): string | null {
+    if (buffer.length < 12) return null;
+    const ascii = (start: number, end: number): string =>
+        buffer.slice(start, end).toString('ascii');
+
+    if (ascii(0, 3) === 'ID3') {
+        return 'audio/mpeg';
+    }
+    if (buffer[0] === 0xff) {
+        // MPEG audio frame sync: second byte starts with 111 (0xE0).
+        if (((buffer[1] ?? 0) & 0xe0) === 0xe0) return 'audio/mpeg';
+        // ADTS AAC frame sync: second byte 1111 (0xF0).
+        if (((buffer[1] ?? 0) & 0xf6) === 0xf0) return 'audio/aac';
+    }
+    if (ascii(0, 4) === 'fLaC') {
+        return 'audio/flac';
+    }
+    if (ascii(0, 4) === 'OggS') {
+        // Ogg carries Vorbis or Opus; the container MIME is the same.
+        return 'audio/ogg';
+    }
+    if (ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WAVE') {
+        return 'audio/wav';
+    }
+    if (ascii(4, 8) === 'ftyp') {
+        const brand = ascii(8, 12);
+        if (brand === 'M4A ' || brand === 'M4B ') return 'audio/mp4';
+        // isom/mp42 may still be audio-only; the caller verifies the streams.
+        return brand === 'isom' || brand.startsWith('mp4')
+            ? 'audio/mp4'
+            : null;
+    }
+    if (buffer[0] === 0x1a && buffer[1] === 0x45 && buffer[2] === 0xdf && buffer[3] === 0xa3) {
+        // EBML (webm/matroska): audio or video, decided by the probe.
+        return 'audio/webm';
+    }
+    return null;
 }
 
 /** Detects a raster image format from magic bytes, or null. */

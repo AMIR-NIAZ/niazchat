@@ -18,6 +18,7 @@ import { Chat } from '../entities/chat.entity';
 import { ChatMember } from '../entities/chat_members.entity';
 import { Link } from '../entities/link.entity';
 import { RoleChat } from '../entities/role_chat.entity';
+import { type GroupRole, toGroupRole } from '../utils/group-members.util';
 import {
     canManageInviteLinks,
     ChatCallerContext,
@@ -68,7 +69,12 @@ export interface InvitePreviewResponse {
     avatar: string | null;
     membersCount: number;
     alreadyMember: boolean;
-    chatId: number | null;
+    /** Same value as `alreadyMember`, additive per-caller membership flag. */
+    isMember: boolean;
+    /** Caller's wire role, or null for non-members (`ban` never previews). */
+    myRole: GroupRole | null;
+    /** Always set now, so the app can open the chat without another request. */
+    chatId: number;
 }
 
 export interface JoinInviteResponse {
@@ -76,6 +82,8 @@ export interface JoinInviteResponse {
     title: string;
     joined: boolean;
     alreadyMember: boolean;
+    /** Caller's role after the call: `owner`/`admin`/`member`, else null. */
+    role: GroupRole | null;
 }
 
 interface CreateInviteLinkInput {
@@ -308,7 +316,9 @@ export class GroupInviteLinksService {
                 : null,
             membersCount: await this.membersCount(link.chat.id),
             alreadyMember,
-            chatId: alreadyMember ? Number(link.chat.id) : null,
+            isMember: alreadyMember,
+            myRole: toGroupRole(this.bestRoleName(rows)),
+            chatId: Number(link.chat.id),
         };
     }
 
@@ -351,11 +361,14 @@ export class GroupInviteLinksService {
                 }
                 const title = link.chat.title ?? '';
                 if (rows.length > 0) {
+                    // Idempotent: an existing member (any role except `ban`,
+                    // rejected above) never creates a row or consumes a use.
                     return {
                         chatId: Number(link.chat.id),
                         title,
                         joined: false,
                         alreadyMember: true,
+                        role: toGroupRole(this.bestRoleName(rows)),
                         wasNew: false,
                     };
                 }
@@ -402,6 +415,7 @@ export class GroupInviteLinksService {
                     title,
                     joined: true,
                     alreadyMember: false,
+                    role: 'member',
                     wasNew: true,
                 };
             },
@@ -421,6 +435,7 @@ export class GroupInviteLinksService {
             title: result.title,
             joined: result.joined,
             alreadyMember: result.alreadyMember,
+            role: result.role,
         };
     }
 

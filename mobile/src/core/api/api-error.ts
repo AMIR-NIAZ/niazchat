@@ -9,9 +9,9 @@
  */
 
 export interface ApiErrorEnvelope {
-  success: false;
-  statusCode: number;
-  message: string | string[];
+    success: false;
+    statusCode: number;
+    message: string | string[];
 }
 
 export type ApiValidationMessage = string;
@@ -21,24 +21,24 @@ export type ApiValidationMessage = string;
  * response interceptor for any non-2xx response (and network failures).
  */
 export class ApiError extends Error {
-  readonly statusCode: number;
-  /** Raw envelope `message` — a string, or string[] for validation errors. */
-  readonly rawMessage: string | string[];
-  /** True only for 403 (backend rewrites those to `user not access`). */
-  readonly isPermissionDenied: boolean;
-  /** True only for 401 (missing/expired access token or refresh failure). */
-  readonly isAuthError: boolean;
+    readonly statusCode: number;
+    /** Raw envelope `message` — a string, or string[] for validation errors. */
+    readonly rawMessage: string | string[];
+    /** True only for 403 (backend rewrites those to `user not access`). */
+    readonly isPermissionDenied: boolean;
+    /** True only for 401 (missing/expired access token or refresh failure). */
+    readonly isAuthError: boolean;
 
-  constructor(envelope: ApiErrorEnvelope) {
-    super(normalizeMessage(envelope.message));
-    this.name = 'ApiError';
-    this.statusCode = envelope.statusCode;
-    this.rawMessage = envelope.message;
-    this.isPermissionDenied = envelope.statusCode === 403;
-    this.isAuthError = envelope.statusCode === 401;
-  }
+    constructor(envelope: ApiErrorEnvelope) {
+        super(normalizeMessage(envelope.message));
+        this.name = 'ApiError';
+        this.statusCode = envelope.statusCode;
+        this.rawMessage = envelope.message;
+        this.isPermissionDenied = envelope.statusCode === 403;
+        this.isAuthError = envelope.statusCode === 401;
+    }
 }
 
 function normalizeMessage(message: string | string[]): string {
-  return Array.isArray(message) ? message.join('; ') : message;
+    return Array.isArray(message) ? message.join('; ') : message;
 }

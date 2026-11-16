@@ -22,6 +22,9 @@ const TypeMessages = [
     {
         name: TypeMessageEnum.VOICE,
     },
+    {
+        name: TypeMessageEnum.MUSIC,
+    },
 ];
 
 export class TypeMessageSeeder extends Seeder {

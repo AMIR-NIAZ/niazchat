@@ -24,3 +24,4 @@ export * from './groups-service';
 export * from './private-chat-service';
 export * from './open-private-chat';
 export * from './chat-search-model';
+export * from './search-recent';

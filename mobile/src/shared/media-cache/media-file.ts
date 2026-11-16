@@ -16,9 +16,7 @@ export interface MediaAttachmentRef {
  * normalising here keeps the download entry, the cache index and the React
  * subscription on the same key.
  */
-export function toKey(
-    id: number | string | null | undefined,
-): number | null {
+export function toKey(id: number | string | null | undefined): number | null {
     if (id === null || id === undefined) return null;
     const numeric = typeof id === 'number' ? id : Number(id);
     return Number.isFinite(numeric) ? numeric : null;
@@ -33,6 +31,19 @@ const IMAGE_EXTENSION_BY_MIME: Record<string, string> = {
     'image/heic': 'heic',
     'image/heif': 'heif',
     'image/avif': 'avif',
+};
+
+const AUDIO_EXTENSION_BY_MIME: Record<string, string> = {
+    'audio/mpeg': 'mp3',
+    'audio/mp4': 'm4a',
+    'audio/x-m4a': 'm4a',
+    'audio/aac': 'aac',
+    'audio/ogg': 'ogg',
+    'audio/opus': 'opus',
+    'audio/wav': 'wav',
+    'audio/x-wav': 'wav',
+    'audio/flac': 'flac',
+    'audio/webm': 'weba',
 };
 
 const VIDEO_EXTENSION_BY_MIME: Record<string, string> = {
@@ -57,12 +68,16 @@ export function mediaFileExtension(
     attachment: MediaAttachmentRef,
 ): string {
     const table =
-        kind === 'image' ? IMAGE_EXTENSION_BY_MIME : VIDEO_EXTENSION_BY_MIME;
+        kind === 'image'
+            ? IMAGE_EXTENSION_BY_MIME
+            : kind === 'video'
+              ? VIDEO_EXTENSION_BY_MIME
+              : AUDIO_EXTENSION_BY_MIME;
     const byMime = table[attachment.mimeType.toLowerCase()];
     if (byMime !== undefined) return byMime;
     const byName = extensionFromName(attachment.name);
     if (byName !== null) return byName;
-    return kind === 'image' ? 'jpg' : 'mp4';
+    return kind === 'image' ? 'jpg' : kind === 'video' ? 'mp4' : 'mp3';
 }
 
 /** Final cache file for an attachment, e.g. `documents/media-cache/videos/12.mp4`. */

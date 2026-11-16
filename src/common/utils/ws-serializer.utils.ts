@@ -34,6 +34,10 @@ function serializeAttachmentMeta(attachment: {
     posterPath?: string | null;
     voice?: boolean | null;
     waveform?: number[] | null;
+    title?: string | null;
+    artist?: string | null;
+    durationSeconds?: string | number | null;
+    coverPath?: string | null;
     createdAt?: Date;
 }) {
     const kind = attachmentKindOf(attachment.mimeType, attachment.voice);
@@ -66,6 +70,21 @@ function serializeAttachmentMeta(attachment: {
             : {}),
         ...(kind === 'voice'
             ? { waveform: normalizeWaveform(attachment.waveform) }
+            : {}),
+        ...(kind === 'music'
+            ? {
+                  title: attachment.title ?? attachment.originalName,
+                  artist: attachment.artist ?? null,
+                  durationSeconds:
+                      attachment.durationSeconds == null
+                          ? null
+                          : Number(attachment.durationSeconds),
+                  // Server-relative route; the app absolutizes it.
+                  coverUrl:
+                      attachment.coverPath == null
+                          ? null
+                          : `/attachments/${num(attachment.id)}/cover`,
+              }
             : {}),
         ...(attachment.createdAt !== undefined
             ? { createdAt: attachment.createdAt }
@@ -112,9 +131,22 @@ export function serializeReplyPreview(reply: Message | null | undefined) {
               ),
         attachmentDuration:
             !isDeleted &&
-            firstAttachment?.duration != null &&
-            Number.isFinite(Number(firstAttachment.duration))
-                ? Number(firstAttachment.duration)
+            (firstAttachment?.durationSeconds ?? firstAttachment?.duration) !=
+                null &&
+            Number.isFinite(
+                Number(
+                    firstAttachment?.durationSeconds ??
+                        firstAttachment?.duration,
+                ),
+            )
+                ? Number(
+                      firstAttachment?.durationSeconds ??
+                          firstAttachment?.duration,
+                  )
+                : null,
+        attachmentTitle:
+            !isDeleted && firstAttachment?.title != null
+                ? firstAttachment.title
                 : null,
         isDeleted,
     };
@@ -145,6 +177,8 @@ export function serializeChat(
         unreadCount?: number;
         peerName?: string | null;
         peer?: unknown;
+        myRole?: string | null;
+        isMember?: boolean;
     },
 ) {
     return {
@@ -160,6 +194,9 @@ export function serializeChat(
         avatars: (chat.avatars ?? []).slice(0, 1),
         type: chat.type,
         isBan: chat.isBan,
+        // Chat-list rows carry the caller's membership answer (additive).
+        ...(chat.myRole !== undefined ? { myRole: chat.myRole } : {}),
+        ...(chat.isMember !== undefined ? { isMember: chat.isMember } : {}),
         // Authoritative only on `getAllChats`; live list updates increment
         // locally in the app and resync on focus/reconnect. `chatInfo` sends 0.
         unreadCount: chat.unreadCount ?? 0,

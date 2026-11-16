@@ -3,7 +3,10 @@ import {
     MAX_ATTACHMENTS_PER_MESSAGE,
     MAX_ATTACHMENT_FILE_SIZE,
     MAX_ATTACHMENT_MESSAGE_SIZE,
+    MAX_MUSIC_FILE_SIZE,
     MAX_VIDEO_FILE_SIZE,
+    MUSIC_EXTENSIONS,
+    MUSIC_MIME_TYPES,
     VIDEO_EXTENSIONS,
 } from './constants';
 import type { AttachmentKind } from '../messages/messages-model';
@@ -67,12 +70,14 @@ export function validateNewAttachments(
         const limit =
             item.kind === 'video'
                 ? MAX_VIDEO_FILE_SIZE
-                : MAX_ATTACHMENT_FILE_SIZE;
+                : item.kind === 'music'
+                  ? MAX_MUSIC_FILE_SIZE
+                  : MAX_ATTACHMENT_FILE_SIZE;
         if (item.size > limit) {
             return {
                 accepted: [],
                 error:
-                    item.kind === 'video'
+                    item.kind === 'video' || item.kind === 'music'
                         ? `“${item.name}” is larger than 100 MB.`
                         : `“${item.name}” is larger than 20 MB.`,
             };
@@ -89,7 +94,7 @@ export function validateNewAttachments(
     return { accepted: [...candidates], error: null };
 }
 
-/** Attachment kind from a picker MIME type/name (server re-verifies images). */
+/** Attachment kind from a picker MIME type/name (server re-verifies content). */
 export function kindOfSelection(
     mimeType: string | null | undefined,
     name: string,
@@ -103,6 +108,11 @@ export function kindOfSelection(
     ) {
         return 'image';
     }
+    // Audio is checked BEFORE the video fallbacks: an audio-only MP4/WebM is a
+    // music track, and the music picker always reports an `audio/*` MIME.
+    if (MUSIC_MIME_TYPES.includes(mime)) {
+        return 'music';
+    }
     if (
         mime === 'video/mp4' ||
         mime === 'video/quicktime' ||
@@ -112,5 +122,6 @@ export function kindOfSelection(
     }
     const ext = extensionOfName(name);
     if (['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext)) return 'image';
-    return VIDEO_EXTENSIONS.includes(ext) ? 'video' : 'file';
+    if (VIDEO_EXTENSIONS.includes(ext)) return 'video';
+    return MUSIC_EXTENSIONS.includes(ext) ? 'music' : 'file';
 }

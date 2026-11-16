@@ -9,6 +9,7 @@ export * from './message-menu';
 export * from './bubble-press';
 export * from './message-bubble-preview';
 export * from './message-runs';
+export * from './chat-list-geometry';
 export * from './message-actions';
 export * from './messages-socket-api';
 export * from './use-chat-messages';

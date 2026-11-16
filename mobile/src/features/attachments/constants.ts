@@ -6,6 +6,8 @@
 export const MAX_ATTACHMENTS_PER_MESSAGE = 10;
 export const MAX_ATTACHMENT_FILE_SIZE = 20 * 1024 * 1024;
 export const MAX_VIDEO_FILE_SIZE = 100 * 1024 * 1024;
+/** Music tracks: 100 MB (the server parses the container). */
+export const MAX_MUSIC_FILE_SIZE = 100 * 1024 * 1024;
 /** Voice messages: 15 MB and 10 minutes (server tolerates 11). */
 export const MAX_VOICE_FILE_SIZE = 15 * 1024 * 1024;
 export const MAX_VOICE_DURATION_SECONDS = 10 * 60;
@@ -23,6 +25,34 @@ export const VIDEO_EXTENSIONS: readonly string[] = [
     'm4v',
     'mov',
     'webm',
+];
+
+/** Audio containers the server accepts as music (content is verified). */
+export const MUSIC_EXTENSIONS: readonly string[] = [
+    'mp3',
+    'm4a',
+    'mp4',
+    'aac',
+    'ogg',
+    'opus',
+    'wav',
+    'flac',
+    'weba',
+    'webm',
+];
+
+/** MIME types the server stores for a music track. */
+export const MUSIC_MIME_TYPES: readonly string[] = [
+    'audio/mpeg',
+    'audio/mp4',
+    'audio/x-m4a',
+    'audio/aac',
+    'audio/ogg',
+    'audio/opus',
+    'audio/wav',
+    'audio/x-wav',
+    'audio/flac',
+    'audio/webm',
 ];
 
 export const MAX_COMMENT_LENGTH = 5000;

@@ -359,3 +359,43 @@ CREATE UNIQUE INDEX IF NOT EXISTS "UQ_link_code"
   `createdByUserId` NULL means a legacy link with an unknown creator.
 - The unique index cannot fail on existing rows because `code` is already
   unique; no backfill is needed (the dev table has no rows).
+
+## Music attachments (`type: "music"`)
+
+Additive and nullable, so the statements are safe to re-run. Dev gets the four
+columns and the new catalog row from TypeORM `synchronize` + the startup seeder
+on the next backend restart; production applies the SQL below. (Never run these
+against the dev database yourself — this file is the hand-maintained production
+SQL.)
+
+```sql
+ALTER TABLE "attachments"
+    ADD COLUMN IF NOT EXISTS "title" character varying(255),
+    ADD COLUMN IF NOT EXISTS "artist" character varying(255),
+    ADD COLUMN IF NOT EXISTS "durationSeconds" numeric(10, 1),
+    ADD COLUMN IF NOT EXISTS "coverPath" character varying(255);
+```
+
+| Column            | Meaning                                                                  |
+| ----------------- | ------------------------------------------------------------------------ |
+| `title`           | Embedded tag title, or the file name without extension (never `NULL`).   |
+| `artist`          | Embedded tag artist; `NULL` means "Unknown artist" in the app.           |
+| `durationSeconds` | Container duration in seconds, one decimal; `NULL` when unparsable.      |
+| `coverPath`       | Server-relative WebP cover path (≤256 px); never sent on the wire.       |
+
+`kind: "music"` is derived in the serializer from the audio MIME type plus
+`voice IS NOT TRUE` (no enum change). `coverUrl` is derived from `coverPath` as
+`/attachments/<id>/cover`. The message-type catalog needs one new row; the
+`TypeMessageSeeder` inserts it on every startup, and this is the equivalent
+idempotent SQL:
+
+```sql
+INSERT INTO "type_messages" ("name", "createdAt", "updatedAt")
+VALUES ('music', now(), now())
+ON CONFLICT DO NOTHING;
+```
+
+No index is required: music tracks are found through their message id, exactly
+like images/videos/voice. `music-metadata` is a pure-JS dependency, so no
+system package is needed for music uploads (ffmpeg is still required for video
+and voice only).

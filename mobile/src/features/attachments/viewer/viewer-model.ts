@@ -1,4 +1,7 @@
-import type { AttachmentView, ChatMessage } from '../../messages/messages-model';
+import type {
+    AttachmentView,
+    ChatMessage,
+} from '../../messages/messages-model';
 import { formatDuration, hasDuration } from '../duration';
 import { formatFileSize } from '../attachment-labels';
 

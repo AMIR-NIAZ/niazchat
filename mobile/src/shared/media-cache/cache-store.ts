@@ -22,7 +22,7 @@ export const ORPHAN_PART_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const ROOT_DIRECTORY = 'media-cache';
 const INDEX_FILE = 'index.json';
 
-export type MediaCacheKind = 'image' | 'video';
+export type MediaCacheKind = 'image' | 'video' | 'audio';
 
 export interface MediaCacheEntry {
     /** Absolute `file://` URI of the cached file. */
@@ -56,10 +56,9 @@ export function rootDirectory(): Directory {
 }
 
 export function mediaDirectory(kind: MediaCacheKind): Directory {
-    return new Directory(
-        rootDirectory(),
-        kind === 'image' ? 'images' : 'videos',
-    );
+    const name =
+        kind === 'image' ? 'images' : kind === 'video' ? 'videos' : 'audio';
+    return new Directory(rootDirectory(), name);
 }
 
 export function ensureMediaDirectory(kind: MediaCacheKind): Directory {
@@ -286,7 +285,7 @@ export async function initMediaCache(): Promise<void> {
     if (initialized) return;
     initialized = true;
     try {
-        for (const kind of ['image', 'video'] as const) {
+        for (const kind of ['image', 'video', 'audio'] as const) {
             const directory = mediaDirectory(kind);
             if (!directory.exists) continue;
             for (const item of directory.list()) {
@@ -327,7 +326,7 @@ export async function initMediaCache(): Promise<void> {
 
         // Adopt complete files from a download that finished right before the
         // app was killed (the file was renamed, but the index write was lost).
-        for (const kind of ['image', 'video'] as const) {
+        for (const kind of ['image', 'video', 'audio'] as const) {
             const directory = mediaDirectory(kind);
             if (!directory.exists) continue;
             for (const item of directory.list()) {

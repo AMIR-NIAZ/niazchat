@@ -1,12 +1,6 @@
 import { memo } from 'react';
 import type { RefObject } from 'react';
-import {
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
-} from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
     useAnimatedStyle,
@@ -96,7 +90,9 @@ export const ViewerGlassButton = memo(function ViewerGlassButton({
                     size={20}
                     strokeWidth={2.2}
                     color={
-                        destructive ? palette.semantic.danger : palette.text.primary
+                        destructive
+                            ? palette.semantic.danger
+                            : palette.text.primary
                     }
                 />
             </Pressable>
@@ -128,7 +124,11 @@ export const ViewerHeader = memo(function ViewerHeader({
         />
     );
     const close = (
-        <ViewerGlassButton icon={X} label="Close media viewer" onPress={onClose} />
+        <ViewerGlassButton
+            icon={X}
+            label="Close media viewer"
+            onPress={onClose}
+        />
     );
     return (
         <LinearGradient
@@ -195,11 +195,7 @@ export const ViewerCaptionFooter = memo(function ViewerCaptionFooter({
     return (
         <LinearGradient
             pointerEvents="box-none"
-            colors={[
-                'rgba(0,0,0,0)',
-                'rgba(0,0,0,0.35)',
-                'rgba(0,0,0,0.72)',
-            ]}
+            colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.35)', 'rgba(0,0,0,0.72)']}
             locations={[0, 0.45, 1]}
             style={[
                 styles.footer,
@@ -228,16 +224,18 @@ export const ViewerCaptionFooter = memo(function ViewerCaptionFooter({
                 </Text>
                 {reactions.length > 0 && (
                     <View style={styles.reactions}>
-                        {reactions.slice(0, 4).map((reaction): React.ReactElement => (
-                            <View
-                                key={reaction.emoji}
-                                style={styles.reactionChip}
-                            >
-                                <Text style={styles.reactionText}>
-                                    {reaction.emoji} {reaction.count}
-                                </Text>
-                            </View>
-                        ))}
+                        {reactions.slice(0, 4).map(
+                            (reaction): React.ReactElement => (
+                                <View
+                                    key={reaction.emoji}
+                                    style={styles.reactionChip}
+                                >
+                                    <Text style={styles.reactionText}>
+                                        {reaction.emoji} {reaction.count}
+                                    </Text>
+                                </View>
+                            ),
+                        )}
                     </View>
                 )}
             </View>

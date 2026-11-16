@@ -37,12 +37,20 @@ export interface ChatLastMessageDto {
         originalName: string;
         mimeType: string;
         size: number;
-        kind?: 'image' | 'video' | 'voice' | 'file';
+        kind?: 'image' | 'video' | 'voice' | 'music' | 'file';
         width?: number;
         height?: number;
         duration?: number;
         hasPoster?: boolean;
         waveform?: number[] | null;
+        /** Music only: track title. */
+        title?: string;
+        /** Music only: track artist, or null. */
+        artist?: string | null;
+        /** Music only: duration in seconds, or null. */
+        durationSeconds?: number | null;
+        /** Music only: server-relative cover route, or null. */
+        coverUrl?: string | null;
     }>;
 }
 
@@ -63,6 +71,8 @@ export interface ChatDto {
     avatars: string[];
     type: ChatType;
     isBan: boolean;
+    /** Optional per-caller membership flag on lookup/search rows. */
+    isMember?: boolean;
     /** Authoritative unread count from `getAllChats` (capped server-side). */
     unreadCount?: number;
     /** Present on the `joinChat` ack (`chatInfo`): read position before joining. */

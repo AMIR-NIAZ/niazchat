@@ -27,7 +27,10 @@ import {
     validateNewAttachments,
 } from '../attachments/validation';
 import type { LocalAttachment } from '../attachments/validation';
-import { MAX_ATTACHMENTS_PER_MESSAGE } from '../attachments/constants';
+import {
+    MAX_ATTACHMENTS_PER_MESSAGE,
+    MAX_MUSIC_FILE_SIZE,
+} from '../attachments/constants';
 import { nextSelectionKey } from './local-keys';
 import {
     playVoiceMessage,
@@ -501,6 +504,45 @@ export function MessageComposer(
         );
     };
 
+    const pickMusic = async (): Promise<void> => {
+        if (remaining <= 0) {
+            dialog.show({
+                title: 'Attachment limit',
+                message: `You can attach up to ${MAX_ATTACHMENTS_PER_MESSAGE} files.`,
+                tone: 'warning',
+            });
+            return;
+        }
+        const result = await DocumentPicker.getDocumentAsync({
+            type: 'audio/*',
+            multiple: true,
+            copyToCacheDirectory: true,
+        });
+        if (result.canceled) return;
+        const assets = result.assets.slice(0, remaining);
+        const oversized = assets.find(
+            (asset) => (asset.size ?? 0) > MAX_MUSIC_FILE_SIZE,
+        );
+        if (oversized !== undefined) {
+            dialog.show({
+                title: 'File too large',
+                message: `"${oversized.name}" is over the 100 MB music limit.`,
+                tone: 'warning',
+            });
+            return;
+        }
+        addAttachments(
+            assets.map((asset) => ({
+                localKey: nextSelectionKey(),
+                uri: asset.uri,
+                name: asset.name,
+                mimeType: asset.mimeType ?? 'audio/mpeg',
+                size: asset.size ?? 0,
+                kind: kindOfSelection(asset.mimeType, asset.name),
+            })),
+        );
+    };
+
     const runPicker = async (pick: () => Promise<void>): Promise<void> => {
         setSheetOpen(false);
         if (picking) return;
@@ -734,10 +776,15 @@ export function MessageComposer(
                         placeholderTextColor={palette.neutral[300]}
                         multiline={true}
                         numberOfLines={4}
-                        editable={!props.disabled}
+                        // The input is never disabled and never blurred on
+                        // submit: `editable={!disabled}` dropped focus (and with
+                        // it the keyboard) for the whole send round-trip, which
+                        // is why the keyboard closed after every message.
+                        // `submitBehavior="newline"` keeps focus and Enter
+                        // inserts a line break instead of submitting.
+                        submitBehavior="newline"
                         accessibilityLabel="Message input"
                         onSubmitEditing={submit}
-                        blurOnSubmit={false}
                     />
                     {text.trim() === '' && selected.length === 0 ? (
                         <View
@@ -816,6 +863,16 @@ export function MessageComposer(
                             }}
                         >
                             <Text style={styles.sheetAction}>Video</Text>
+                        </Pressable>
+                        <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel="Choose music"
+                            style={styles.sheetButton}
+                            onPress={(): void => {
+                                void runPicker(pickMusic);
+                            }}
+                        >
+                            <Text style={styles.sheetAction}>Music</Text>
                         </Pressable>
                         <Pressable
                             accessibilityRole="button"

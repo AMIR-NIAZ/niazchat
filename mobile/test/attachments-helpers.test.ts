@@ -287,6 +287,7 @@ test('chat list preview derives Photo / file name from metadata', () => {
             firstAttachmentKind: 'image',
             firstAttachmentDuration: null,
             firstAttachmentName: null,
+            firstAttachmentTitle: null
         }),
         '📷 3 photos',
     );
@@ -301,6 +302,7 @@ test('chat list preview derives Photo / file name from metadata', () => {
             firstAttachmentKind: 'file',
             firstAttachmentDuration: null,
             firstAttachmentName: 'report.pdf',
+            firstAttachmentTitle: null
         }),
         '📎 report.pdf',
     );
@@ -315,6 +317,7 @@ test('chat list preview derives Photo / file name from metadata', () => {
             firstAttachmentKind: null,
             firstAttachmentDuration: null,
             firstAttachmentName: null,
+            firstAttachmentTitle: null
         }),
         'hello',
     );

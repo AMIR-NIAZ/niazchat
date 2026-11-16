@@ -30,6 +30,8 @@ import type { ViewerRect } from '../attachments/viewer/viewer-model';
 import { AttachmentGrid } from '../attachments/attachment-grid';
 import { AttachmentFileRow } from '../attachments/attachment-file-row';
 import { VoiceBubble } from '../voice/voice-bubble';
+import { MusicBubble } from '../music/music-bubble';
+import type { MusicTrack } from '../../shared/music-player';
 import { splitLinkifiedText } from '../groups/invite-links-model';
 import { childPressBlocksMenu, resolveBubblePress } from './bubble-press';
 /**
@@ -99,6 +101,8 @@ interface MessageBubbleProps {
         | undefined;
     /** Long-press on the reaction row: open the grouped reactor sheet. */
     onOpenReactions?: ((message: ChatMessage) => void) | undefined;
+    /** This chat's music tracks, ascending: the player's next/previous queue. */
+    musicQueue?: MusicTrack[] | undefined;
 }
 
 /** Bubble avatar edge length (the spacer keeps the other rows aligned). */
@@ -119,6 +123,7 @@ function quoteSnippet(reply: ReplyPreview): string {
         reply.attachmentKind,
         null,
         reply.attachmentDuration,
+        reply.attachmentTitle ?? null,
     );
 }
 
@@ -150,6 +155,7 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
         onForwardedProfilePress,
         onToggleReaction,
         onOpenReactions,
+        musicQueue = [],
     } = props;
     // Anchor of the lifted preview: measured in window coordinates at press
     // time so the popup lands on the bubble with the keyboard open too.
@@ -250,6 +256,9 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
     );
     const voiceAttachments = message.attachments.filter(
         (attachment) => attachment.kind === 'voice',
+    );
+    const musicAttachments = message.attachments.filter(
+        (attachment) => attachment.kind === 'music',
     );
     const uploadingAttachments = message.attachments.some(
         (attachment) => attachment.status === 'uploading',
@@ -394,6 +403,17 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                 ))}
             {message.attachments.length > 0 && (
                 <View style={styles.attachmentsWrap}>
+                    {musicAttachments.map((attachment) => (
+                        <MusicBubble
+                            key={attachment.key}
+                            attachment={attachment}
+                            messageKey={message.key}
+                            mine={mine}
+                            queue={musicQueue}
+                            isStatic={isStatic}
+                            onLongPress={childLongPress}
+                        />
+                    ))}
                     {voiceAttachments.map((attachment) =>
                         isStatic ? (
                             <StaticVoiceRow

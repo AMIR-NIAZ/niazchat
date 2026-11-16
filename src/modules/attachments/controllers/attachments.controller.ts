@@ -94,6 +94,22 @@ export class AttachmentsController {
         );
     }
 
+    /** Embedded music cover (music attachments only). */
+    @Get(':id/cover')
+    @Role([RoleEnum.ALL])
+    async cover(
+        @Param('id', ParseIntPipe) id: AttachmentId,
+        @Req() req: RequestAuth,
+        @Res() res: Response,
+    ) {
+        await this.attachmentService.cover(
+            id,
+            req.user,
+            req as unknown as Request,
+            res,
+        );
+    }
+
     @Get(':id/preview')
     @Role([RoleEnum.ALL])
     async preview(

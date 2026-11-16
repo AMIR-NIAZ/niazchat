@@ -36,6 +36,11 @@ export interface InvitePreview {
     avatar: string | null;
     membersCount: number;
     alreadyMember: boolean;
+    /** Caller is already in the group (`alreadyMember` plus explicit flag). */
+    isMember: boolean;
+    /** Caller's group role, or null for a non-member. */
+    myRole: 'owner' | 'admin' | 'member' | null;
+    /** Always present now, so a member can open the chat directly. */
     chatId: number | null;
 }
 
@@ -44,6 +49,8 @@ export interface JoinInviteResult {
     title: string;
     joined: boolean;
     alreadyMember: boolean;
+    /** Role after joining (or the existing one); null when unknown. */
+    role: 'owner' | 'admin' | 'member' | null;
 }
 
 export interface InviteCreateInput {

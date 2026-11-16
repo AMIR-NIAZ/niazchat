@@ -59,6 +59,25 @@ export class Attachment extends BaseEntity {
     @Column({ type: 'varchar', length: 255, nullable: true })
     posterPath?: string | null;
 
+    /** Music title from the embedded tags, or the file name without extension. */
+    @Column({ type: 'varchar', length: 255, nullable: true })
+    title?: string | null;
+
+    /** Music artist from the embedded tags; NULL means "Unknown artist". */
+    @Column({ type: 'varchar', length: 255, nullable: true })
+    artist?: string | null;
+
+    /** Music duration in seconds (one decimal), parsed from the container. */
+    @Column({ type: 'numeric', precision: 10, scale: 1, nullable: true })
+    durationSeconds?: string | number | null;
+
+    /**
+     * Relative storage path of the re-encoded cover thumbnail (music only).
+     * Never leaves the server: the wire exposes a derived `coverUrl`.
+     */
+    @Column({ type: 'varchar', length: 255, nullable: true })
+    coverPath?: string | null;
+
     @ManyToOne(() => User, { eager: true })
     @JoinColumn()
     uploader: User;

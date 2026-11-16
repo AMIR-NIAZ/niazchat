@@ -50,8 +50,12 @@ export async function deliverMessage(
     replyToId?: number,
     attachmentIds?: number[],
     clientMessageId?: string,
+    type?: 'text' | 'music',
 ): Promise<MessageDto | null> {
     const payload: CreateMessageSocketPayload = { chatId, content };
+    if (type !== undefined) {
+        payload.type = type;
+    }
     if (replyToId !== undefined) {
         payload.reply = replyToId;
     }

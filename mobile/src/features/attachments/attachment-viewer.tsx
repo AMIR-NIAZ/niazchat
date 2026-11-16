@@ -158,10 +158,7 @@ export function AttachmentViewer({
         if (!usable || origin === undefined || origin === null) {
             return { scale: 0.96, x: 0, y: 0, known: false };
         }
-        const scale = Math.min(
-            1.4,
-            Math.max(0.2, origin.width / window.width),
-        );
+        const scale = Math.min(1.4, Math.max(0.2, origin.width / window.width));
         return {
             scale,
             x: origin.x + origin.width / 2 - window.width / 2,
@@ -317,7 +314,10 @@ export function AttachmentViewer({
     // Playing video: the chrome hides itself after a moment of inactivity.
     useEffect((): (() => void) => {
         if (!playing || !chromeVisible) return (): void => undefined;
-        const timer = setTimeout((): void => setChromeVisible(false), CHROME_IDLE_MS);
+        const timer = setTimeout(
+            (): void => setChromeVisible(false),
+            CHROME_IDLE_MS,
+        );
         return (): void => clearTimeout(timer);
     }, [playing, chromeVisible]);
 
@@ -401,7 +401,16 @@ export function AttachmentViewer({
                 accessibilityLabel: 'Media actions',
             });
         });
-    }, [canDelete, close, index, items, onDelete, onForward, onGoToMessage, popup]);
+    }, [
+        canDelete,
+        close,
+        index,
+        items,
+        onDelete,
+        onForward,
+        onGoToMessage,
+        popup,
+    ]);
 
     // ── drag to dismiss (only at 1x, and not from the caption sheet) ─────
     const dragGesture = usePanGesture(
@@ -450,8 +459,7 @@ export function AttachmentViewer({
     );
 
     const backdropStyle = useAnimatedStyle(() => ({
-        opacity:
-            hero.value * (1 - dismissProgress.value * 0.9),
+        opacity: hero.value * (1 - dismissProgress.value * 0.9),
     }));
 
     const contentStyle = useAnimatedStyle(() => {
@@ -465,8 +473,7 @@ export function AttachmentViewer({
             transform: [
                 { translateX: heroFrom.x * (1 - progress) },
                 {
-                    translateY:
-                        heroFrom.y * (1 - progress) + dismissY.value,
+                    translateY: heroFrom.y * (1 - progress) + dismissY.value,
                 },
                 { scale },
             ],
@@ -475,26 +482,29 @@ export function AttachmentViewer({
 
     const headerStyle = useAnimatedStyle(() => ({
         opacity: chrome.value,
-        transform: [
-            { translateY: interpolate(chrome.value, [0, 1], [-8, 0]) },
-        ],
+        transform: [{ translateY: interpolate(chrome.value, [0, 1], [-8, 0]) }],
     }));
     const footerStyle = useAnimatedStyle(() => ({
         opacity: chrome.value,
-        transform: [
-            { translateY: interpolate(chrome.value, [0, 1], [8, 0]) },
-        ],
+        transform: [{ translateY: interpolate(chrome.value, [0, 1], [8, 0]) }],
     }));
     const counterStyle = useAnimatedStyle(() => ({
         opacity: counter.value,
     }));
 
     const renderItem = useCallback(
-        ({ item, index: pageIndex }: ListRenderItemInfo<ViewerItem>): React.ReactElement => {
+        ({
+            item,
+            index: pageIndex,
+        }: ListRenderItemInfo<ViewerItem>): React.ReactElement => {
             const active = pageIndex === index;
             // Only the current page and its two neighbours are mounted.
             if (Math.abs(pageIndex - index) > 1) {
-                return <View style={{ width: window.width, height: window.height }} />;
+                return (
+                    <View
+                        style={{ width: window.width, height: window.height }}
+                    />
+                );
             }
             if (item.attachment.kind === 'video') {
                 return (
@@ -508,7 +518,9 @@ export function AttachmentViewer({
                         onTap={toggleChrome}
                         onPlayingChange={onVideoPlayingChange}
                         paused={dismissing}
-                        controlsBottom={hasCaption ? footerHeight : insets.bottom}
+                        controlsBottom={
+                            hasCaption ? footerHeight : insets.bottom
+                        }
                     />
                 );
             }
@@ -563,7 +575,11 @@ export function AttachmentViewer({
                         getItemLayout={(
                             _data,
                             pageIndex,
-                        ): { length: number; offset: number; index: number } => ({
+                        ): {
+                            length: number;
+                            offset: number;
+                            index: number;
+                        } => ({
                             length: window.width,
                             offset: window.width * pageIndex,
                             index: pageIndex,
@@ -647,4 +663,3 @@ const styles = StyleSheet.create({
         end: 0,
     },
 });
-

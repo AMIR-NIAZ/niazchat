@@ -22,6 +22,8 @@ export function toChatPreview(chat: ChatDto): ChatPreview {
         peerName: chat.peerName ?? null,
         peer: toChatPeer(chat.peer),
         isBan: chat.isBan,
+        ...(chat.isMember !== undefined ? { isMember: chat.isMember } : {}),
+        ...(chat.myRole !== undefined ? { myRole: chat.myRole } : {}),
         avatarUrls: chat.avatars.map(absoluteUploadUrl),
         createdAt: chat.createdAt,
         updatedAt: chat.updatedAt,
@@ -61,12 +63,17 @@ export function lastMessageFromUpdate(
                       ? 'image'
                       : attachments[0]?.mimeType.startsWith('video/')
                         ? 'video'
-                        : 'file')),
+                        : attachments[0]?.mimeType.startsWith('audio/')
+                          ? 'music'
+                          : 'file')),
         firstAttachmentDuration:
-            typeof attachments[0]?.duration === 'number'
-                ? attachments[0].duration
-                : null,
+            typeof attachments[0]?.durationSeconds === 'number'
+                ? attachments[0].durationSeconds
+                : typeof attachments[0]?.duration === 'number'
+                  ? attachments[0].duration
+                  : null,
         firstAttachmentName: attachments[0]?.originalName ?? null,
+        firstAttachmentTitle: attachments[0]?.title ?? null,
     };
 }
 
@@ -98,6 +105,7 @@ export function chatPreviewText(preview: ChatPreview['lastMessage']): string {
         preview.firstAttachmentKind,
         preview.firstAttachmentName,
         preview.firstAttachmentDuration,
+        preview.firstAttachmentTitle,
     );
 }
 
@@ -156,6 +164,11 @@ export function filterChats(
     return chats.filter((chat) => {
         const name = getChatDisplay(chat).title.toLowerCase();
         const preview = chat.lastMessage?.content.toLowerCase() ?? '';
-        return name.includes(q) || preview.includes(q);
+        const username = chat.peer?.username?.toLowerCase() ?? '';
+        return (
+            name.includes(q) ||
+            username.includes(q) ||
+            preview.includes(q)
+        );
     });
 }

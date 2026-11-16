@@ -1,14 +1,29 @@
 /** Wire kind of an attachment: media renders inline, everything else as a row. */
-export type AttachmentKind = 'image' | 'video' | 'voice' | 'file';
+export type AttachmentKind = 'image' | 'video' | 'voice' | 'music' | 'file';
+
+/** Audio containers uploaded as music tracks (never as generic files). */
+const MUSIC_MIME_TYPES: readonly string[] = [
+    'audio/mpeg',
+    'audio/mp4',
+    'audio/x-m4a',
+    'audio/aac',
+    'audio/ogg',
+    'audio/opus',
+    'audio/wav',
+    'audio/x-wav',
+    'audio/flac',
+    'audio/webm',
+];
 
 /**
  * `image` only for the verified raster image MIME types the upload service
  * stores, `video` only for the containers probed and accepted at upload time,
- * `voice` only for rows the voice upload path flagged. Everything else is a
- * generic file (never rendered inline).
+ * `voice` only for rows the voice upload path flagged, `music` for audio rows
+ * parsed by music-metadata. Everything else is a generic file (never rendered
+ * inline).
  *
  * The `voice` flag is authoritative: an `audio/mp4` file uploaded as a normal
- * attachment stays a file, while the same container uploaded with `voice=1`
+ * attachment becomes music, while the same container uploaded with `voice=1`
  * becomes a voice message.
  */
 export function attachmentKindOf(
@@ -33,6 +48,9 @@ export function attachmentKindOf(
         mime === 'video/webm'
     ) {
         return 'video';
+    }
+    if (MUSIC_MIME_TYPES.includes(mime)) {
+        return 'music';
     }
     return 'file';
 }

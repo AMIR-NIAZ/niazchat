@@ -32,10 +32,7 @@ import Animated, {
 import { RotateCw } from 'lucide-react-native';
 import { palette, radii, spacing } from '../../../shared/theme';
 import { useReducedMotion } from '../../../shared/hooks/use-reduced-motion';
-import {
-    cacheImage,
-    getCachedImageUri,
-} from '../../../shared/media-cache';
+import { cacheImage, getCachedImageUri } from '../../../shared/media-cache';
 import { attachmentPreviewUrl, attachmentUrl } from '../attachment-url';
 import { useAttachmentAuth } from '../auth-headers';
 import type { ViewerItem } from './viewer-model';
@@ -136,7 +133,8 @@ export const ViewerImagePage = memo(function ViewerImagePage({
         return (): void => clearTimeout(timer);
     }, [loaded, failed, refreshToken]);
 
-    const remoteUri = id !== null ? attachmentUrl(id) : (attachment.localUri ?? null);
+    const remoteUri =
+        id !== null ? attachmentUrl(id) : (attachment.localUri ?? null);
     const uri = localUri ?? remoteUri;
     const thumbUri =
         id !== null ? attachmentPreviewUrl(id, 640) : attachment.localUri;
@@ -146,7 +144,10 @@ export const ViewerImagePage = memo(function ViewerImagePage({
         uri === null
             ? null
             : localUri !== null
-              ? { uri: localUri, ...(cacheKey !== undefined ? { cacheKey } : {}) }
+              ? {
+                    uri: localUri,
+                    ...(cacheKey !== undefined ? { cacheKey } : {}),
+                }
               : {
                     uri,
                     ...(cacheKey !== undefined ? { cacheKey } : {}),
@@ -179,7 +180,10 @@ export const ViewerImagePage = memo(function ViewerImagePage({
     const reset = useCallback((): void => {
         'worklet';
         const duration = reduceMotion ? 90 : 180;
-        scale.value = withTiming(1, { duration, easing: Easing.out(Easing.quad) });
+        scale.value = withTiming(1, {
+            duration,
+            easing: Easing.out(Easing.quad),
+        });
         translateX.value = withTiming(0, { duration });
         translateY.value = withTiming(0, { duration });
     }, [reduceMotion, scale, translateX, translateY]);

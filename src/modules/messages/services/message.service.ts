@@ -28,6 +28,7 @@ import { Attachment } from 'src/modules/attachments/entities/attachment.entity';
 import { ChatAccessService } from 'src/modules/chats/services/chat-access.service';
 import { PrivateChatService } from 'src/modules/chats/services/private-chat.service';
 import { ReactionsService } from 'src/modules/reactions/services/reactions.service';
+import { attachmentKindOf } from 'src/common/utils/attachment-kind.util';
 
 @Injectable()
 export class MessageService {
@@ -120,6 +121,7 @@ export class MessageService {
             reply,
             content,
             typeData.id,
+            type,
             attachmentIds,
         );
     }
@@ -155,6 +157,7 @@ export class MessageService {
             reply,
             content,
             typeData.id,
+            type,
             attachmentIds,
         );
     }
@@ -170,6 +173,7 @@ export class MessageService {
         reply: MessageId | undefined,
         content: string,
         typeMessageId: number,
+        typeName: TypeMessageEnum,
         attachmentIds?: AttachmentId[],
     ): Promise<Message> {
         // The replied-to message must exist in THIS chat and not be deleted.
@@ -195,6 +199,9 @@ export class MessageService {
                     attachmentIds,
                     content,
                 );
+                if (typeName === TypeMessageEnum.MUSIC) {
+                    await this.assertMusicComposition(manager, attachmentIds);
+                }
             }
 
             const saved = await manager.getRepository(Message).save({
@@ -223,6 +230,33 @@ export class MessageService {
         return attachmentIds?.length
             ? this.orderAttachments(loaded, attachmentIds)
             : loaded;
+    }
+
+    /**
+     * A music message carries exactly one audio attachment (never a generic
+     * file or a voice recording); an optional text caption is allowed.
+     */
+    private async assertMusicComposition(
+        manager: EntityManager,
+        attachmentIds: AttachmentId[],
+    ): Promise<void> {
+        if (attachmentIds.length !== 1) {
+            throw new BadRequestException(
+                'a music message must have exactly one attachment',
+            );
+        }
+        const row = await manager.getRepository(Attachment).findOne({
+            where: { id: attachmentIds[0] },
+            select: { id: true, mimeType: true, voice: true },
+        });
+        if (
+            row === null ||
+            attachmentKindOf(row.mimeType, row.voice) !== 'music'
+        ) {
+            throw new BadRequestException(
+                'a music message must reference an audio track',
+            );
+        }
     }
 
     /**
@@ -359,6 +393,10 @@ export class MessageService {
                     posterPath: true,
                     voice: true,
                     waveform: true,
+                    title: true,
+                    artist: true,
+                    durationSeconds: true,
+                    coverPath: true,
                     createdAt: true,
                 },
                 replyTo: {
@@ -372,6 +410,8 @@ export class MessageService {
                         mimeType: true,
                         duration: true,
                         voice: true,
+                        title: true,
+                        durationSeconds: true,
                     },
                 },
             },
@@ -441,6 +481,10 @@ export class MessageService {
                     posterPath: true,
                     voice: true,
                     waveform: true,
+                    title: true,
+                    artist: true,
+                    durationSeconds: true,
+                    coverPath: true,
                     createdAt: true,
                 },
                 replyTo: {
@@ -454,6 +498,8 @@ export class MessageService {
                         mimeType: true,
                         duration: true,
                         voice: true,
+                        title: true,
+                        durationSeconds: true,
                     },
                 },
             },
@@ -610,6 +656,10 @@ export class MessageService {
                     posterPath: true,
                     voice: true,
                     waveform: true,
+                    title: true,
+                    artist: true,
+                    durationSeconds: true,
+                    coverPath: true,
                     createdAt: true,
                 },
                 replyTo: {
@@ -623,6 +673,8 @@ export class MessageService {
                         mimeType: true,
                         duration: true,
                         voice: true,
+                        title: true,
+                        durationSeconds: true,
                     },
                 },
             },

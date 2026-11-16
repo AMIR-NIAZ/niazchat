@@ -1,11 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-    AppState,
-    Pressable,
-    StyleSheet,
-    Text,
-    View,
-} from 'react-native';
+import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useEventListener } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import type { VideoPlayer } from 'expo-video';
@@ -15,7 +9,10 @@ import {
     usePanGesture,
     useTapGesture,
 } from 'react-native-gesture-handler';
-import type { PanGestureConfig, TapGestureConfig } from 'react-native-gesture-handler';
+import type {
+    PanGestureConfig,
+    TapGestureConfig,
+} from 'react-native-gesture-handler';
 import { scheduleOnRN } from 'react-native-worklets';
 import type { StyleProp, ViewStyle } from 'react-native';
 import Animated, {
@@ -28,13 +25,7 @@ import Animated, {
     withTiming,
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
-import {
-    Pause,
-    Play,
-    RotateCw,
-    Volume2,
-    VolumeX,
-} from 'lucide-react-native';
+import { Pause, Play, RotateCw, Volume2, VolumeX } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import { palette, radii, spacing } from '../../../shared/theme';
 import { useReducedMotion } from '../../../shared/hooks/use-reduced-motion';
@@ -143,7 +134,9 @@ export const ViewerVideoPage = memo(function ViewerVideoPage({
                     previewSize={1280}
                     variant="viewer"
                 />
-                <Text style={styles.statusText}>This video is still uploading.</Text>
+                <Text style={styles.statusText}>
+                    This video is still uploading.
+                </Text>
             </View>
         );
     }
@@ -203,7 +196,9 @@ function VideoStatusPanel({
     const state = video.state;
     if (state === 'ready') return null;
     const title =
-        attachment.size > 0 ? `Video · ${formatFileSize(attachment.size)}` : 'Video';
+        attachment.size > 0
+            ? `Video · ${formatFileSize(attachment.size)}`
+            : 'Video';
     const status = ((): string | null => {
         switch (state) {
             case 'downloading':
@@ -224,7 +219,10 @@ function VideoStatusPanel({
         <View style={styles.panel} pointerEvents="box-none">
             <Text style={styles.panelTitle}>{title}</Text>
             {status !== null && (
-                <Text style={styles.statusText} accessibilityLiveRegion="polite">
+                <Text
+                    style={styles.statusText}
+                    accessibilityLiveRegion="polite"
+                >
                     {status}
                 </Text>
             )}
@@ -341,9 +339,12 @@ function PlayerSurface({
 
     // Backgrounding the app pauses; playback never continues off-screen.
     useEffect((): (() => void) => {
-        const subscription = AppState.addEventListener('change', (state): void => {
-            if (state !== 'active') player.pause();
-        });
+        const subscription = AppState.addEventListener(
+            'change',
+            (state): void => {
+                if (state !== 'active') player.pause();
+            },
+        );
         return (): void => subscription.remove();
     }, [player]);
 
@@ -421,7 +422,10 @@ function VideoTapLayer({
         (direction: number): void => {
             side.value = direction;
             flash.value = withSequence(
-                withTiming(1, { duration: 110, easing: Easing.out(Easing.quad) }),
+                withTiming(1, {
+                    duration: 110,
+                    easing: Easing.out(Easing.quad),
+                }),
                 withDelay(320, withTiming(0, { duration: 260 })),
             );
         },
@@ -502,7 +506,11 @@ function VideoTapLayer({
                     <Text style={styles.flashText}>10</Text>
                 </Animated.View>
                 <Animated.View
-                    style={[styles.seekFlash, styles.seekFlashRight, rightStyle]}
+                    style={[
+                        styles.seekFlash,
+                        styles.seekFlashRight,
+                        rightStyle,
+                    ]}
                     pointerEvents="none"
                 >
                     <RotateCw
@@ -740,14 +748,18 @@ const VideoControls = memo(function VideoControls({
                                 <View
                                     style={[
                                         styles.seekBuffered,
-                                        { width: `${Math.round(buffered * 100)}%` },
+                                        {
+                                            width: `${Math.round(buffered * 100)}%`,
+                                        },
                                     ]}
                                 />
                                 <Animated.View
                                     style={[styles.seekFill, fillStyle]}
                                 />
                             </View>
-                            <Animated.View style={[styles.seekThumb, thumbStyle]}>
+                            <Animated.View
+                                style={[styles.seekThumb, thumbStyle]}
+                            >
                                 <View style={styles.seekThumbDot} />
                             </Animated.View>
                             <Animated.View
@@ -817,9 +829,7 @@ function ControlButton({
                 size={18}
                 color={palette.text.primary}
                 strokeWidth={2.1}
-                {...(filled
-                    ? { fill: palette.text.primary }
-                    : {})}
+                {...(filled ? { fill: palette.text.primary } : {})}
             />
         </Pressable>
     );

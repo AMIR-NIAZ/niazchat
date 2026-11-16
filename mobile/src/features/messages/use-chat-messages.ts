@@ -426,11 +426,18 @@ export function useChatMessages(
             if (current === undefined) {
                 return;
             }
+            const messages = producer(current.messages);
+            // A merge that changed nothing must not republish the conversation:
+            // the same array keeps the list data, its memoized rows and the
+            // scroll position untouched (re-merges are common on open/rejoin).
+            if (messages === current.messages) {
+                return;
+            }
             queryClient.setQueryData<ConversationDetail>(
                 messagesQueryKey(chatId),
                 {
                     ...current,
-                    messages: producer(current.messages),
+                    messages,
                 },
             );
         },

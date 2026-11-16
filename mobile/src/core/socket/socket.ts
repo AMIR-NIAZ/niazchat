@@ -168,6 +168,8 @@ export interface CreateMessageSocketPayload {
     chatId?: number;
     userId?: number;
     content?: string;
+    /** `music` marks an audio-only message (voice stays `voice`). */
+    type?: 'text' | 'music';
     reply?: number;
     attachments?: number[];
     clientMessageId?: string;

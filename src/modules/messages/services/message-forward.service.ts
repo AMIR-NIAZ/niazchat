@@ -158,6 +158,10 @@ export class MessageForwardService {
                     posterPath: true,
                     voice: true,
                     waveform: true,
+                    title: true,
+                    artist: true,
+                    durationSeconds: true,
+                    coverPath: true,
                 },
             },
         });
@@ -217,6 +221,11 @@ export class MessageForwardService {
                                 voice: attachment.voice ?? null,
                                 waveform: attachment.waveform ?? null,
                                 posterPath: files.posterPath,
+                                coverPath: files.coverPath,
+                                title: attachment.title ?? null,
+                                artist: attachment.artist ?? null,
+                                durationSeconds:
+                                    attachment.durationSeconds ?? null,
                                 uploader: { id: user.sub },
                                 chat: { id: chatId },
                                 message: { id: saved.id },

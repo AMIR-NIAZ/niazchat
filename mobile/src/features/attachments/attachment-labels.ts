@@ -10,12 +10,17 @@ export function attachmentPreviewLabel(
     kind: AttachmentKind | null | undefined,
     name?: string | null,
     durationSeconds?: number | null,
+    title?: string | null,
 ): string {
     if (count <= 0) {
         return '';
     }
     if (kind === 'voice') {
         return voicePreviewLabel(durationSeconds);
+    }
+    if (kind === 'music') {
+        const trackTitle = (title ?? '').trim();
+        return trackTitle === '' ? '🎵 Music' : `🎵 ${trackTitle}`;
     }
     if (kind === 'image') {
         return count === 1 ? '📷 Photo' : `📷 ${count} photos`;

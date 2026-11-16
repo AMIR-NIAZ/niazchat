@@ -13,10 +13,12 @@ export interface ChatLastMessage {
     createdAt: string;
     attachmentCount: number;
     /** Kind/name of the first attachment (drives the preview label). */
-    firstAttachmentKind: 'image' | 'video' | 'voice' | 'file' | null;
-    /** Duration of a voice first attachment, when the server sent one. */
+    firstAttachmentKind: 'image' | 'video' | 'voice' | 'music' | 'file' | null;
+    /** Duration of a voice/music first attachment, when the server sent one. */
     firstAttachmentDuration: number | null;
     firstAttachmentName: string | null;
+    /** Title of a music first attachment ("🎵 Title" preview). */
+    firstAttachmentTitle: string | null;
 }
 
 /** Other participant of a private chat (server `PeerDto`, ids numeric). */
@@ -41,6 +43,13 @@ export interface ChatPreview {
     /** Other participant of a private chat; null for groups. */
     peer: ChatPeer | null;
     isBan: boolean;
+    /**
+     * Server-provided membership for this row, when a lookup endpoint includes
+     * it. Chat-list rows are the caller's own chats, so it is optional.
+     */
+    isMember?: boolean;
+    /** Caller's wire role for this row, when the server sends it. */
+    myRole?: ChatRole | null;
     avatarUrls: string[];
     createdAt: string;
     /** Entity updatedAt — a fallback ordering signal when no lastMessage exists. */

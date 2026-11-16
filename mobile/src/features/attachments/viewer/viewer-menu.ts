@@ -66,7 +66,11 @@ async function shareItem(item: ViewerItem): Promise<void> {
         return;
     }
     try {
-        await shareLocalFile(path, item.attachment.mimeType, item.attachment.name);
+        await shareLocalFile(
+            path,
+            item.attachment.mimeType,
+            item.attachment.name,
+        );
     } catch (error) {
         toast.show(
             error instanceof Error ? error.message : 'Could not share.',
@@ -171,7 +175,11 @@ async function saveItem(item: ViewerItem): Promise<void> {
         return;
     }
     try {
-        await shareLocalFile(path, item.attachment.mimeType, item.attachment.name);
+        await shareLocalFile(
+            path,
+            item.attachment.mimeType,
+            item.attachment.name,
+        );
         toast.show('Choose “Save to Photos” to keep a copy.');
     } catch (error) {
         toast.show(
@@ -219,7 +227,8 @@ export function buildViewerMenuItems(
     });
     items.push({
         id: 'save',
-        label: Platform.OS === 'android' ? 'Save to Downloads' : 'Save to gallery',
+        label:
+            Platform.OS === 'android' ? 'Save to Downloads' : 'Save to gallery',
         icon: Download,
         disabled: !fileReady,
         ...(fileReady ? {} : { hint: 'Download first' }),

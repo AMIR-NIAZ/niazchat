@@ -1,4 +1,5 @@
 import { absoluteUploadUrl } from '../../core/config/env';
+import { attachmentCoverUrl } from '../attachments/attachment-url';
 import type {
     MessageDto,
     MessageReplyDto,
@@ -53,6 +54,7 @@ function kindOfMime(
         kind === 'image' ||
         kind === 'video' ||
         kind === 'voice' ||
+        kind === 'music' ||
         kind === 'file'
     ) {
         return kind;
@@ -73,32 +75,54 @@ function kindOfMime(
     ) {
         return 'video';
     }
+    if (mime.startsWith('audio/')) {
+        return 'music';
+    }
     return 'file';
 }
 
-/** Wire attachments → attachment views (confirmed messages). */
+/**
+ * Wire attachments → attachment views (confirmed messages). Music rows carry
+ * their track metadata; the cover route is absolutized like other upload URLs.
+ */
 export function toAttachmentViews(dto: MessageDto): AttachmentView[] {
-    return (dto.attachments ?? []).map((attachment) => ({
-        key: `a-${attachment.id}`,
-        id: toNumericId(attachment.id),
-        name: attachment.originalName,
-        mimeType: attachment.mimeType,
-        size: Number(attachment.size),
-        kind: kindOfMime(attachment.mimeType, attachment.kind),
-        ...(attachment.width !== undefined && attachment.height !== undefined
-            ? { width: attachment.width, height: attachment.height }
-            : {}),
-        ...(attachment.duration !== undefined
-            ? { duration: attachment.duration }
-            : {}),
-        ...(Array.isArray(attachment.waveform)
-            ? { waveform: attachment.waveform }
-            : {}),
-        ...(attachment.hasPoster !== undefined
-            ? { hasPoster: attachment.hasPoster }
-            : {}),
-        status: 'uploaded',
-    }));
+    return (dto.attachments ?? []).map((attachment) => {
+        const id = toNumericId(attachment.id);
+        const kind = kindOfMime(attachment.mimeType, attachment.kind);
+        return {
+            key: `a-${attachment.id}`,
+            id,
+            name: attachment.originalName,
+            mimeType: attachment.mimeType,
+            size: Number(attachment.size),
+            kind,
+            ...(attachment.width !== undefined &&
+            attachment.height !== undefined
+                ? { width: attachment.width, height: attachment.height }
+                : {}),
+            ...(attachment.duration !== undefined
+                ? { duration: attachment.duration }
+                : {}),
+            ...(Array.isArray(attachment.waveform)
+                ? { waveform: attachment.waveform }
+                : {}),
+            ...(attachment.hasPoster !== undefined
+                ? { hasPoster: attachment.hasPoster }
+                : {}),
+            ...(kind === 'music'
+                ? {
+                      title: attachment.title ?? attachment.originalName,
+                      artist: attachment.artist ?? null,
+                      durationSeconds:
+                          typeof attachment.durationSeconds === 'number'
+                              ? attachment.durationSeconds
+                              : null,
+                      coverUrl: attachmentCoverUrl(attachment.coverUrl, id),
+                  }
+                : {}),
+            status: 'uploaded',
+        };
+    });
 }
 
 /** Sender id from the flat field, falling back to the nested `sender.id` (entity broadcast). */
@@ -132,6 +156,7 @@ export function replyPreviewFromDto(
             (dto.attachmentsCount ?? 0) > 0
                 ? kindOfMime(undefined, dto.attachmentKind ?? null)
                 : null,
+        attachmentTitle: dto.attachmentTitle ?? null,
         isDeleted: dto.isDeleted === true,
     };
 }
@@ -152,6 +177,7 @@ export function toReplyPreview(message: ChatMessage): ReplyPreview | null {
         attachmentsCount: message.attachmentsCount,
         attachmentKind: message.attachments[0]?.kind ?? null,
         attachmentDuration: message.attachments[0]?.duration ?? null,
+        attachmentTitle: message.attachments[0]?.title ?? null,
         isDeleted: message.isDeleted,
     };
 }
@@ -212,11 +238,12 @@ export function toPendingChatMessage(
     replyTo: ReplyPreview | null = null,
     attachments: AttachmentView[] = [],
     clientMessageId: string | null = null,
+    type: ChatMessage['type'] = 'text',
 ): ChatMessage {
     return {
         key,
         id: null,
-        type: 'text',
+        type,
         content,
         createdAtIso: new Date().toISOString(),
         isEdited: false,
@@ -308,6 +335,34 @@ export function applyOriginalDeleted(
 }
 
 /**
+ * Structural equality for mapped messages (plain data: primitives, arrays and
+ * plain objects). The FlatList data is only replaced when something REALLY
+ * changed, so a re-merge of an unchanged page cannot re-render rows or move
+ * the scroll position.
+ */
+function sameData(a: unknown, b: unknown): boolean {
+    if (a === b) return true;
+    if (typeof a !== typeof b || a === null || b === null) return false;
+    if (typeof a !== 'object') return false;
+    if (Array.isArray(a) || Array.isArray(b)) {
+        if (!Array.isArray(a) || !Array.isArray(b)) return false;
+        if (a.length !== b.length) return false;
+        for (let index = 0; index < a.length; index += 1) {
+            if (!sameData(a[index], b[index])) return false;
+        }
+        return true;
+    }
+    const left = a as Record<string, unknown>;
+    const right = b as Record<string, unknown>;
+    const leftKeys = Object.keys(left);
+    if (leftKeys.length !== Object.keys(right).length) return false;
+    for (const key of leftKeys) {
+        if (!sameData(left[key], right[key])) return false;
+    }
+    return true;
+}
+
+/**
  * Merges server-confirmed messages with locally-pending sends:
  * - De-duplicate by id: a live event never creates a second copy.
  * - A NEW confirmed message consumes exactly ONE local bubble:
@@ -348,7 +403,7 @@ export function mergeMessages(
             // Already known (duplicate echo / re-delivery): update, never consume a bubble.
             // The echo is authoritative and carries `replyTo`, so the preview survives.
             // A broadcast/edit echo omits `myReaction`; keep the cached one.
-            confirmed.set(message.id, {
+            const merged: ChatMessage = {
                 ...existing,
                 ...message,
                 myReaction: message.myReactionProvided
@@ -356,7 +411,12 @@ export function mergeMessages(
                     : existing.myReaction,
                 myReactionProvided:
                     existing.myReactionProvided || message.myReactionProvided,
-            });
+            };
+            // Identical content: keep the CACHED object so the row (and the
+            // array around it) keeps its identity.
+            if (!sameData(merged, existing)) {
+                confirmed.set(message.id, merged);
+            }
             continue;
         }
         confirmed.set(message.id, message);
@@ -402,7 +462,13 @@ export function mergeMessages(
         (local) => !consumedKeys.has(local.key),
     );
 
-    return [...confirmedList, ...remainingLocals];
+    const result = [...confirmedList, ...remainingLocals];
+    // Nothing changed (same objects, same order): hand back the SAME array so
+    // the list data, its memoized derivations and the scroll position stay put.
+    const unchanged =
+        result.length === current.length &&
+        result.every((item, index) => item === current[index]);
+    return unchanged ? current : result;
 }
 
 /** Marks every pending entry for the chat as failed (e.g. on send timeout). */
@@ -494,13 +560,20 @@ export function reconcileMessages(
     if (serverIds.size === 0) {
         return mergeMessages(current, incoming, currentUserId);
     }
+    let dropped = false;
     const kept = current.filter((message) => {
         if (message.id === null || serverIds.has(message.id)) {
             return true;
         }
-        return message.id < minId || message.id > maxId;
+        if (message.id < minId || message.id > maxId) {
+            return true;
+        }
+        dropped = true;
+        return false;
     });
-    return mergeMessages(kept, incoming, currentUserId);
+    // Nothing was dropped: merge against the ORIGINAL array so `mergeMessages`
+    // can hand back the very same reference when the page changed nothing.
+    return mergeMessages(dropped ? kept : current, incoming, currentUserId);
 }
 
 /** Removed a failed pending entry (used by the retry-tap action before resend). */
