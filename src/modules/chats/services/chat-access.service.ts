@@ -171,7 +171,7 @@ export class ChatAccessService {
     async getTargetMember(memberId: number): Promise<ChatMember> {
         const member = await this.memberRepository.findOne({
             where: { id: memberId },
-            relations: { chat: true, role: true },
+            relations: { chat: true, role: true, user: true },
         });
         if (!member) {
             throw new NotFoundException('member not found');
@@ -186,7 +186,7 @@ export class ChatAccessService {
     ): Promise<ChatMember> {
         const member = await this.memberRepository.findOne({
             where: { id: memberId, chat: { id: chatId } },
-            relations: { chat: true, role: true },
+            relations: { chat: true, role: true, user: true },
         });
         if (!member) {
             throw new NotFoundException('member not found in this chat');

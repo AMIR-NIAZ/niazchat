@@ -105,6 +105,11 @@ export interface ConversationDetail {
      * Undefined is treated as `'server'` (a plain network conversation).
      */
     nextCursorSource?: 'local' | 'server';
+    /**
+     * Confirmed `system` ids that arrived LIVE while this chat was open (not
+     * history/pagination). Drives the pill entrance animation; never cached.
+     */
+    liveMessageIds?: number[];
 }
 
 /**
@@ -453,9 +458,29 @@ export function useChatMessages(
         if (message.chatId !== chatId) {
             return;
         }
-        applyToCache((current) =>
-            mergeMessages(current, [toChatMessage(message)], myId),
-        );
+        const incoming = toChatMessage(message);
+        // Mark the live service message BEFORE the list changes, so its first
+        // render already sees `animate` (batched or not). Only live arrivals
+        // animate; history/pagination loads never do.
+        if (incoming.type === 'system' && incoming.id !== null) {
+            const id = incoming.id;
+            queryClient.setQueryData<ConversationDetail>(
+                messagesQueryKey(chatId),
+                (current) =>
+                    current === undefined
+                        ? current
+                        : {
+                              ...current,
+                              liveMessageIds: [
+                                  ...(current.liveMessageIds ?? []).filter(
+                                      (value) => value !== id,
+                                  ),
+                                  id,
+                              ],
+                          },
+            );
+        }
+        applyToCache((current) => mergeMessages(current, [incoming], myId));
     };
     const onEditedMessage = (message: MessageDto): void => {
         if (message.chatId !== chatId) {

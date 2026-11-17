@@ -85,6 +85,7 @@ function message(over: Partial<ChatMessage> = {}): ChatMessage {
         myReactionProvided: false,
         clientMessageId: null,
         forwardedFrom: null,
+        service: null,
         replyTo: null,
         replyToId: null,
         status: 'sent',

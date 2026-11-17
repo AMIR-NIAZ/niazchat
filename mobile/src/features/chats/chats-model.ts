@@ -1,4 +1,6 @@
 import type { ChatDto, ChatRole, ChatType } from '../../core/api/dto/chat.dto';
+import type { MessageTypeName } from '../../core/api/dto/message.dto';
+import type { ServiceMessage } from '../messages/service-message';
 
 /**
  * Domain models for the chats feature (UI-facing), distinct from wire DTOs.
@@ -7,6 +9,10 @@ import type { ChatDto, ChatRole, ChatType } from '../../core/api/dto/chat.dto';
 export interface ChatLastMessage {
     id: number;
     content: string;
+    /** Catalog type name; `system` renders the service sentence. */
+    type: MessageTypeName;
+    /** Service messages only: drives the same preview sentence as the pill. */
+    service: ServiceMessage | null;
     /** Display name of the sender when known (chatlist:updated events only). */
     senderName: string | null;
     senderId: number;

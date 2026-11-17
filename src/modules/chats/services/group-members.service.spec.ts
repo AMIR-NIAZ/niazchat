@@ -11,6 +11,8 @@ import { TypeChatEnum } from 'src/common/enums/typeChat.enum';
 import { ChatMember } from '../entities/chat_members.entity';
 import { PermissionAdmin } from '../entities/permission_admin.entity';
 import { PermissionChat } from '../entities/permission_chat.entity';
+import { TypeMessage } from 'src/modules/messages/entities/typeMessage.entity';
+import { Message } from 'src/modules/messages/entities/message.entity';
 import { RoleChat } from '../entities/role_chat.entity';
 import { ChatPermissionService } from './chat-permission.service';
 import type { ChatCallerContext } from './chat-permission.service';
@@ -183,6 +185,18 @@ function buildHarness(options: {
                         }),
                 };
             }
+            if (entity === TypeMessage) {
+                return {
+                    findOneOrFail: (): Promise<unknown> =>
+                        Promise.resolve({ id: 7, name: 'system' }),
+                };
+            }
+            if (entity === Message) {
+                return {
+                    save: (data: Record<string, unknown>): Promise<unknown> =>
+                        Promise.resolve({ ...data, id: 500 }),
+                };
+            }
             throw new Error('unexpected repository');
         },
     };
@@ -211,6 +225,7 @@ function buildHarness(options: {
         memberPermissionsChanged: jest.fn(),
         memberRemoved: jest.fn((): Promise<void> => Promise.resolve()),
         membersCountChanged: jest.fn(),
+        broadcastServiceMessage: jest.fn(),
     };
     const rateLimit = {
         consume:

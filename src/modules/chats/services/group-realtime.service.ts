@@ -2,7 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Server } from 'socket.io';
 import { ChatId, UserId } from 'src/common/types/brands.type';
 import { chatRoom, userRoom } from 'src/common/utils/roomCreator.utils';
-import { num } from 'src/common/utils/ws-serializer.utils';
+import {
+    num,
+    serializeLastMessage,
+    serializeMessage,
+} from 'src/common/utils/ws-serializer.utils';
+import type { Message } from 'src/modules/messages/entities/message.entity';
 
 /**
  * Realtime fan-out for group-management changes, shared by REST controllers
@@ -189,6 +194,44 @@ export class GroupRealtimeService {
         this.server
             .to(userRoom(userId as UserId))
             .emit('group:added', { chatId: num(chatId) });
+    }
+
+    /**
+     * A membership service (`system`) message just committed.
+     *
+     * Emits the exact same payload as a normal message (`sendMessage:list`) to
+     * the `chat:<id>` room AFTER the membership change, so remaining members
+     * receive it live, plus `chatlist:updated` (same shape as the gateway) for
+     * every member so previews reorder. `alsoUserIds` delivers the message
+     * straight to users who are not in the room yet (a joining member).
+     */
+    broadcastServiceMessage(
+        message: Message,
+        memberIds: number[],
+        alsoUserIds: number[] = [],
+    ): void {
+        if (!this.server) return;
+        const chatId = num(message.chat?.id);
+        const wire = serializeMessage(message);
+
+        this.server
+            .to(chatRoom(chatId as ChatId))
+            .emit('sendMessage:list', wire);
+        for (const id of new Set(alsoUserIds)) {
+            this.server
+                .to(userRoom(id as UserId))
+                .emit('sendMessage:list', wire);
+        }
+
+        const payload = {
+            chatId,
+            lastMessage: serializeLastMessage(message),
+        };
+        for (const id of new Set(memberIds)) {
+            this.server
+                .to(userRoom(id as UserId))
+                .emit('chatlist:updated', payload);
+        }
     }
 
     /** Live member count for everyone currently in the chat room. */

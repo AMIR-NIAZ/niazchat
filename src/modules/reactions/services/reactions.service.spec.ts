@@ -83,6 +83,8 @@ describe('ReactionsService.toggle', () => {
                 chat: { id: 5 },
                 isDeleted: false,
             },
+            relations: { type: true },
+            select: { id: true, type: { id: true, name: true } },
         });
         expect(ctx.messageReactRepository.save).toHaveBeenCalledWith({
             message: { id: 9 },

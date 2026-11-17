@@ -403,6 +403,7 @@ export default function SearchScreen(): React.ReactElement {
                                 >
                                     <ChatResultRow
                                         chat={chat}
+                                        currentUserId={currentUserId}
                                         onPress={(): void => openChatResult(chat)}
                                     />
                                 </Animated.View>
@@ -621,9 +622,10 @@ function RecentRow(props: {
 
 function ChatResultRow(props: {
     chat: ChatPreview;
+    currentUserId: number | null;
     onPress: () => void;
 }): React.ReactElement {
-    const { chat } = props;
+    const { chat, currentUserId } = props;
     return (
         <ResultRow
             accessibilityLabel={`Open chat with ${displayTitle(chat)}`}
@@ -640,7 +642,7 @@ function ChatResultRow(props: {
                     {displayTitle(chat)}
                 </Text>
                 <Text style={typography.caption} numberOfLines={1}>
-                    {chatPreviewText(chat.lastMessage)}
+                    {chatPreviewText(chat.lastMessage, currentUserId)}
                 </Text>
             </View>
         </ResultRow>

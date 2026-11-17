@@ -399,3 +399,41 @@ No index is required: music tracks are found through their message id, exactly
 like images/videos/voice. `music-metadata` is a pure-JS dependency, so no
 system package is needed for music uploads (ffmpeg is still required for video
 and voice only).
+
+## Group service (`system`) messages
+
+Membership changes are stored as real `system` messages. Dev gets both changes
+from TypeORM `synchronize` on the next backend restart; production applies the
+idempotent SQL below. The new column is nullable and additive, so existing rows
+keep `NULL` (an ordinary, user-authored message).
+
+```sql
+ALTER TABLE "messages"
+    ADD COLUMN IF NOT EXISTS "meta" jsonb;
+
+INSERT INTO "type_messages" ("name", "createdAt", "updatedAt")
+VALUES ('system', now(), now())
+ON CONFLICT DO NOTHING;
+```
+
+| Column | Added by | Meaning                                                           |
+| ------ | -------- | ----------------------------------------------------------------- |
+| `meta` | system   | `NULL` for user messages; the service contract below for `system`. |
+
+```json
+{
+    "action": "member_joined_via_link",
+    "actorId": 12,
+    "actorName": "Sara",
+    "targetId": 12,
+    "targetName": "Sara"
+}
+```
+
+`action` is one of `member_joined`, `member_joined_via_link`, `member_added`,
+`member_left`, `member_banned`, `member_removed`. Names are snapshots at the
+time of the action. `messages.content` carries an English fallback sentence.
+No index is required: these rows are read through the normal `messages`
+pagination and `MAX(id)` last-message subquery. `TypeMessageSeeder` inserts the
+`system` catalog row on every startup; the SQL above is the production
+equivalent.

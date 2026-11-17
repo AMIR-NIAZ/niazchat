@@ -59,6 +59,7 @@ import {
     MessageComposer,
     MessageReactionsCard,
     ScrollToBottomButton,
+    ServiceMessagePill,
     UnreadDivider,
     GroupChatSubtitle,
     useChatMessages,
@@ -688,6 +689,7 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         const newest = messages[messages.length - 1];
         const liveFromOther =
             newest !== undefined &&
+            newest.type !== 'system' &&
             newest.id === newestId &&
             newest.status === 'sent' &&
             previousId !== null &&
@@ -1549,6 +1551,31 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
             );
         }
         const message = item.message;
+        if (message.type === 'system') {
+            return (
+                <ServiceMessagePill
+                    message={message}
+                    currentUserId={currentUserId}
+                    animate={
+                        message.id !== null &&
+                        (detail?.liveMessageIds ?? []).includes(message.id)
+                    }
+                    onOpenProfile={
+                        selecting
+                            ? undefined
+                            : (userId, name): void => {
+                                  openUserProfile({
+                                      userId,
+                                      name,
+                                      isSelf:
+                                          currentUserId !== null &&
+                                          userId === currentUserId,
+                                  });
+                              }
+                    }
+                />
+            );
+        }
         // Both ids normalized to numbers (a bigint-string
         // id can never flip the whole history to "theirs").
         const mine = isOwnMessage(currentUserId, message.senderId);

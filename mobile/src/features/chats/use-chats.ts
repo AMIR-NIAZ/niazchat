@@ -87,6 +87,8 @@ export function useChats(): ReturnType<typeof useQuery<ChatPreview[]>> {
             update.lastMessage !== null &&
             isOwnMessage(myId, update.lastMessage.senderId);
         const isReadingHere = active.chatId === chatId && active.reading;
+        // Service messages update the preview but never create an unread badge.
+        const isService = update.lastMessage?.type === 'system';
 
         // New array + new objects (never mutate the cache) + re-sort, so
         // the chat with the newest activity moves to the top.
@@ -98,7 +100,7 @@ export function useChats(): ReturnType<typeof useQuery<ChatPreview[]>> {
                           lastMessage: lastMessageFromUpdate(update),
                           // A deleted last message changes nothing.
                           unreadCount:
-                              update.lastMessage === null
+                              update.lastMessage === null || isService
                                   ? chat.unreadCount
                                   : isMine || isReadingHere
                                     ? 0

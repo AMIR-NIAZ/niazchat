@@ -403,7 +403,8 @@ describe('MessageService (attachment integration)', () => {
             1,
             expect.objectContaining({
                 where: { id: 77, chat: { id: 10 }, isDeleted: false },
-                select: { id: true },
+                relations: { type: true },
+                select: { id: true, type: { id: true, name: true } },
             }),
         );
         expect(messageRepository.save).toHaveBeenCalledWith(

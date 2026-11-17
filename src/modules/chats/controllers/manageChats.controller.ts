@@ -151,10 +151,15 @@ export class ManageChatsController {
     @Role([RoleEnum.ALL])
     @ChatAccess({ minRole: RoleChatEnum.ADMIN })
     async addMemberByPhone(
+        @Req() request: RequestAuth,
         @Param('groupId', ParseIntPipe) groupId: ChatId,
         @Param('userPhone') userPhone: string,
     ) {
-        return await this.chatService.addMemberByPhone(groupId, userPhone);
+        return await this.chatService.addMemberByPhone(
+            groupId,
+            userPhone,
+            request.user.sub,
+        );
     }
 
     /** Kick: remove someone else; a leaving member uses `/leave`. */
@@ -308,8 +313,7 @@ export class ManageChatsController {
         }
 
         const requestedMaxUses = Number(dto.usageLimit ?? 0);
-        const maxUses =
-            requestedMaxUses <= 0 ? null : requestedMaxUses;
+        const maxUses = requestedMaxUses <= 0 ? null : requestedMaxUses;
         if (
             maxUses !== null &&
             !(INVITE_MAX_USES_OPTIONS as readonly number[]).includes(maxUses)

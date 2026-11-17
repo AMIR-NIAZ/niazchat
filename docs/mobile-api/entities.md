@@ -74,7 +74,7 @@ API output: got with `sender` = `toUserResponse` object, `type` = `{id, name, â€
 ## type_messages
 
 ```ts
-{ id, name: string }  // seeded: file, ice, image, text, video, voice
+{ id, name: string }  // seeded: file, ice, image, text, video, voice, music, system
 ```
 Returned inline on messages; never listed by any endpoint.
 

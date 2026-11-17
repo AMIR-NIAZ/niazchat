@@ -13,6 +13,7 @@ import { RoleChatEnum } from 'src/common/enums/roleChat.enum';
 import { ChatId, UserId } from 'src/common/types/brands.type';
 import { RateLimitService } from 'src/common/services/rate-limit.service';
 import { ChatMember } from '../entities/chat_members.entity';
+import type { Message } from 'src/modules/messages/entities/message.entity';
 import { PermissionAdmin } from '../entities/permission_admin.entity';
 import { PermissionChat } from '../entities/permission_chat.entity';
 import { RoleChat } from '../entities/role_chat.entity';
@@ -25,6 +26,7 @@ import {
     ChatPermissionService,
 } from './chat-permission.service';
 import { GroupRealtimeService } from './group-realtime.service';
+import { createServiceMessage } from '../utils/service-message.util';
 import {
     ADMIN_PERMISSION_OPTIONS,
     canBan,
@@ -684,6 +686,7 @@ export class GroupMembersService {
             'Too many group actions, please try again later',
         );
 
+        let serviceMessage: Message | null = null;
         const result = await this.dataSource.transaction(async (manager) => {
             const callerCtx = await this.loadLockedCaller(
                 manager,
@@ -754,6 +757,13 @@ export class GroupMembersService {
                 .getRepository(PermissionAdmin)
                 .delete({ member: { id: In(targetIds) } });
 
+            serviceMessage = await createServiceMessage(manager, {
+                chatId,
+                action: 'member_banned',
+                actorId: Number(callerUserId),
+                targetId: targetUserId,
+            });
+
             return {
                 memberId: Number(bestTarget.id),
                 role: null,
@@ -766,6 +776,13 @@ export class GroupMembersService {
         void this.realtime
             .memberRemoved(chatId, targetUserId, 'banned')
             .catch(() => undefined);
+        if (serviceMessage !== null) {
+            const memberIds = await this.activeMemberIds(chatId);
+            this.realtime.broadcastServiceMessage(
+                serviceMessage,
+                memberIds.filter((id) => Number(id) !== targetUserId),
+            );
+        }
         void this.notifyMembersCount(chatId);
 
         return result;
@@ -800,6 +817,7 @@ export class GroupMembersService {
             'Too many group actions, please try again later',
         );
 
+        let serviceMessage: Message | null = null;
         const result = await this.dataSource.transaction(async (manager) => {
             const callerCtx = await this.loadLockedCaller(
                 manager,
@@ -939,6 +957,12 @@ export class GroupMembersService {
             await manager
                 .getRepository(ChatMember)
                 .delete({ id: In(targetIds) });
+            serviceMessage = await createServiceMessage(manager, {
+                chatId,
+                action: 'member_removed',
+                actorId: Number(callerUserId),
+                targetId: targetUserId,
+            });
             return {
                 memberId: Number(bestTarget.id),
                 role: null,
@@ -950,6 +974,12 @@ export class GroupMembersService {
             void this.realtime
                 .memberRemoved(chatId, targetUserId)
                 .catch(() => undefined);
+            if (serviceMessage !== null) {
+                this.realtime.broadcastServiceMessage(
+                    serviceMessage,
+                    await this.activeMemberIds(chatId),
+                );
+            }
             void this.notifyMembersCount(chatId);
         } else if (result.changed) {
             this.realtime.memberRoleChanged(chatId, targetUserId);
@@ -1078,6 +1108,20 @@ export class GroupMembersService {
             .findOne({ where: { name } });
         if (!role) throw new NotFoundException(`${name} role not found`);
         return role;
+    }
+
+    /** Non-banned members (roles by name), used for service broadcasts. */
+    private async activeMemberIds(chatId: ChatId): Promise<number[]> {
+        const rows = await this.memberRepository.query<
+            Array<{ userId: string | number }>
+        >(
+            `SELECT DISTINCT m."userId" AS "userId"
+               FROM chat_members m
+               JOIN role_chat r ON r.id = m."roleId"
+              WHERE m."chatId" = $1 AND r.name <> 'ban'`,
+            [chatId],
+        );
+        return rows.map((row) => Number(row.userId));
     }
 
     private async notifyMembersCount(chatId: ChatId): Promise<void> {

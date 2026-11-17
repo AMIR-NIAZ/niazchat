@@ -25,6 +25,8 @@ import {
     ChatPermissionService,
 } from './chat-permission.service';
 import { GroupRealtimeService } from './group-realtime.service';
+import { createServiceMessage } from '../utils/service-message.util';
+import type { Message } from 'src/modules/messages/entities/message.entity';
 import {
     computeInviteStatus,
     generateInviteCode,
@@ -234,11 +236,7 @@ export class GroupInviteLinksService {
 
         const result = await this.dataSource.transaction(
             async (manager): Promise<InviteLinkRevokeResponse> => {
-                await this.assertLockedManager(
-                    manager,
-                    chatId,
-                    callerUserId,
-                );
+                await this.assertLockedManager(manager, chatId, callerUserId);
 
                 const link = await manager
                     .getRepository(Link)
@@ -334,6 +332,7 @@ export class GroupInviteLinksService {
             'Too many join attempts, please try again later',
         );
 
+        let serviceMessage: Message | null = null;
         const result = await this.dataSource.transaction(
             async (
                 manager,
@@ -410,6 +409,13 @@ export class GroupInviteLinksService {
                     throw this.invalidLink();
                 }
 
+                serviceMessage = await createServiceMessage(manager, {
+                    chatId: link.chat.id,
+                    action: 'member_joined_via_link',
+                    actorId: Number(callerUserId),
+                    targetId: Number(callerUserId),
+                });
+
                 return {
                     chatId: Number(link.chat.id),
                     title,
@@ -428,6 +434,13 @@ export class GroupInviteLinksService {
                 callerUserId,
             );
             this.realtime.groupAdded(result.chatId, callerUserId);
+            if (serviceMessage !== null) {
+                this.realtime.broadcastServiceMessage(
+                    serviceMessage,
+                    await this.memberIds(result.chatId as ChatId),
+                    [Number(callerUserId)],
+                );
+            }
             void this.notifyMembersCount(result.chatId);
         }
         return {
@@ -515,19 +528,14 @@ export class GroupInviteLinksService {
             .getMany();
         const role = this.bestRoleName(rows);
         if (role === null) {
-            throw new ForbiddenException(
-                'you are not a member of this group',
-            );
+            throw new ForbiddenException('you are not a member of this group');
         }
         if (role === RoleChatEnum.BAN) {
             throw new ForbiddenException(
                 'you have been banned from this group',
             );
         }
-        if (
-            role !== RoleChatEnum.MANAGER &&
-            role !== RoleChatEnum.ADMIN
-        ) {
+        if (role !== RoleChatEnum.MANAGER && role !== RoleChatEnum.ADMIN) {
             throw new ForbiddenException(INVITE_FORBIDDEN_MESSAGE);
         }
     }
@@ -552,10 +560,7 @@ export class GroupInviteLinksService {
         return rows.some((row) => row.role?.name === RoleChatEnum.BAN);
     }
 
-    private memberRows(
-        chatId: ChatId,
-        userId: UserId,
-    ): Promise<ChatMember[]> {
+    private memberRows(chatId: ChatId, userId: UserId): Promise<ChatMember[]> {
         return this.memberRepository.find({
             where: { chat: { id: chatId }, user: { id: userId } },
             relations: { role: true },
@@ -618,8 +623,7 @@ export class GroupInviteLinksService {
         now: Date,
     ): InviteLinkItem {
         const createdById =
-            link.createdByUserId === null ||
-            link.createdByUserId === undefined
+            link.createdByUserId === null || link.createdByUserId === undefined
                 ? null
                 : Number(link.createdByUserId);
         return {
@@ -629,9 +633,7 @@ export class GroupInviteLinksService {
             createdBy: {
                 userId: createdById,
                 name:
-                    createdById === null
-                        ? ''
-                        : (names.get(createdById) ?? ''),
+                    createdById === null ? '' : (names.get(createdById) ?? ''),
             },
             createdAt: link.createdAt,
             expiresAt:
@@ -665,6 +667,20 @@ export class GroupInviteLinksService {
         return new Map(
             rows.map((row) => [Number(row.userId), row.name ?? ''] as const),
         );
+    }
+
+    /** Non-banned members (roles by name), used for service broadcasts. */
+    private async memberIds(chatId: ChatId): Promise<number[]> {
+        const rows = await this.memberRepository.query<
+            Array<{ userId: string | number }>
+        >(
+            `SELECT DISTINCT m."userId" AS "userId"
+               FROM chat_members m
+               JOIN role_chat r ON r.id = m."roleId"
+              WHERE m."chatId" = $1 AND r.name <> 'ban'`,
+            [chatId],
+        );
+        return rows.map((row) => Number(row.userId));
     }
 
     private async membersCount(chatId: ChatId): Promise<number> {

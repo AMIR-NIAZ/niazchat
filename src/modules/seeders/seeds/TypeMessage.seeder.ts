@@ -25,6 +25,9 @@ const TypeMessages = [
     {
         name: TypeMessageEnum.MUSIC,
     },
+    {
+        name: TypeMessageEnum.SYSTEM,
+    },
 ];
 
 export class TypeMessageSeeder extends Seeder {

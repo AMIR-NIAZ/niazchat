@@ -23,7 +23,8 @@
         "seed:run": "npm run cli -- run",
         "seed:run-all": "npm run cli -- run-all",
         "seed:list": "npm run cli -- list",
-        "seed:run:user": "npm run cli -- run UserSeeder -- --opts '{\"onlyIfEmpty\": true}'"
+        "seed:run:user": "npm run cli -- run UserSeeder -- --opts '{\"onlyIfEmpty\": true}'",
+        "seed:demo": "ts-node --require tsconfig-paths/register --project tsconfig.json src/modules/seeders/demo-seed.ts"
     },
     "dependencies": {
         "@nestjs/bullmq": "^11.0.4",

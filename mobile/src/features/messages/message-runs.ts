@@ -30,6 +30,8 @@ export interface MessageRunOptions {
 
 function isSameSender(previous: ChatMessage, next: ChatMessage): boolean {
     return (
+        previous.type !== 'system' &&
+        next.type !== 'system' &&
         previous.senderId === next.senderId &&
         previous.status === 'sent' &&
         next.status === 'sent'
@@ -67,7 +69,8 @@ export function assignMessageRuns(
         const mine = isOwnMessage(currentUserId, message.senderId);
         // Optimistic (pending/failed) bubbles are local-only, own messages:
         // they never participate in another sender's run.
-        const confirmed = message.status === 'sent';
+        const confirmed =
+            message.status === 'sent' && message.type !== 'system';
 
         return {
             message,

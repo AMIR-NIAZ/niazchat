@@ -5,6 +5,7 @@ import type {
     MessageReplyDto,
 } from '../../core/api/dto/message.dto';
 import { dayKeyOf, isPendingMessage, toNumericId } from './messages-model';
+import { toServiceMessage } from './service-message';
 import type {
     AttachmentKind,
     AttachmentView,
@@ -224,6 +225,12 @@ export function toChatMessage(dto: MessageDto): ChatMessage {
                       userId: toNumericId(dto.forwardedFrom.userId),
                       name: dto.forwardedFrom.name ?? '',
                   },
+        // `system` rows carry `meta`; unknown/malformed meta stays null and the
+        // renderer falls back to `content`.
+        service:
+            dto.type?.name === 'system'
+                ? toServiceMessage(dto.meta, dto.content)
+                : null,
         replyTo: replyPreviewFromDto(dto.replyTo),
         replyToId: toNumericId(dto.replyToId),
         status: 'sent',
@@ -259,6 +266,7 @@ export function toPendingChatMessage(
         myReactionProvided: false,
         clientMessageId,
         forwardedFrom: null,
+        service: null,
         replyTo,
         replyToId: replyTo === null ? null : replyTo.id,
         status: 'pending',
@@ -420,6 +428,12 @@ export function mergeMessages(
             continue;
         }
         confirmed.set(message.id, message);
+
+        // Service messages are server-authored: they can never be the echo of
+        // an optimistic local bubble, even when the text happens to match.
+        if (message.type === 'system') {
+            continue;
+        }
 
         // 1) Exact echo match: the app generated this id for this send.
         if (

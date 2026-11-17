@@ -12,7 +12,29 @@ export type MessageTypeName =
     | 'file'
     | 'voice'
     | 'music'
-    | 'ice';
+    | 'ice'
+    | 'system';
+
+/** Service (`system`) message actions (docs/mobile-api/messages.md). */
+export type ServiceMessageActionDto =
+    | 'member_joined'
+    | 'member_joined_via_link'
+    | 'member_added'
+    | 'member_left'
+    | 'member_banned'
+    | 'member_removed';
+
+/**
+ * Machine-readable service-message payload. Names are snapshots taken when
+ * the action happened; ids are numbers.
+ */
+export interface ServiceMessageMetaDto {
+    action: ServiceMessageActionDto;
+    actorId: number;
+    actorName: string;
+    targetId: number;
+    targetName: string;
+}
 
 /**
  * Serialized `Message` entity from WS `getMessages` / `sendMessage:list` / `editMessage:list`.
@@ -63,6 +85,8 @@ export interface MessageDto {
     attachments: MessageAttachmentDto[];
     /** Count-only chips, ordered by count then the seeded catalog order. */
     reactions?: MessageReactionDto[];
+    /** Service messages only (`type.name === 'system'`); null otherwise. */
+    meta?: ServiceMessageMetaDto | null;
     /** Caller-specific; present on history acks, omitted from broadcasts. */
     myReaction?: string | null;
     /** Echoed on the send ack/room event; absent in history pages. */

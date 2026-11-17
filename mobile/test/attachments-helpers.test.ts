@@ -79,6 +79,7 @@ function confirmed(id: number, over: Partial<ChatMessage> = {}): ChatMessage {
         myReactionProvided: false,
         clientMessageId: null,
         forwardedFrom: null,
+        service: null,
         replyTo: null,
         replyToId: null,
         status: 'sent',
@@ -111,6 +112,7 @@ function pending(
         myReactionProvided: false,
         clientMessageId,
         forwardedFrom: null,
+        service: null,
         replyTo: null,
         replyToId: null,
         status: 'pending',
@@ -280,6 +282,8 @@ test('chat list preview derives Photo / file name from metadata', () => {
         chatPreviewText({
             id: 1,
             content: '',
+            type: 'text',
+            service: null,
             senderId: 1,
             createdAt: '2026-01-01T00:00:00.000Z',
             senderName: null,
@@ -295,6 +299,8 @@ test('chat list preview derives Photo / file name from metadata', () => {
         chatPreviewText({
             id: 1,
             content: '',
+            type: 'text',
+            service: null,
             senderId: 1,
             createdAt: '2026-01-01T00:00:00.000Z',
             senderName: null,
@@ -310,6 +316,8 @@ test('chat list preview derives Photo / file name from metadata', () => {
         chatPreviewText({
             id: 1,
             content: 'hello',
+            type: 'text',
+            service: null,
             senderId: 1,
             createdAt: '2026-01-01T00:00:00.000Z',
             senderName: null,

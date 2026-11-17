@@ -10,6 +10,8 @@ import { Chat } from '../entities/chat.entity';
 import { ChatMember } from '../entities/chat_members.entity';
 import { Link } from '../entities/link.entity';
 import { RoleChat } from '../entities/role_chat.entity';
+import { TypeMessage } from 'src/modules/messages/entities/typeMessage.entity';
+import { Message } from 'src/modules/messages/entities/message.entity';
 import type { ChatCallerContext } from './chat-permission.service';
 import { GroupInviteLinksService } from './group-invite-links.service';
 import {
@@ -285,12 +287,23 @@ function makeHarness(
         query: async (): Promise<Array<{ userId: number; name: string }>> => [],
     };
 
+    let nextMessageId = 1000;
+    const typeMessageRepository = {
+        findOneOrFail: async (): Promise<{ id: number; name: string }> => ({
+            id: 7,
+            name: 'system',
+        }),
+    };
+    const messageRepository = {
+        save: async (data: Record<string, unknown>): Promise<unknown> => ({
+            ...data,
+            id: nextMessageId++,
+        }),
+    };
+
     interface FakeManager {
         getRepository: (entity: unknown) => unknown;
-        query: (
-            sql: string,
-            params: unknown[],
-        ) => Promise<Array<{ count: string | number }>>;
+        query: (sql: string, params: unknown[]) => Promise<unknown[]>;
     }
 
     const manager: FakeManager = {
@@ -299,12 +312,11 @@ function makeHarness(
             if (entity === ChatMember) return memberRepository;
             if (entity === Chat) return chatRepository;
             if (entity === RoleChat) return roleRepository;
+            if (entity === TypeMessage) return typeMessageRepository;
+            if (entity === Message) return messageRepository;
             return {};
         },
-        query: async (
-            sql: string,
-            params: unknown[],
-        ): Promise<Array<{ count: string | number }>> => {
+        query: async (sql: string, params: unknown[]): Promise<unknown[]> => {
             if (
                 sql.includes('SELECT COUNT(*)::int AS count') &&
                 sql.includes('FROM "link"')
@@ -319,6 +331,13 @@ function makeHarness(
                         ).length,
                     },
                 ];
+            }
+            if (sql.includes('FROM user_profiles')) {
+                const ids = (params[0] as Array<string | number>) ?? [];
+                return ids.map((userId) => ({
+                    userId,
+                    name: `User ${String(userId)}`,
+                }));
             }
             if (sql.includes('WITH updated AS')) {
                 const link = store.links.find(
@@ -388,6 +407,7 @@ function makeHarness(
         groupChanged: jest.fn(),
         groupAdded: jest.fn(),
         membersCountChanged: jest.fn(),
+        broadcastServiceMessage: jest.fn(),
     };
     const rateLimit = {
         consume: jest.fn(async () => 1),

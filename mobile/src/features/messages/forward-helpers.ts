@@ -11,7 +11,10 @@ export const MAX_FORWARD_TARGETS = 5;
 
 export function isForwardable(message: ChatMessage): boolean {
     return (
-        message.status === 'sent' && message.id !== null && !message.isDeleted
+        message.status === 'sent' &&
+        message.id !== null &&
+        !message.isDeleted &&
+        message.type !== 'system'
     );
 }
 

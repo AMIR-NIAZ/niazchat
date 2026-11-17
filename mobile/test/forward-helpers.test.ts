@@ -63,6 +63,7 @@ function message(
         myReactionProvided: false,
         clientMessageId: null,
         forwardedFrom: null,
+        service: null,
         replyTo: null,
         replyToId: null,
         status: id === null ? 'pending' : 'sent',

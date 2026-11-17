@@ -27,6 +27,7 @@ import { GroupRealtimeService } from './group-realtime.service';
 import { removeAvatarThumbnails } from 'src/modules/media/avatar-thumbnail.util';
 import { PeerDto, toPeerDto } from './private-chat.service';
 import { isChatVisibleInList } from '../utils/private-chat.util';
+import { createServiceMessage } from '../utils/service-message.util';
 
 export interface ChatMemberPageOptions {
     search?: string;
@@ -125,7 +126,11 @@ export class ChatService {
         return { message: 'group created successfully' };
     }
 
-    async addMemberByPhone(chatId: ChatId, userPhone: string) {
+    async addMemberByPhone(
+        chatId: ChatId,
+        userPhone: string,
+        callerUserId: UserId,
+    ) {
         const user = await this.userRepository.findOne({
             where: { phone: userPhone },
         });
@@ -167,17 +172,34 @@ export class ChatService {
             throw new NotFoundException('role not found');
         }
 
-        const member = this.memberRepository.create({
-            chat,
-            user,
-            role: userRole,
-        });
-
-        await this.memberRepository.save(member);
+        // Membership row + its service message commit together; a repeated
+        // call fails above, so it can never write a second message.
+        const { member, serviceMessage } =
+            await this.memberRepository.manager.transaction(async (manager) => {
+                const saved = await manager.getRepository(ChatMember).save(
+                    manager.getRepository(ChatMember).create({
+                        chat,
+                        user,
+                        role: userRole,
+                    }),
+                );
+                const message = await createServiceMessage(manager, {
+                    chatId,
+                    action: 'member_added',
+                    actorId: Number(callerUserId),
+                    targetId: Number(user.id),
+                });
+                return { member: saved, serviceMessage: message };
+            });
 
         const wireMember = this.serializeMember(member, user, false);
         this.groupRealtime.groupAdded(chatId, user.id);
         this.groupRealtime.groupChanged(chatId, 'member_joined');
+        this.groupRealtime.broadcastServiceMessage(
+            serviceMessage,
+            await this.getMemberIds(chatId),
+            [Number(user.id)],
+        );
         await this.notifyMembersCount(chatId);
 
         return {
@@ -204,8 +226,10 @@ export class ChatService {
             )`,
             )
             // `serializeChat` puts `senderId` on the wire; the sender must be
-            // loaded (attachments stay unloaded — serialized as []).
+            // loaded (attachments stay unloaded — serialized as []). The type
+            // is joined so a `system` last message carries `type` + `meta`.
             .leftJoinAndSelect('lm.sender', 'lmSender')
+            .leftJoinAndSelect('lm.type', 'lmType')
             .where('member.user.id = :userId', { userId: user.sub })
             .andWhere('chat.isBan = :isban', { isban: false })
             .andWhere(
@@ -344,6 +368,10 @@ export class ChatService {
                         seen."messageId" IS NULL
                         OR message.id > seen."messageId"
                     )
+                   -- Membership service messages never create unread badges.
+                   JOIN type_messages messageType
+                     ON messageType.id = message."typeId"
+                    AND messageType.name <> 'system'
                   WHERE member."userId" = $1
                   GROUP BY member."chatId"`,
             [userId],
@@ -531,11 +559,25 @@ export class ChatService {
             throw new ConflictException('user is already banned');
         }
 
-        await this.removePermissionsForMember(target.id);
-        await this.memberRepository.remove(target);
+        const serviceMessage = await this.memberRepository.manager.transaction(
+            async (manager) => {
+                await this.removePermissionsForMember(target.id, manager);
+                await manager.getRepository(ChatMember).remove(target);
+                return createServiceMessage(manager, {
+                    chatId,
+                    action: 'member_removed',
+                    actorId: Number(callerUserId),
+                    targetId: Number(target.user.id),
+                });
+            },
+        );
 
         this.groupRealtime.groupRemoved(chatId, target.user.id, 'kicked');
         this.groupRealtime.groupChanged(chatId, 'member_kicked');
+        this.groupRealtime.broadcastServiceMessage(
+            serviceMessage,
+            await this.getMemberIds(chatId),
+        );
         await this.notifyMembersCount(chatId);
 
         return { message: 'user kicked from the group' };
@@ -557,11 +599,28 @@ export class ChatService {
             );
         }
 
-        await this.removePermissionsForMember(caller.member.id);
-        await this.memberRepository.remove(caller.member);
+        const serviceMessage = await this.memberRepository.manager.transaction(
+            async (manager) => {
+                await this.removePermissionsForMember(
+                    caller.member.id,
+                    manager,
+                );
+                await manager.getRepository(ChatMember).remove(caller.member);
+                return createServiceMessage(manager, {
+                    chatId,
+                    action: 'member_left',
+                    actorId: Number(callerUserId),
+                    targetId: Number(callerUserId),
+                });
+            },
+        );
 
         this.groupRealtime.groupRemoved(chatId, callerUserId, 'left');
         this.groupRealtime.groupChanged(chatId, 'member_left');
+        this.groupRealtime.broadcastServiceMessage(
+            serviceMessage,
+            await this.getMemberIds(chatId),
+        );
         await this.notifyMembersCount(chatId);
 
         return { message: 'you have left the group', chatId };
@@ -592,10 +651,20 @@ export class ChatService {
         }
 
         const banRole = await this.getRoleOrFail(RoleChatEnum.BAN);
-        target.role = banRole;
-        await this.memberRepository.save(target);
-        // A banned admin loses their permission grants.
-        await this.removePermissionsForMember(target.id);
+        const serviceMessage = await this.memberRepository.manager.transaction(
+            async (manager) => {
+                target.role = banRole;
+                await manager.getRepository(ChatMember).save(target);
+                // A banned admin loses their permission grants.
+                await this.removePermissionsForMember(target.id, manager);
+                return createServiceMessage(manager, {
+                    chatId: target.chat.id,
+                    action: 'member_banned',
+                    actorId: Number(callerUserId),
+                    targetId: Number(target.user.id),
+                });
+            },
+        );
 
         this.groupRealtime.groupRemoved(
             target.chat.id,
@@ -603,6 +672,12 @@ export class ChatService {
             'banned',
         );
         this.groupRealtime.groupChanged(target.chat.id, 'member_banned');
+        this.groupRealtime.broadcastServiceMessage(
+            serviceMessage,
+            (await this.getMemberIds(target.chat.id)).filter(
+                (id) => Number(id) !== Number(target.user.id),
+            ),
+        );
         await this.notifyMembersCount(target.chat.id);
 
         return { message: 'user baned successfully' };
@@ -946,8 +1021,11 @@ export class ChatService {
         return role;
     }
 
-    private async removePermissionsForMember(memberId: number) {
-        await this.memberRepository.manager
+    private async removePermissionsForMember(
+        memberId: number,
+        manager = this.memberRepository.manager,
+    ) {
+        await manager
             .getRepository(PermissionAdmin)
             .delete({ member: { id: memberId } });
     }

@@ -10,6 +10,7 @@ import { AttachmentStatus } from 'src/modules/attachments/enums/attachmentStatus
 import { AttachmentService } from 'src/modules/attachments/services/attachment.service';
 import { ChatMember } from 'src/modules/chats/entities/chat_members.entity';
 import { RoleChatEnum } from 'src/common/enums/roleChat.enum';
+import { TypeMessageEnum } from 'src/common/enums/typeMessage.enum';
 import { ChatId, MessageId, UserId } from 'src/common/types/brands.type';
 import { JwtPayload } from 'src/common/types/jwt-payload.type';
 import { ForwardMessagesDto } from '../dtos/forwardMessages.dto';
@@ -169,6 +170,17 @@ export class MessageForwardService {
         if (messages.length !== ids.length) {
             throw new BadRequestException(
                 'One or more messages were not found in this chat or have been deleted',
+            );
+        }
+        // Membership service messages are not forwardable.
+        if (
+            messages.some(
+                (message) =>
+                    message.type?.name === (TypeMessageEnum.SYSTEM as string),
+            )
+        ) {
+            throw new BadRequestException(
+                'system messages cannot be forwarded',
             );
         }
         return messages.sort((a, b) => Number(a.id) - Number(b.id));

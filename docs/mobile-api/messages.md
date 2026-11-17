@@ -34,7 +34,7 @@ on the room event and the ack but is **not persisted** (history omits it).
 
 `sendChat` requires membership (`BadRequestException 'user not exit in chat'`). `sendPv` finds or creates a private Chat between the two users (`MessageService.sendPv`).
 
-`type` values: `text` | `image` | `video` | `file` | `voice` | `ice`. Note: only `text` (`TextContentHandler`) is registered in the content-handler pool (`message.module.ts`) — for other types the `ContentResolverService` would throw `Unsupported message type`, **but it isn't actually invoked in the create flow**; the server treats them as text today.
+`type` values: `text` | `image` | `video` | `file` | `voice` | `music` | `ice` | `system`. `system` is **server-authored only** (membership changes); a client `sendMessage` with `type: "system"` is rejected with 400 `system messages cannot be sent by clients`. Note: only `text` (`TextContentHandler`) is registered in the content-handler pool (`message.module.ts`) — for other types the `ContentResolverService` would throw `Unsupported message type`, **but it isn't actually invoked in the create flow**; the server treats them as text today.
 
 ### Validation failures (from the global WS `ValidationPipe`)
 
@@ -65,6 +65,8 @@ on the room event and the ack but is **not persisted** (history omits it).
         "content": "hello",
         "senderId": 7,
         "createdAt": "...",
+        "type": "text", // catalog name; "system" for a service preview
+        "meta": null,   // service-message contract, see below
         "attachments": [
             {
                 "id": 12,
@@ -112,6 +114,7 @@ download route serves the detected audio MIME inline.
     avatars: string[]    // at most the CURRENT photo: [path] or []
   },
   replyToId: number | null,
+  meta: ServiceMessageMeta | null, // system messages only, see below
   forwardedFrom: {        // first forward origin; null for ordinary messages
     userId: number | null, // null when the original user no longer exists
     name: string           // snapshot taken at first forward time
@@ -142,6 +145,49 @@ download route serves the detected audio MIME inline.
 
 (`getMessages`/`loadMessage` output above, from `MessageService.getPage` and `loadMessage`. Storage keys, paths (including `posterPath`), uploader ids and statuses are never serialized. `hasPoster` is derived from the private poster reference.)
 
+### Service (`system`) messages
+
+A membership change is a real message stored at that point in history (it
+survives restarts, pagination and the offline cache) and broadcast live like
+any other message. It has `type.name = "system"`, no attachments, is never
+editable/deletable and can never be replied to, forwarded or reacted to (400).
+
+`content` is a short English fallback sentence for clients that do not know
+the action. `meta` is the machine-readable contract (names are snapshots taken
+when the action happened):
+
+```ts
+type ServiceMessageAction =
+    | 'member_joined'          // joined by any non-invite path
+    | 'member_joined_via_link' // joined through an invite link
+    | 'member_added'           // an admin added the member
+    | 'member_left'            // the member left
+    | 'member_banned'          // the member was banned
+    | 'member_removed';        // the member was kicked
+
+interface ServiceMessageMeta {
+    action: ServiceMessageAction;
+    actorId: number;   // who performed the action (join/leave = the member)
+    actorName: string;
+    targetId: number;  // the member the action happened to
+    targetName: string;
+}
+```
+
+Rules:
+
+- `senderId` is the actor (for join/leave, the member themselves).
+- Created in the SAME transaction as the membership change; an idempotent
+  repeat (already a member, already banned, already left) creates nothing.
+- Broadcast as a normal `sendMessage:list` to `chat:<id>` after the change; a
+  joining member also receives it directly and everyone gets `chatlist:updated`
+  (so the chat-list preview shows the service sentence).
+- System messages are the chat's `lastMessage` when they are newest, but they
+  never increase `unreadCount` and are ignored by the `seen`/read-receipt
+  logic (no unread badges or notifications).
+- History (`getMessages`) returns them like any other message; media galleries
+  and search ignore them.
+
 ## Forwarding
 
 `forwardMessages` accepts:
@@ -163,7 +209,9 @@ Authorization is enforced per chat: the caller must be a member, not have the
 `ban` role, and the chat must not have `isBan = true`. Source failure rejects
 the whole request; a failing target returns `{ chatId, ok: false, message }`
 without blocking other targets. The source must belong to `fromChatId` and not
-be soft-deleted; a missing/foreign/deleted id rejects the whole selection.
+be soft-deleted; a missing/foreign/deleted id rejects the whole selection. A
+`system` source message rejects the whole request with
+`system messages cannot be forwarded`.
 
 ```json
 {
@@ -191,7 +239,7 @@ chat has been banned`, and `An attachment is no longer available`.
 
 ## Reply rules
 
-- `sendMessage.reply` is validated server-side: the original must exist in the **same chat** and have `isDeleted: false`, otherwise `BadRequestException 'reply message not found in this chat (or deleted)'`.
+- `sendMessage.reply` is validated server-side: the original must exist in the **same chat** and have `isDeleted: false`, otherwise `BadRequestException 'reply message not found in this chat (or deleted)'`. A `system` original is rejected with `system messages cannot be replied to`.
 - Missing/non-numeric `reply` means "no reply" (normalized, not rejected).
 - Reply-to-a-reply is allowed; only one preview level is serialized (`replyTo`).
 - A reply to a soft-deleted original is still returned with `replyTo.isDeleted: true` and `content: null`.
@@ -201,6 +249,7 @@ chat has been banned`, and `An attachment is no longer available`.
 - Must be the sender, not deleted, with existing non-empty text (attachments are allowed; only the caption changes).
 - Voice messages are never editable: `WsException('voice messages cannot be edited')`.
 - Forwarded messages are never editable: `WsException('forwarded messages cannot be edited')`.
+- Service messages are never editable: `WsException('system messages cannot be edited')`.
 - Attachment-only messages are rejected: `WsException('messages without text cannot be edited')`.
 - Non-owners get `WsException('you can only edit your own messages')`; empty new text gets `'message content is required'`; missing/deleted get `'message not found'`.
 - Sets `isEdited: true` and returns the full message with attachments/reply/forward fields loaded for the echo.
@@ -210,6 +259,7 @@ chat has been banned`, and `An attachment is no longer available`.
 - Sender-only soft delete (sets `isDeleted: true`) for every message kind; group owners may delete other members' messages.
 - Attachments and their files are cleaned up by the existing delayed cleanup job, while downloads of a soft-deleted message immediately return 404.
 - **Deleted messages are filtered from `getPage`** and do not appear in `getMessages`; peers learn of deletion only via the `deleteMessage:list` event.
+- Service messages are never deletable: `WsException('system messages cannot be deleted')`.
 
 ## Reactions
 

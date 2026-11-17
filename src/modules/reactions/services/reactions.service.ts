@@ -7,6 +7,7 @@ import { UpdateReactDto } from '../dto/update-react.dto';
 import { MessageReact } from '../entities/message_react.entity';
 import { ReactMessageDto } from '../dto/reaction.dto';
 import { Message } from 'src/modules/messages/entities/message.entity';
+import { TypeMessageEnum } from 'src/common/enums/typeMessage.enum';
 import { JwtPayload } from 'src/common/types/jwt-payload.type';
 import { WsException } from '@nestjs/websockets';
 import { RateLimitService } from 'src/common/services/rate-limit.service';
@@ -14,7 +15,6 @@ import {
     MessageReactionSummary,
     ReactionEntry,
     ReactionGroup,
-    ReactionSnapshot,
     ReactionSnapshotForViewer,
     ReactionState,
     ReactionToggleResult,
@@ -34,9 +34,7 @@ export function reactionSnapshotForViewer(
     const mine =
         viewerId === undefined || !Number.isFinite(viewerId)
             ? undefined
-            : state.reactions.find((entry) =>
-                  entry.userIds.includes(viewerId),
-              );
+            : state.reactions.find((entry) => entry.userIds.includes(viewerId));
     return {
         chatId: state.chatId,
         messageId: state.messageId,
@@ -123,8 +121,13 @@ export class ReactionsService {
                     chat: { id: chatId },
                     isDeleted: false,
                 },
+                relations: { type: true },
+                select: { id: true, type: { id: true, name: true } },
             });
             if (!message) throw new WsException('message not found');
+            if (message.type?.name === (TypeMessageEnum.SYSTEM as string)) {
+                throw new WsException('system messages cannot be reacted to');
+            }
 
             const existing = await this.messageReactRepository.findOne({
                 where: {
@@ -260,16 +263,23 @@ export class ReactionsService {
      * newest reactions first; profiles are joined in this one query and only
      * the public avatar/name/username projection is serialized.
      */
-    async reactorsFor(chatId: number, messageId: number): Promise<ReactionGroup[]> {
+    async reactorsFor(
+        chatId: number,
+        messageId: number,
+    ): Promise<ReactionGroup[]> {
         const message = await this.messageRepository.findOne({
             where: {
                 id: messageId as never,
                 chat: { id: chatId as never },
                 isDeleted: false,
             },
-            select: { id: true },
+            relations: { type: true },
+            select: { id: true, type: { id: true, name: true } },
         });
         if (!message) throw new WsException('message not found');
+        if (message.type?.name === (TypeMessageEnum.SYSTEM as string)) {
+            throw new WsException('system messages have no reactions');
+        }
 
         const rows = await this.messageReactRepository.find({
             where: { message: { id: messageId } },
@@ -350,9 +360,7 @@ export class ReactionsService {
 
     private async withLock<T>(key: string, run: () => Promise<T>): Promise<T> {
         const previous = this.locks.get(key) ?? Promise.resolve();
-        const current = previous
-            .catch((): void => undefined)
-            .then(run);
+        const current = previous.catch((): void => undefined).then(run);
         this.locks.set(key, current);
         try {
             return await current;

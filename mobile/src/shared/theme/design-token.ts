@@ -41,6 +41,9 @@ export const palette = {
         /** Text/icons placed on a purple accent surface. */
         onAccent: '#FFFFFF',
         inverse: '#09070F',
+        /** Centered service pill: 80% white, names at 95%. */
+        service: 'rgba(255,255,255,0.80)',
+        serviceName: 'rgba(255,255,255,0.95)',
     },
     border: {
         subtle: 'rgba(220,197,255,0.12)',
@@ -54,6 +57,9 @@ export const palette = {
         header: 'rgba(9,7,15,0.62)',
         accent: 'rgba(117,69,184,0.22)',
         highlight: 'rgba(220,197,255,0.08)',
+        /** Centered membership service pill + its hairline border. */
+        systemPill: 'rgba(20,10,40,0.55)',
+        systemPillBorder: 'rgba(255,255,255,0.10)',
     },
     semantic: {
         success: '#6FD79B',

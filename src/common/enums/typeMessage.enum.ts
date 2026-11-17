@@ -6,4 +6,6 @@ export enum TypeMessageEnum {
     VOICE = 'voice',
     MUSIC = 'music',
     ICE = 'ice',
+    /** Membership service message (centered pill, never user-authored). */
+    SYSTEM = 'system',
 }

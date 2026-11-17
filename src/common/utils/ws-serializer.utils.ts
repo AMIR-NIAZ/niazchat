@@ -162,6 +162,10 @@ export function serializeLastMessage(message: Message) {
         content: message.content ?? '',
         senderId: num(message.sender?.id ?? 0),
         createdAt: message.createdAt,
+        // `system` previews are rebuilt client-side from `meta` (same sentence
+        // builder as the in-chat pill); older clients fall back to `content`.
+        type: message.type?.name ?? 'text',
+        meta: message.meta ?? null,
         attachments: (message.attachments ?? []).map((attachment) =>
             serializeAttachmentMeta(attachment),
         ),
@@ -296,6 +300,8 @@ export function serializeMessage(
         type: message.type
             ? { id: num(message.type.id), name: message.type.name }
             : null,
+        // Service-message contract (null for every user-authored message).
+        meta: message.meta ?? null,
         attachments: (message.attachments ?? []).map((attachment) =>
             serializeAttachmentMeta(attachment),
         ),

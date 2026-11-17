@@ -44,6 +44,10 @@ export function getMessageActions(
     if (message.status !== 'sent' || message.id === null) {
         return NO_MESSAGE_ACTIONS;
     }
+    // Service pills are not selectable/quotable/forwardable/reactable.
+    if (message.type === 'system') {
+        return NO_MESSAGE_ACTIONS;
+    }
 
     const own = isOwnMessage(context.currentUserId, message.senderId);
     const isVoice =

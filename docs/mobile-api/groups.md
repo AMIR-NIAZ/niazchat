@@ -213,6 +213,12 @@ Ids are validated integers.
 Per-user rate limit: 30 actions per minute (Redis fixed window through the
 existing `RateLimitService`, 429 otherwise).
 
+Every membership change (join via invite link, add by admin, leave, ban, kick)
+also writes exactly one `system` message in the same transaction and broadcasts
+it to the group (see [messages.md](./messages.md#service-system-messages)). A
+repeated call that changes nothing (already a member / already banned) writes
+no message.
+
 ## Ban a member
 
 ```

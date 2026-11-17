@@ -10,13 +10,14 @@
 /** Minimal row shape accepted from `onViewableItemsChanged`. */
 export interface ViewableRow {
     kind: string;
-    message?: { id: number | null } | undefined;
+    message?: { id: number | null; type?: string } | undefined;
 }
 
 /** Minimal message shape accepted by the unread-block snapshot. */
 export interface ReadableMessage {
     id: number | null;
     senderId: number;
+    type?: string;
 }
 
 /**
@@ -39,6 +40,10 @@ export function firstUnreadMessageId(input: {
         if (id === null || !Number.isInteger(id) || id <= 0) {
             continue;
         }
+        // Service messages never anchor an unread block (they are not unread).
+        if (message.type === 'system') {
+            continue;
+        }
         if (message.senderId === myId) {
             continue;
         }
@@ -57,6 +62,10 @@ export function highestVisibleMessageId(
     let highest: number | null = null;
     for (const row of rows) {
         if (row.kind !== 'message') {
+            continue;
+        }
+        // A service pill is not a read position.
+        if (row.message?.type === 'system') {
             continue;
         }
         const id = row.message?.id;

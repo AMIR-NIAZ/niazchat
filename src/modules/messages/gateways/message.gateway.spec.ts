@@ -134,6 +134,8 @@ describe('MessageGateway', () => {
                 content: '',
                 senderId: 1,
                 createdAt: message.createdAt,
+                type: 'text',
+                meta: null,
                 attachments: [
                     {
                         id: 9,

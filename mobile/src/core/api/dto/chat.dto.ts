@@ -1,6 +1,7 @@
 /**
  * Chat DTOs (docs/mobile-api/chats.md, websocket.md).
  */
+import type { MessageTypeName, ServiceMessageMetaDto } from './message.dto';
 
 export type ChatType = 'private' | 'groupe' | 'channel';
 
@@ -32,6 +33,10 @@ export interface ChatLastMessageDto {
     content: string;
     senderId: number;
     createdAt: string;
+    /** Catalog name: `text`, `image`, … or `system` for a service preview. */
+    type?: MessageTypeName;
+    /** Service messages only: drives the same sentence as the in-chat pill. */
+    meta?: ServiceMessageMetaDto | null;
     attachments: Array<{
         id: number;
         originalName: string;

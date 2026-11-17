@@ -4,6 +4,10 @@ import type { ChatDto } from '../../core/api/dto/chat.dto';
 import type { ChatListUpdateDto } from '../../core/api/dto/message.dto';
 import type { UserDto } from '../../core/api/dto/user.dto';
 import { getChatDisplay } from './chats-model';
+import {
+    serviceMessageText,
+    toServiceMessage,
+} from '../messages/service-message';
 import type { ChatPeer, ChatPreview } from './chats-model';
 
 /**
@@ -47,9 +51,18 @@ export function lastMessageFromUpdate(
         return null;
     }
     const attachments = update.lastMessage.attachments ?? [];
+    const type = update.lastMessage.type ?? 'text';
     return {
         id: update.lastMessage.id,
         content: update.lastMessage.content,
+        type,
+        service:
+            type === 'system'
+                ? toServiceMessage(
+                      update.lastMessage.meta,
+                      update.lastMessage.content,
+                  )
+                : null,
         senderId: update.lastMessage.senderId,
         createdAt: update.lastMessage.createdAt,
         senderName:
@@ -92,10 +105,22 @@ export function toChatPeer(peer: ChatPeer | null | undefined): ChatPeer | null {
     };
 }
 
-/** Chat-list preview text: text, else a photo/file summary. */
-export function chatPreviewText(preview: ChatPreview['lastMessage']): string {
+/**
+ * Chat-list preview text: service sentence, then text, else an attachment
+ * summary. Uses the exact same pure builder as the in-chat service pill.
+ */
+export function chatPreviewText(
+    preview: ChatPreview['lastMessage'],
+    currentUserId: number | null = null,
+): string {
     if (preview === null) {
         return '—';
+    }
+    if (preview.type === 'system') {
+        const sentence = serviceMessageText(preview.service, currentUserId);
+        if (sentence.trim() !== '') {
+            return sentence;
+        }
     }
     if (preview.content.trim() !== '') {
         return preview.content;
@@ -163,12 +188,11 @@ export function filterChats(
     }
     return chats.filter((chat) => {
         const name = getChatDisplay(chat).title.toLowerCase();
-        const preview = chat.lastMessage?.content.toLowerCase() ?? '';
+        const preview =
+            chat.lastMessage === null
+                ? ''
+                : chatPreviewText(chat.lastMessage).toLowerCase();
         const username = chat.peer?.username?.toLowerCase() ?? '';
-        return (
-            name.includes(q) ||
-            username.includes(q) ||
-            preview.includes(q)
-        );
+        return name.includes(q) || username.includes(q) || preview.includes(q);
     });
 }

@@ -1,4 +1,5 @@
 import type { MessageTypeName } from '../../core/api/dto/message.dto';
+import type { ServiceMessage } from './service-message';
 
 /**
  * Domain model for the conversation screen (UI-facing), distinct from the wire
@@ -105,6 +106,11 @@ export interface ChatMessage {
     myReaction: string | null;
     /** False for broadcast/echo payloads that omitted `myReaction`. */
     myReactionProvided: boolean;
+    /**
+     * `system` messages only: the membership action + name snapshots. Null for
+     * every user-authored message (and for unknown/malformed meta).
+     */
+    service: ServiceMessage | null;
     /** Quoted preview when this message replies to another, else null. */
     replyTo: ReplyPreview | null;
     /** Wire id of the replied-to message, kept even if the preview is null. */

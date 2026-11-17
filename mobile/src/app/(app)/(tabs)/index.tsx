@@ -300,7 +300,10 @@ export default function ChatsScreen(): React.ReactElement {
                 <ChatRowPreview
                     chat={chat}
                     pinned={isPinned}
-                    previewText={chatPreviewText(chat.lastMessage)}
+                    previewText={chatPreviewText(
+                        chat.lastMessage,
+                        currentUserId,
+                    )}
                     width={anchor.width}
                 />
             ),
@@ -350,6 +353,7 @@ export default function ChatsScreen(): React.ReactElement {
                         renderItem={({ item }): React.ReactElement => (
                             <ChatRowItem
                                 chat={item}
+                                currentUserId={currentUserId}
                                 pinned={pinned.has(Number(item.id))}
                                 onHold={prefetchRole}
                                 onLongPress={openChatMenu}
@@ -477,6 +481,8 @@ function SearchIconButton(): React.ReactElement {
 
 interface ChatRowItemProps {
     chat: ChatRow;
+    /** Viewer id: a service preview addressed to them renders "You". */
+    currentUserId: number | null;
     pinned: boolean;
     /** Runs while the row is held: warms whatever the menu needs. */
     onHold: (chat: ChatRow) => void;
@@ -486,11 +492,11 @@ interface ChatRowItemProps {
 const LONG_PRESS_MS = 350;
 
 function ChatRowItem(props: ChatRowItemProps): React.ReactElement {
-    const { chat, pinned } = props;
+    const { chat, currentUserId, pinned } = props;
     const rowRef = useRef<ComponentRef<typeof View>>(null);
     // Releasing a hold that opened the menu must not also navigate.
     const pressStartedAtRef = useRef(0);
-    const previewText = chatPreviewText(chat.lastMessage);
+    const previewText = chatPreviewText(chat.lastMessage, currentUserId);
     // Hidden (opacity only, UI thread) while the popup draws this row's copy on
     // top of it. Applied to the row's own Pressable: no extra node, so the row
     // keeps its exact layout whether the popup is open or not.

@@ -51,6 +51,7 @@ function message(
         replyToId: null,
         status,
         pendingContent: null,
+        service: null,
 
         // New reaction fields
         reactions: [],

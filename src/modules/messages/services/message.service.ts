@@ -53,6 +53,14 @@ export class MessageService {
     async create(user: JwtPayload, dto: CreateMessageDto): Promise<Message> {
         const { chatId, reply, userId, type } = dto;
 
+        // `system` messages are written by membership services only; a client
+        // can never author one (and never fake a join/ban announcement).
+        if (type === TypeMessageEnum.SYSTEM) {
+            throw new BadRequestException(
+                'system messages cannot be sent by clients',
+            );
+        }
+
         // A message must have text, attachments, or both.
         const hasAttachments = !!dto.attachments?.length;
         const hasText = !!dto.content?.trim();
@@ -334,11 +342,17 @@ export class MessageService {
                 chat: { id: chatId },
                 isDeleted: false,
             },
-            select: { id: true },
+            relations: { type: true },
+            select: { id: true, type: { id: true, name: true } },
         });
         if (!original) {
             throw new BadRequestException(
                 'reply message not found in this chat (or deleted)',
+            );
+        }
+        if (original.type?.name === (TypeMessageEnum.SYSTEM as string)) {
+            throw new BadRequestException(
+                'system messages cannot be replied to',
             );
         }
         return replyId;
@@ -371,6 +385,7 @@ export class MessageService {
                 isDeleted: true,
                 forwardedFromUserId: true,
                 forwardedFromName: true,
+                meta: true,
                 chat: { id: true },
                 sender: {
                     id: true,
@@ -459,6 +474,7 @@ export class MessageService {
                 isDeleted: true,
                 forwardedFromUserId: true,
                 forwardedFromName: true,
+                meta: true,
                 chat: { id: true },
                 sender: {
                     id: true,
@@ -506,6 +522,9 @@ export class MessageService {
         });
         if (!message) throw new WsException('message not found');
 
+        if (message.type?.name === (TypeMessageEnum.SYSTEM as string)) {
+            throw new WsException('system messages cannot be edited');
+        }
         if (Number(message.sender?.id) !== Number(user.sub)) {
             throw new WsException('you can only edit your own messages');
         }
@@ -556,9 +575,12 @@ export class MessageService {
                 chat: { id: chatId },
                 isDeleted: false,
             },
-            relations: { sender: true },
+            relations: { sender: true, type: true },
         });
         if (!message) throw new WsException('message not found');
+        if (message.type?.name === (TypeMessageEnum.SYSTEM as string)) {
+            throw new WsException('system messages cannot be deleted');
+        }
 
         const isOwnMessage = Number(message.sender?.id) === Number(user.sub);
         if (!isOwnMessage) {
@@ -636,6 +658,7 @@ export class MessageService {
                 isDeleted: true,
                 forwardedFromUserId: true,
                 forwardedFromName: true,
+                meta: true,
                 sender: {
                     id: true,
                     profile: {

@@ -5,6 +5,7 @@ import { ChatSeen } from 'src/modules/chats/entities/chats_seen.entity';
 import { Attachment } from 'src/modules/attachments/entities/attachment.entity';
 import { Entity, Column, ManyToOne, OneToMany } from 'typeorm';
 import { TypeMessage } from './typeMessage.entity';
+import type { ServiceMessageMeta } from '../service-message.types';
 
 @Entity('messages')
 export class Message extends BaseEntity {
@@ -49,4 +50,11 @@ export class Message extends BaseEntity {
 
     @Column({ type: 'varchar', length: 100, nullable: true })
     forwardedFromName: string | null;
+
+    /**
+     * Service (`system`) messages only: the action plus actor/target snapshots.
+     * Null for every user-authored message.
+     */
+    @Column({ type: 'jsonb', nullable: true })
+    meta: ServiceMessageMeta | null;
 }

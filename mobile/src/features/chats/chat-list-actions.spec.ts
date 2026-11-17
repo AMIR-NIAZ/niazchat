@@ -14,6 +14,8 @@ function group(overrides: Partial<ChatPreview> = {}): ChatPreview {
         lastMessage: {
             id: 99,
             content: 'hello',
+            type: 'text',
+            service: null,
             senderName: 'Sara',
             senderId: 4,
             createdAt: '2026-01-02T10:00:00.000Z',
