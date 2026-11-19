@@ -16,7 +16,10 @@ import { AttachmentService } from 'src/modules/attachments/services/attachment.s
 import { ChatAccessService } from 'src/modules/chats/services/chat-access.service';
 import { PrivateChatService } from 'src/modules/chats/services/private-chat.service';
 import { ReactionsService } from 'src/modules/reactions/services/reactions.service';
+import { UserBlockService } from 'src/modules/chats/services/user-block.service';
+import { ChatService } from 'src/modules/chats/services/chat.service';
 import { TypeChatEnum } from 'src/common/enums/typeChat.enum';
+import { DEFAULT_MEMBER_PERMISSIONS } from 'src/modules/chats/utils/member-permissions.util';
 import { DataSource } from 'typeorm';
 import { JwtPayload } from 'src/common/types/jwt-payload.type';
 
@@ -31,6 +34,7 @@ describe('MessageService (attachment integration)', () => {
     };
     let transaction: jest.Mock;
     let attachmentService: { findUsable: jest.Mock; bindToMessage: jest.Mock };
+    let access: { getCallerContext: jest.Mock; assertRole: jest.Mock };
 
     const user: JwtPayload = { sub: 1 as never, role: 'user' };
     const typeData = { id: 7, name: 'text' };
@@ -67,6 +71,16 @@ describe('MessageService (attachment integration)', () => {
         };
         transaction = jest.fn();
         attachmentService = { findUsable: jest.fn(), bindToMessage: jest.fn() };
+        access = {
+            getCallerContext: jest.fn().mockResolvedValue({
+                chat: { id: 10, type: TypeChatEnum.PRIVATE },
+                roleName: 'user',
+                isManager: false,
+                isAdmin: false,
+                permissions: [],
+            }),
+            assertRole: jest.fn(),
+        };
 
         transaction.mockImplementation(
             (cb: (manager: unknown) => Promise<unknown>) =>
@@ -113,10 +127,7 @@ describe('MessageService (attachment integration)', () => {
                     },
                 },
                 { provide: AttachmentService, useValue: attachmentService },
-                {
-                    provide: ChatAccessService,
-                    useValue: { getCallerContext: jest.fn() },
-                },
+                { provide: ChatAccessService, useValue: access },
                 {
                     provide: PrivateChatService,
                     useValue: { ensureChat: jest.fn() },
@@ -127,6 +138,23 @@ describe('MessageService (attachment integration)', () => {
                         clearForMessage: jest.fn(),
                         summariesFor: jest.fn(),
                         myReactionsFor: jest.fn(),
+                    },
+                },
+                {
+                    provide: UserBlockService,
+                    useValue: {
+                        assertCanCommunicate: jest
+                            .fn()
+                            .mockResolvedValue(undefined),
+                        assertCanMessageUser: jest
+                            .fn()
+                            .mockResolvedValue(undefined),
+                    },
+                },
+                {
+                    provide: ChatService,
+                    useValue: {
+                        getClearedBeforeId: jest.fn().mockResolvedValue(null),
                     },
                 },
             ],
@@ -369,12 +397,9 @@ describe('MessageService (attachment integration)', () => {
     });
 
     it('rejects messages whose sender is not a chat member', async () => {
-        const module = service as unknown as {
-            memberRepository: { findOne: jest.Mock };
-        };
-        module.memberRepository = {
-            findOne: jest.fn().mockResolvedValue(null),
-        };
+        access.getCallerContext.mockRejectedValue(
+            new BadRequestException('user not exit in chat'),
+        );
 
         await expect(
             service.create(
@@ -382,6 +407,7 @@ describe('MessageService (attachment integration)', () => {
                 { chatId: 10, content: 'x', type: 'text' } as never,
             ),
         ).rejects.toThrow(/not exit in chat/);
+        expect(transaction).not.toHaveBeenCalled();
     });
 
     it('persists a reply only when the original is in the same chat and not deleted', async () => {
@@ -444,6 +470,231 @@ describe('MessageService (attachment integration)', () => {
             expect.objectContaining({ replyTo: { id: undefined } }),
         );
     });
+
+    // ── group member permission policy (backend enforcement) ──────────────
+
+    const groupCaller = (
+        overrides: Record<string, boolean> = {},
+        role: { isManager?: boolean; isAdmin?: boolean } = {},
+        effectiveOverrides: Record<string, boolean> = {},
+    ) => {
+        const groupPermissions = {
+            ...DEFAULT_MEMBER_PERMISSIONS,
+            ...overrides,
+        };
+        return {
+            chat: {
+                id: 10,
+                type: TypeChatEnum.GRUPE,
+                memberPermissions: groupPermissions,
+            },
+            roleName: 'user',
+            isManager: role.isManager ?? false,
+            isAdmin: role.isAdmin ?? false,
+            permissions: [],
+            // The resolver's output: defaults + this member's overrides.
+            effectiveMemberPermissions: {
+                ...groupPermissions,
+                ...effectiveOverrides,
+            },
+        };
+    };
+
+    it('blocks a member text message when send_messages is off', async () => {
+        access.getCallerContext.mockResolvedValue(
+            groupCaller({ send_messages: false }),
+        );
+
+        await expect(
+            service.create(
+                user as never,
+                {
+                    chatId: 10,
+                    content: 'hello',
+                    type: 'text',
+                } as never,
+            ),
+        ).rejects.toThrow(/Sending text messages is disabled/);
+        expect(transaction).not.toHaveBeenCalled();
+    });
+
+    it('blocks a member message containing a link when send_links is off', async () => {
+        access.getCallerContext.mockResolvedValue(
+            groupCaller({ send_links: false }),
+        );
+
+        await expect(
+            service.create(
+                user as never,
+                {
+                    chatId: 10,
+                    content: 'see https://example.com/invite',
+                    type: 'text',
+                } as never,
+            ),
+        ).rejects.toThrow(/Sending links is disabled/);
+        expect(transaction).not.toHaveBeenCalled();
+    });
+
+    it('blocks an image when send_media is off', async () => {
+        access.getCallerContext.mockResolvedValue(
+            groupCaller({ send_media: false }),
+        );
+        attachmentService.findUsable.mockResolvedValue([
+            { id: 9, mimeType: 'image/jpeg', voice: false },
+        ]);
+
+        await expect(
+            service.create(
+                user as never,
+                {
+                    chatId: 10,
+                    content: '',
+                    type: 'image',
+                    attachments: [9],
+                } as never,
+            ),
+        ).rejects.toThrow(/Sending photos and videos is disabled/);
+        expect(transaction).not.toHaveBeenCalled();
+    });
+
+    it('blocks a voice message when send_voice is off', async () => {
+        access.getCallerContext.mockResolvedValue(
+            groupCaller({ send_voice: false }),
+        );
+        attachmentService.findUsable.mockResolvedValue([
+            { id: 9, mimeType: 'audio/mp4', voice: true },
+        ]);
+
+        await expect(
+            service.create(
+                user as never,
+                {
+                    chatId: 10,
+                    content: '',
+                    type: 'voice',
+                    attachments: [9],
+                } as never,
+            ),
+        ).rejects.toThrow(/Sending voice messages is disabled/);
+        expect(transaction).not.toHaveBeenCalled();
+    });
+
+    it('blocks a file when send_files is off', async () => {
+        access.getCallerContext.mockResolvedValue(
+            groupCaller({ send_files: false }),
+        );
+        attachmentService.findUsable.mockResolvedValue([
+            { id: 9, mimeType: 'application/pdf', voice: false },
+        ]);
+
+        await expect(
+            service.create(
+                user as never,
+                {
+                    chatId: 10,
+                    content: '',
+                    type: 'file',
+                    attachments: [9],
+                } as never,
+            ),
+        ).rejects.toThrow(/Sending files is disabled/);
+        expect(transaction).not.toHaveBeenCalled();
+    });
+
+    it('honors an individual allow override of a disabled group default', async () => {
+        access.getCallerContext.mockResolvedValue(
+            groupCaller({ send_files: false }, {}, { send_files: true }),
+        );
+        attachmentService.findUsable.mockResolvedValue([
+            { id: 9, mimeType: 'application/pdf', voice: false },
+        ]);
+
+        await expect(
+            service.create(
+                user as never,
+                {
+                    chatId: 10,
+                    content: '',
+                    type: 'file',
+                    attachments: [9],
+                } as never,
+            ),
+        ).resolves.toBeDefined();
+    });
+
+    it('honors an individual deny override of an enabled group default', async () => {
+        access.getCallerContext.mockResolvedValue(
+            groupCaller({}, {}, { send_messages: false }),
+        );
+
+        await expect(
+            service.create(
+                user as never,
+                {
+                    chatId: 10,
+                    content: 'hello',
+                    type: 'text',
+                } as never,
+            ),
+        ).rejects.toThrow(/Sending text messages is disabled/);
+    });
+
+    it('allows a member when the switch is on', async () => {
+        access.getCallerContext.mockResolvedValue(groupCaller());
+
+        await expect(
+            service.create(
+                user as never,
+                {
+                    chatId: 10,
+                    content: 'hello',
+                    type: 'text',
+                } as never,
+            ),
+        ).resolves.toBeDefined();
+        expect(transaction).toHaveBeenCalled();
+    });
+
+    it('never restricts the owner', async () => {
+        access.getCallerContext.mockResolvedValue(
+            groupCaller(
+                { send_messages: false, send_links: false },
+                {
+                    isManager: true,
+                },
+            ),
+        );
+
+        await expect(
+            service.create(
+                user as never,
+                {
+                    chatId: 10,
+                    content: 'https://example.com',
+                    type: 'text',
+                } as never,
+            ),
+        ).resolves.toBeDefined();
+        expect(transaction).toHaveBeenCalled();
+    });
+
+    it('never restricts an admin even when the member switch is off', async () => {
+        access.getCallerContext.mockResolvedValue(
+            groupCaller({ send_messages: false }, { isAdmin: true }),
+        );
+
+        await expect(
+            service.create(
+                user as never,
+                {
+                    chatId: 10,
+                    content: 'hello',
+                    type: 'text',
+                } as never,
+            ),
+        ).resolves.toBeDefined();
+    });
 });
 
 describe('MessageService edit/delete rules (ownership, chat match, state)', () => {
@@ -505,6 +756,23 @@ describe('MessageService edit/delete rules (ownership, chat match, state)', () =
                 {
                     provide: ReactionsService,
                     useValue: reactions,
+                },
+                {
+                    provide: UserBlockService,
+                    useValue: {
+                        assertCanCommunicate: jest
+                            .fn()
+                            .mockResolvedValue(undefined),
+                        assertCanMessageUser: jest
+                            .fn()
+                            .mockResolvedValue(undefined),
+                    },
+                },
+                {
+                    provide: ChatService,
+                    useValue: {
+                        getClearedBeforeId: jest.fn().mockResolvedValue(null),
+                    },
                 },
             ],
         }).compile();
@@ -701,6 +969,8 @@ describe('MessageService edit/delete rules (ownership, chat match, state)', () =
 
         expect(messageRepository.update).toHaveBeenCalledWith(200, {
             isDeleted: true,
+            isPinned: false,
+            pinnedAt: null,
         });
         expect(reactions.clearForMessage).toHaveBeenCalledWith(200);
     });
@@ -715,12 +985,15 @@ describe('MessageService edit/delete rules (ownership, chat match, state)', () =
 
         expect(messageRepository.update).toHaveBeenCalledWith(200, {
             isDeleted: true,
+            isPinned: false,
+            pinnedAt: null,
         });
     });
 
     it("rejects deleting someone else's message for members and non-owner admins", async () => {
         messageRepository.findOne.mockResolvedValue({
             ...ownTextMessage,
+            chat: { id: 10, type: TypeChatEnum.GRUPE },
             sender: { id: 2, profile: null },
         });
         // `isManager` is the chat `manager` role only; a chat admin also gets
@@ -735,14 +1008,41 @@ describe('MessageService edit/delete rules (ownership, chat match, state)', () =
                 { chatId: 10, messageId: 200 } as never,
                 user as never,
             ),
-        ).rejects.toThrow(/only the group owner/);
+        ).rejects.toThrow("You don't have permission to do this");
         expect(access.getCallerContext).toHaveBeenCalledWith(10, 1);
         expect(messageRepository.update).not.toHaveBeenCalled();
+    });
+
+    it("lets an admin with manage_messages delete another member's message", async () => {
+        messageRepository.findOne.mockResolvedValue({
+            ...ownTextMessage,
+            chat: { id: 10, type: TypeChatEnum.GRUPE },
+            sender: { id: 2, profile: null },
+        });
+        // `manage_messages` implies `delete_other_messages`.
+        access.getCallerContext.mockResolvedValue({
+            isManager: false,
+            isAdmin: true,
+            permissions: ['manage_messages'],
+            chat: { type: TypeChatEnum.GRUPE },
+        });
+
+        await service.delete(
+            { chatId: 10, messageId: 200 } as never,
+            user as never,
+        );
+
+        expect(messageRepository.update).toHaveBeenCalledWith(200, {
+            isDeleted: true,
+            isPinned: false,
+            pinnedAt: null,
+        });
     });
 
     it("lets the group owner delete another member's message", async () => {
         messageRepository.findOne.mockResolvedValue({
             ...ownTextMessage,
+            chat: { id: 10, type: TypeChatEnum.GRUPE },
             sender: { id: 2, profile: null },
         });
         access.getCallerContext.mockResolvedValue({
@@ -758,6 +1058,8 @@ describe('MessageService edit/delete rules (ownership, chat match, state)', () =
         expect(access.getCallerContext).toHaveBeenCalledWith(10, 1);
         expect(messageRepository.update).toHaveBeenCalledWith(200, {
             isDeleted: true,
+            isPinned: false,
+            pinnedAt: null,
         });
     });
 
@@ -862,6 +1164,23 @@ describe('MessageService.getPage (cursor pagination)', () => {
                         clearForMessage: jest.fn(),
                         summariesFor: jest.fn(),
                         myReactionsFor: jest.fn(),
+                    },
+                },
+                {
+                    provide: UserBlockService,
+                    useValue: {
+                        assertCanCommunicate: jest
+                            .fn()
+                            .mockResolvedValue(undefined),
+                        assertCanMessageUser: jest
+                            .fn()
+                            .mockResolvedValue(undefined),
+                    },
+                },
+                {
+                    provide: ChatService,
+                    useValue: {
+                        getClearedBeforeId: jest.fn().mockResolvedValue(null),
                     },
                 },
             ],

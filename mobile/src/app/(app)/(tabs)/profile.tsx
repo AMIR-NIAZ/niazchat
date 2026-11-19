@@ -372,6 +372,7 @@ export default function ProfileScreen(): React.ReactElement {
 
                 <GlassCard padding={spacing.md} contentStyle={styles.infoCard}>
                     <InfoRow label="Name" value={user.name} />
+                    <InfoRow label="User ID" value={String(user.id)} />
                     <InfoRow
                         label="Username"
                         value={

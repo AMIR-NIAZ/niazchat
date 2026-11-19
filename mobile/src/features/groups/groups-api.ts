@@ -8,12 +8,27 @@ import type {
     GroupInfoUpdateResponse,
     GroupMember,
     GroupMemberPage,
+    GroupMemberPermissionsResponse,
+    GroupMemberPermissionsUpdateResponse,
+    GroupMemberPermissionsConfig,
     MemberActionResponse,
     MemberPermissionKey,
+    MemberPermissionOverridesResponse,
+    MemberPermissionOverridesUpdateResponse,
+    MemberPermissionOverrideState,
     MemberPermissions,
     MemberPermissionsUpdate,
+    AddMemberFailure,
+    AddMembersResult,
+    AddedGroupMember,
 } from './group-model';
-import { isMemberPermissionKey } from './group-model';
+import {
+    explicitPermissions,
+    isGroupPermissionKey,
+    PERMISSION_META,
+    normalizeGroupMemberPermissions,
+    normalizeMemberPermissionOverrides,
+} from './permissions';
 import { normalizeAvatarMime } from '../users/profile-service';
 
 /**
@@ -58,7 +73,22 @@ function toGroupInfo(raw: GroupInfo): GroupInfo {
             canEditInfo: raw.capabilities?.canEditInfo === true,
             canManageInviteLinks:
                 raw.capabilities?.canManageInviteLinks === true,
+            canManageInvites: raw.capabilities?.canManageInvites === true,
             canManageBans: raw.capabilities?.canManageBans === true,
+            canRemoveMembers: raw.capabilities?.canRemoveMembers === true,
+            canManageMembers: raw.capabilities?.canManageMembers === true,
+            canDeleteOthersMessages:
+                raw.capabilities?.canDeleteOthersMessages === true,
+            canPinMessages: raw.capabilities?.canPinMessages === true,
+            canManageAdmins: raw.capabilities?.canManageAdmins === true,
+            canManagePermissions:
+                raw.capabilities?.canManagePermissions === true,
+            canRestrictMembers: raw.capabilities?.canRestrictMembers === true,
+            canManageVoiceChats: raw.capabilities?.canManageVoiceChats === true,
+            canManageMemberPermissions:
+                raw.capabilities?.canManageMemberPermissions === true,
+            canAddMembers: raw.capabilities?.canAddMembers === true,
+            canInviteViaLink: raw.capabilities?.canInviteViaLink === true,
         },
         owner:
             raw.owner === null || raw.owner === undefined
@@ -81,12 +111,19 @@ function toGroupMember(raw: GroupMember): GroupMember {
         isOnline: raw.isOnline === true,
         lastSeen: raw.lastSeen ?? null,
         role: raw.role,
+        permissions: explicitPermissions(raw.permissions),
+        promotedById:
+            raw.promotedById === null || raw.promotedById === undefined
+                ? null
+                : number(raw.promotedById),
         actions: {
             canPromote: raw.actions?.canPromote === true,
             canDemote: raw.actions?.canDemote === true,
             canRemove: raw.actions?.canRemove === true,
             canEditPermissions: raw.actions?.canEditPermissions === true,
             canBan: raw.actions?.canBan === true,
+            canManageMemberPermissions:
+                raw.actions?.canManageMemberPermissions === true,
         },
     };
 }
@@ -94,6 +131,76 @@ function toGroupMember(raw: GroupMember): GroupMember {
 export async function fetchGroupInfo(chatId: number): Promise<GroupInfo> {
     const response = await httpClient.get<GroupInfo>(`/chats/${chatId}/group`);
     return toGroupInfo(response.data);
+}
+
+/**
+ * Adds up to 50 users in one batch (`POST /chats/:chatId/members`). Each user
+ * is accepted or rejected independently: the response carries both arrays so
+ * the app can report partial success.
+ */
+export async function addGroupMembers(
+    chatId: number,
+    userIds: number[],
+): Promise<AddMembersResult> {
+    const response = await httpClient.post<AddMembersResult>(
+        `/chats/${chatId}/members`,
+        { userIds },
+    );
+    return {
+        added: (response.data.added ?? []).map(
+            (member): AddedGroupMember => ({
+                memberId: number(member.memberId),
+                userId: number(member.userId),
+                name: member.name ?? '',
+                username: member.username ?? null,
+                avatars: Array.isArray(member.avatars) ? member.avatars : [],
+                role: 'member',
+            }),
+        ),
+        failed: (response.data.failed ?? []).map(
+            (failure): AddMemberFailure => ({
+                userId: number(failure.userId),
+                code: failure.code,
+                message: failure.message ?? 'This user could not be added',
+            }),
+        ),
+        membersCount: number(response.data.membersCount),
+    };
+}
+
+
+
+/** Server cap for one members page (same as the members endpoint). */
+const GROUP_MEMBER_IDS_PAGE_SIZE = 100;
+const GROUP_MEMBER_IDS_MAX_PAGES = 50;
+
+/**
+ * Every active member id of the group, paged with the existing members
+ * endpoint. Used by the contacts picker to disable people already in the group;
+ * it never returns banned rows.
+ */
+export async function fetchGroupMemberIds(
+    chatId: number,
+): Promise<Set<number>> {
+    const ids = new Set<number>();
+    let cursor: string | null = null;
+    for (let page = 0; page < GROUP_MEMBER_IDS_MAX_PAGES; page += 1) {
+        const params: Record<string, string | number> = {
+            limit: GROUP_MEMBER_IDS_PAGE_SIZE,
+        };
+        if (cursor !== null) params.cursor = cursor;
+        const response = await httpClient.get<GroupMemberPage>(
+            `/chats/${chatId}/members`,
+            { params },
+        );
+        for (const item of response.data.items ?? []) {
+            ids.add(number(item.userId));
+        }
+        const next = response.data.nextCursor ?? null;
+        if (next === null || next === '') return ids;
+        cursor = next;
+    }
+    return ids;
 }
 
 export async function fetchGroupMembers(
@@ -177,9 +284,11 @@ function toMemberActionResponse(
 export async function promoteMember(
     chatId: number,
     memberId: number,
+    permissions: MemberPermissionKey[],
 ): Promise<MemberActionResponse> {
     const response = await httpClient.post<MemberActionResponse>(
         `/chats/${chatId}/members/${memberId}/promote`,
+        { permissions },
     );
     return toMemberActionResponse(response.data);
 }
@@ -220,7 +329,7 @@ export async function banMember(
 }
 
 function permissionKeys(value: unknown): MemberPermissionKey[] {
-    return Array.isArray(value) ? value.filter(isMemberPermissionKey) : [];
+    return explicitPermissions(Array.isArray(value) ? value : []);
 }
 
 function toMemberPermissions(raw: MemberPermissions): MemberPermissions {
@@ -230,14 +339,26 @@ function toMemberPermissions(raw: MemberPermissions): MemberPermissions {
         role: 'admin',
         available: Array.isArray(raw.available)
             ? raw.available
-                  .filter((option) => isMemberPermissionKey(option.key))
+                  .filter((option) => isGroupPermissionKey(option.key))
                   .map((option) => ({
                       key: option.key,
                       label: option.label ?? option.key,
+                      active: option.active !== false,
+                      description:
+                          option.description ??
+                          PERMISSION_META[option.key].description,
+                      implies: Array.isArray(option.implies)
+                          ? option.implies.filter(isGroupPermissionKey)
+                          : [...PERMISSION_META[option.key].implies],
                   }))
             : [],
         granted: permissionKeys(raw.granted),
         hasAll: raw.hasAll === true,
+        grantable: permissionKeys(raw.grantable),
+        promotedById:
+            raw.promotedById === null || raw.promotedById === undefined
+                ? null
+                : number(raw.promotedById),
     };
 }
 
@@ -353,6 +474,106 @@ function toAvatarMutation(
     };
 }
 
+function toGroupMemberPermissions(
+    raw: GroupMemberPermissionsResponse,
+): GroupMemberPermissionsResponse {
+    return {
+        chatId: number(raw.chatId),
+        permissions: normalizeGroupMemberPermissions(
+            raw.permissions,
+        ) as GroupMemberPermissionsConfig,
+        canEdit: raw.canEdit === true,
+    };
+}
+
+/** The group's member policy (readable by every non-banned member). */
+export async function fetchGroupMemberPermissions(
+    chatId: number,
+): Promise<GroupMemberPermissionsResponse> {
+    const response = await httpClient.get<GroupMemberPermissionsResponse>(
+        `/chats/${chatId}/member-permissions`,
+    );
+    return toGroupMemberPermissions(response.data);
+}
+
+/** Partial update; only the changed switches are sent. */
+export async function updateGroupMemberPermissions(
+    chatId: number,
+    patch: Partial<GroupMemberPermissionsConfig>,
+): Promise<GroupMemberPermissionsUpdateResponse> {
+    const response =
+        await httpClient.patch<GroupMemberPermissionsUpdateResponse>(
+            `/chats/${chatId}/member-permissions`,
+            patch,
+        );
+    return {
+        ...toGroupMemberPermissions(response.data),
+        changed: response.data.changed === true,
+    };
+}
+
+function toMemberPermissionOverrides(
+    raw: MemberPermissionOverridesResponse,
+): MemberPermissionOverridesResponse {
+    return {
+        chatId: number(raw.chatId),
+        memberId: number(raw.memberId),
+        userId: number(raw.userId),
+        role: 'member',
+        groupPermissions: normalizeGroupMemberPermissions(
+            raw.groupPermissions,
+        ) as GroupMemberPermissionsConfig,
+        overrides: normalizeMemberPermissionOverrides(raw.overrides),
+        effective: normalizeGroupMemberPermissions(
+            raw.effective,
+        ) as GroupMemberPermissionsConfig,
+        canEdit: raw.canEdit === true,
+    };
+}
+
+/** One member's individual overrides + effective permissions. */
+export async function fetchMemberPermissionOverrides(
+    chatId: number,
+    memberId: number,
+): Promise<MemberPermissionOverridesResponse> {
+    const response = await httpClient.get<MemberPermissionOverridesResponse>(
+        `/chats/${chatId}/members/${memberId}/permission-overrides`,
+    );
+    return toMemberPermissionOverrides(response.data);
+}
+
+/** Partial tri-state patch; `inherit` resets that single key. */
+export async function updateMemberPermissionOverrides(
+    chatId: number,
+    memberId: number,
+    patch: Partial<Record<MemberPermissionKey, MemberPermissionOverrideState>>,
+): Promise<MemberPermissionOverridesUpdateResponse> {
+    const response =
+        await httpClient.patch<MemberPermissionOverridesUpdateResponse>(
+            `/chats/${chatId}/members/${memberId}/permission-overrides`,
+            patch,
+        );
+    return {
+        ...toMemberPermissionOverrides(response.data),
+        changed: response.data.changed === true,
+    };
+}
+
+/** Resets every override of one member to `inherit`. */
+export async function resetMemberPermissionOverrides(
+    chatId: number,
+    memberId: number,
+): Promise<MemberPermissionOverridesUpdateResponse> {
+    const response =
+        await httpClient.delete<MemberPermissionOverridesUpdateResponse>(
+            `/chats/${chatId}/members/${memberId}/permission-overrides`,
+        );
+    return {
+        ...toMemberPermissionOverrides(response.data),
+        changed: response.data.changed === true,
+    };
+}
+
 export async function updateMemberPermissions(
     chatId: number,
     memberId: number,
@@ -365,6 +586,7 @@ export async function updateMemberPermissions(
     return {
         memberId: number(response.data.memberId),
         granted: permissionKeys(response.data.granted),
+        hasAll: response.data.hasAll === true,
         changed: response.data.changed === true,
     };
 }

@@ -3,6 +3,7 @@ import { Chat } from 'src/modules/chats/entities/chat.entity';
 import { User } from 'src/modules/auth/entities/user.entity';
 import { UserProfile } from 'src/modules/auth/entities/user_profile.entity';
 import { TypeChatEnum } from 'src/common/enums/typeChat.enum';
+import { sanitizeUserForViewer } from 'src/modules/visibility/visibility.util';
 import { attachmentKindOf } from './attachment-kind.util';
 import type { MessageReactionSummary } from 'src/modules/reactions/reaction.types';
 
@@ -110,17 +111,23 @@ function normalizeWaveform(
  * Compact quoted-message preview (never the full entity). A soft-deleted
  * original keeps its id/flag but leaks no content.
  */
-export function serializeReplyPreview(reply: Message | null | undefined) {
+export function serializeReplyPreview(
+    reply: Message | null | undefined,
+    hiddenUserIds?: ReadonlySet<number>,
+) {
     if (reply === undefined || reply === null) {
         return null;
     }
     const isDeleted = reply.isDeleted === true;
+    const replySenderId = num(reply.sender?.id ?? 0);
+    const hideSender = hiddenUserIds?.has(replySenderId) === true;
     const firstAttachment = reply.attachments?.[0];
     return {
         id: num(reply.id),
         content: isDeleted ? null : truncateReplyContent(reply.content),
-        senderId: num(reply.sender?.id ?? 0),
-        senderName: reply.sender?.profile?.name ?? '',
+        senderId: replySenderId,
+        // A user who blocked the viewer stays unnamed in quoted previews too.
+        senderName: hideSender ? '' : (reply.sender?.profile?.name ?? ''),
         type: reply.type?.name ?? 'text',
         attachmentsCount: reply.attachments?.length ?? 0,
         attachmentKind: isDeleted
@@ -221,7 +228,10 @@ export function serializeChat(
  * at most the CURRENT photo (index 0 convention), keeping the array shape the
  * app already maps.
  */
-function serializeMessageSender(message: Message) {
+function serializeMessageSender(
+    message: Message,
+    hiddenUserIds?: ReadonlySet<number>,
+) {
     const sender = message.sender as
         | (User & {
               name?: string;
@@ -247,12 +257,15 @@ function serializeMessageSender(message: Message) {
         profile !== null ? (profile.avatars ?? []) : (sender.avatars ?? []);
     const current = photos[0];
 
-    return {
-        id: num(sender.id),
-        name,
-        username,
-        avatars: current === undefined ? [] : [current],
-    };
+    return sanitizeUserForViewer(
+        {
+            id: num(sender.id),
+            name,
+            username,
+            avatars: current === undefined ? [] : [current],
+        },
+        hiddenUserIds?.has(Number(sender.id)) === true,
+    );
 }
 
 /**
@@ -260,10 +273,20 @@ function serializeMessageSender(message: Message) {
  * sender, the type row and the attachments. No `chat` object. Attachment paths
  * and storage keys never leave the server.
  */
+export interface MessageSerializeOptions {
+    /**
+     * User ids whose details are hidden from the recipient: users who blocked
+     * the viewer. Applied to the sender, the quoted sender and the forward
+     * origin. Omit for public/deleted snapshots.
+     */
+    hiddenUserIds?: ReadonlySet<number>;
+}
+
 export function serializeMessage(
     message: Message,
     reactions: MessageReactionSummary[] = [],
     myReaction?: string | null,
+    options: MessageSerializeOptions = {},
 ) {
     // `clientMessageId` is a transient echo field (not persisted): history
     // pages and older messages simply do not carry it.
@@ -277,14 +300,16 @@ export function serializeMessage(
         updatedAt: message.updatedAt,
         isEdited: message.isEdited,
         isDeleted: message.isDeleted,
+        isPinned: message.isPinned === true,
+        pinnedAt: message.pinnedAt ?? null,
         chatId: num(message.chat?.id ?? 0),
         senderId: num(message.sender?.id ?? 0),
-        sender: serializeMessageSender(message),
+        sender: serializeMessageSender(message, options.hiddenUserIds),
         replyToId:
             message.replyTo !== undefined && message.replyTo !== null
                 ? num(message.replyTo.id)
                 : null,
-        replyTo: serializeReplyPreview(message.replyTo),
+        replyTo: serializeReplyPreview(message.replyTo, options.hiddenUserIds),
         forwardedFrom:
             message.forwardedFromUserId == null &&
             message.forwardedFromName == null
@@ -294,7 +319,13 @@ export function serializeMessage(
                           message.forwardedFromUserId == null
                               ? null
                               : num(message.forwardedFromUserId),
-                      name: message.forwardedFromName ?? '',
+                      name:
+                          message.forwardedFromUserId != null &&
+                          options.hiddenUserIds?.has(
+                              Number(message.forwardedFromUserId),
+                          ) === true
+                              ? ''
+                              : (message.forwardedFromName ?? ''),
                   },
         typeId: message.type?.id ? num(message.type.id) : null,
         type: message.type

@@ -7,7 +7,7 @@ import {
     NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { RoleChatEnum } from 'src/common/enums/roleChat.enum';
 import { TypeChatEnum } from 'src/common/enums/typeChat.enum';
 import { RateLimitService } from 'src/common/services/rate-limit.service';
@@ -17,13 +17,18 @@ import { UserProfile } from 'src/modules/auth/entities/user_profile.entity';
 import { Chat } from '../entities/chat.entity';
 import { ChatMember } from '../entities/chat_members.entity';
 import { Link } from '../entities/link.entity';
+import { PermissionAdmin } from '../entities/permission_admin.entity';
 import { RoleChat } from '../entities/role_chat.entity';
+import { normalizePermissions } from '../utils/group-permissions.util';
 import { type GroupRole, toGroupRole } from '../utils/group-members.util';
 import {
     canManageInviteLinks,
+    callerMemberPermissions,
     ChatCallerContext,
     ChatPermissionService,
 } from './chat-permission.service';
+import { MemberPermissionResolverService } from './member-permission-resolver.service';
+import { MEMBER_PERMISSION_FORBIDDEN } from '../utils/member-permissions.util';
 import { GroupRealtimeService } from './group-realtime.service';
 import { createServiceMessage } from '../utils/service-message.util';
 import type { Message } from 'src/modules/messages/entities/message.entity';
@@ -120,6 +125,7 @@ export class GroupInviteLinksService {
         private readonly permissions: ChatPermissionService,
         private readonly realtime: GroupRealtimeService,
         private readonly rateLimit: RateLimitService,
+        private readonly memberPermissions: MemberPermissionResolverService,
     ) {}
 
     // ── management ─────────────────────────────────────────────────────────
@@ -128,7 +134,10 @@ export class GroupInviteLinksService {
         chatId: ChatId,
         callerUserId: UserId,
     ): Promise<InviteLinksResponse> {
-        await this.assertManager(chatId, callerUserId);
+        const isRegularMember = await this.assertInviteSharer(
+            chatId,
+            callerUserId,
+        );
         await this.consumeManage(callerUserId);
 
         const now = new Date();
@@ -136,7 +145,9 @@ export class GroupInviteLinksService {
             this.activeLinks(chatId, now),
             this.inactiveLinks(chatId, now),
         ]);
-        const items = [...active, ...inactive];
+        // A regular member shares links; revoked/expired history stays
+        // moderator-only.
+        const items = isRegularMember ? active : [...active, ...inactive];
         const names = await this.createdByNames(
             items
                 .map((link) => link.createdByUserId)
@@ -155,7 +166,9 @@ export class GroupInviteLinksService {
         callerUserId: UserId,
         input: CreateInviteLinkInput,
     ): Promise<InviteLinkItem> {
-        await this.assertManager(chatId, callerUserId);
+        // Owners/admins need `manage_invites`; a regular member may create a
+        // link only when the group's member policy allows `invite_via_link`.
+        await this.assertInviteSharer(chatId, callerUserId);
         await this.consumeManage(callerUserId);
 
         const maxUses = input.maxUses ?? null;
@@ -168,10 +181,11 @@ export class GroupInviteLinksService {
             try {
                 const saved = await this.dataSource.transaction(
                     async (manager): Promise<Link> => {
-                        await this.assertLockedManager(
+                        await this.assertLockedInviteSharer(
                             manager,
                             chatId,
                             callerUserId,
+                            true,
                         );
 
                         if (
@@ -472,6 +486,35 @@ export class GroupInviteLinksService {
         );
     }
 
+    /**
+     * Who may READ/CREATE an invite link (share it): owners and admins with
+     * `manage_invites`, or a regular member when the group's member policy has
+     * `invite_via_link` enabled. Returns `true` for a regular member so the
+     * caller can hide moderator-only history. Revoking stays moderator-only.
+     */
+    private async assertInviteSharer(
+        chatId: ChatId,
+        callerUserId: UserId,
+    ): Promise<boolean> {
+        const caller = await this.permissions.getCallerContext(
+            chatId,
+            callerUserId,
+        );
+        this.permissions.assertGroup(caller);
+        if (caller.isOwner || caller.isAdmin) {
+            if (!canManageInviteLinks(caller)) {
+                throw new ForbiddenException(INVITE_FORBIDDEN_MESSAGE);
+            }
+            return false;
+        }
+        if (!callerMemberPermissions(caller).invite_via_link) {
+            throw new ForbiddenException(
+                MEMBER_PERMISSION_FORBIDDEN.invite_via_link,
+            );
+        }
+        return true;
+    }
+
     private async assertManager(
         chatId: ChatId,
         callerUserId: UserId,
@@ -496,11 +539,31 @@ export class GroupInviteLinksService {
         );
     }
 
-    /** Re-checks the caller, group type and ban state under FOR UPDATE. */
+    /** Moderator-only wrapper kept for the revoke path. */
     private async assertLockedManager(
         manager: EntityManager,
         chatId: ChatId,
         callerUserId: UserId,
+    ): Promise<void> {
+        await this.assertLockedInviteSharer(
+            manager,
+            chatId,
+            callerUserId,
+            false,
+        );
+    }
+
+    /**
+     * Re-checks the caller, group type and ban state under FOR UPDATE.
+     * `allowMember` grants the regular-member path (`invite_via_link`), which
+     * is re-read from the LOCKED chat row so a concurrent permission change
+     * cannot be bypassed.
+     */
+    private async assertLockedInviteSharer(
+        manager: EntityManager,
+        chatId: ChatId,
+        callerUserId: UserId,
+        allowMember: boolean,
     ): Promise<void> {
         const chat = await manager.getRepository(Chat).findOne({
             where: { id: chatId },
@@ -535,7 +598,43 @@ export class GroupInviteLinksService {
                 'you have been banned from this group',
             );
         }
+        if (
+            allowMember &&
+            role !== RoleChatEnum.MANAGER &&
+            role !== RoleChatEnum.ADMIN
+        ) {
+            const effective = await this.memberPermissions.resolve(
+                chat,
+                callerUserId,
+                manager,
+            );
+            if (!effective.invite_via_link) {
+                throw new ForbiddenException(
+                    MEMBER_PERMISSION_FORBIDDEN.invite_via_link,
+                );
+            }
+            return;
+        }
         if (role !== RoleChatEnum.MANAGER && role !== RoleChatEnum.ADMIN) {
+            throw new ForbiddenException(INVITE_FORBIDDEN_MESSAGE);
+        }
+
+        // Re-check `manage_invites` under the lock: role alone is not enough.
+        const memberIds = rows.map((row) => Number(row.id));
+        const grants = await manager.getRepository(PermissionAdmin).find({
+            where: { member: { id: In(memberIds) } },
+            relations: { permission: true },
+        });
+        if (
+            role !== RoleChatEnum.MANAGER &&
+            !canManageInviteLinks({
+                isOwner: false,
+                isAdmin: true,
+                permissions: normalizePermissions(
+                    grants.map((grant) => grant.permission.name),
+                ),
+            })
+        ) {
             throw new ForbiddenException(INVITE_FORBIDDEN_MESSAGE);
         }
     }

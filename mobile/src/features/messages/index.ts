@@ -11,6 +11,8 @@ export * from './message-bubble-preview';
 export * from './message-runs';
 export * from './chat-list-geometry';
 export * from './message-actions';
+export * from './pinned-messages';
+export * from './pinned-banner';
 export * from './service-message';
 export * from './service-message-pill';
 export * from './messages-socket-api';

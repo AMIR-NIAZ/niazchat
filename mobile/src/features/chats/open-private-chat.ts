@@ -80,6 +80,7 @@ function seedConversation(
                 nextCursor: null,
                 myLastSeenId: null,
                 othersLastSeenId: null,
+                pinnedMessages: [],
             },
     );
 }

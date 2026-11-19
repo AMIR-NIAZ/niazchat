@@ -39,6 +39,8 @@ function message(
         createdAtIso: iso,
         isEdited: false,
         isDeleted: false,
+        isPinned: false,
+        pinnedAtIso: null,
         senderId,
         senderName: `user${senderId}`,
         senderAvatarUrls: [],

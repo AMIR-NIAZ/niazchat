@@ -13,6 +13,7 @@ import {
     ContentResolverService,
 } from '../services/content-resolver.service';
 import { ReactionsService } from 'src/modules/reactions/services/reactions.service';
+import { VisibilityService } from 'src/modules/visibility/visibility.service';
 
 describe('MessageGateway', () => {
     let gateway: MessageGateway;
@@ -20,6 +21,11 @@ describe('MessageGateway', () => {
         create: jest.Mock;
         getPage: jest.Mock;
         edit: jest.Mock;
+        delete: jest.Mock;
+        pin: jest.Mock;
+        unpin: jest.Mock;
+        getPinned: jest.Mock;
+        lastNonDeletedMessage: jest.Mock;
     };
     let chatService: { getMemberIds: jest.Mock };
     let forwardService: { forward: jest.Mock };
@@ -31,6 +37,11 @@ describe('MessageGateway', () => {
             create: jest.fn(),
             getPage: jest.fn(),
             edit: jest.fn(),
+            delete: jest.fn().mockResolvedValue({ wasPinned: false }),
+            pin: jest.fn(),
+            unpin: jest.fn(),
+            getPinned: jest.fn().mockResolvedValue([]),
+            lastNonDeletedMessage: jest.fn().mockResolvedValue(null),
         };
         chatService = { getMemberIds: jest.fn().mockResolvedValue([1, 2]) };
         forwardService = { forward: jest.fn() };
@@ -50,6 +61,20 @@ describe('MessageGateway', () => {
                 },
                 { provide: ChatService, useValue: chatService },
                 { provide: ReactionsService, useValue: reactions },
+                {
+                    provide: VisibilityService,
+                    useValue: {
+                        blockedRelationsInChat: jest
+                            .fn()
+                            .mockResolvedValue([]),
+                        blockersOfViewer: jest
+                            .fn()
+                            .mockResolvedValue(new Set()),
+                        hiddenUserIdsFor: jest
+                            .fn()
+                            .mockReturnValue(new Set()),
+                    },
+                },
                 { provide: JwtAppService, useValue: {} },
                 { provide: JwtService, useValue: {} },
                 { provide: getRepositoryToken(ChatMember), useValue: {} },
@@ -427,6 +452,149 @@ describe('MessageGateway', () => {
             'sendMessage:list',
             expect.objectContaining({ id: 102, chatId: 10, senderId: 1 }),
         );
+    });
+
+    it('broadcasts pinMessage:list to the chat room exactly once', async () => {
+        messageService.pin.mockResolvedValue({
+            message: {
+                id: 200,
+                content: 'pin me',
+                chat: { id: 10 },
+                sender: { id: 1 },
+                type: { id: 1, name: 'text' },
+                createdAt: new Date('2026-01-01'),
+                updatedAt: new Date('2026-01-01'),
+                isPinned: true,
+                pinnedAt: new Date('2026-01-01'),
+                attachments: [],
+            },
+            changed: true,
+        });
+
+        const client = makeClient();
+        const result = await (
+            gateway as unknown as {
+                pinMessage: (
+                    client: unknown,
+                    dto: unknown,
+                ) => Promise<{ ok: boolean; data: unknown }>;
+            }
+        ).pinMessage(client, { chatId: 10, messageId: 200 });
+
+        expect(roomEmit).toHaveBeenCalledTimes(1);
+        expect(roomEmit).toHaveBeenCalledWith(
+            'pinMessage:list',
+            expect.objectContaining({
+                chatId: 10,
+                message: expect.objectContaining({
+                    id: 200,
+                    isPinned: true,
+                }),
+            }),
+        );
+        expect(result).toMatchObject({
+            ok: true,
+            data: { alreadyPinned: false },
+        });
+    });
+
+    it('does not rebroadcast a duplicate pin', async () => {
+        messageService.pin.mockResolvedValue({
+            message: {
+                id: 200,
+                chat: { id: 10 },
+                sender: { id: 1 },
+                type: { id: 1, name: 'text' },
+                isPinned: true,
+                attachments: [],
+            },
+            changed: false,
+        });
+
+        const result = await (
+            gateway as unknown as {
+                pinMessage: (
+                    client: unknown,
+                    dto: unknown,
+                ) => Promise<{ ok: boolean; data: unknown }>;
+            }
+        ).pinMessage(makeClient(), { chatId: 10, messageId: 200 });
+
+        expect(roomEmit).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+            ok: true,
+            data: { alreadyPinned: true },
+        });
+    });
+
+    it('broadcasts unpinMessage:list and its ack', async () => {
+        messageService.unpin.mockResolvedValue({
+            messageId: 200,
+            changed: true,
+        });
+
+        const result = await (
+            gateway as unknown as {
+                unpinMessage: (
+                    client: unknown,
+                    dto: unknown,
+                ) => Promise<{ ok: boolean; data: unknown }>;
+            }
+        ).unpinMessage(makeClient(), { chatId: 10, messageId: 200 });
+
+        expect(roomEmit).toHaveBeenCalledWith('unpinMessage:list', {
+            chatId: 10,
+            messageId: 200,
+        });
+        expect(result).toMatchObject({
+            ok: true,
+            data: { alreadyUnpinned: false },
+        });
+    });
+
+    it('unpins a deleted pinned message for the room', async () => {
+        messageService.delete.mockResolvedValue({ wasPinned: true });
+
+        await (
+            gateway as unknown as {
+                deleteMessage: (
+                    client: unknown,
+                    dto: unknown,
+                ) => Promise<unknown>;
+            }
+        ).deleteMessage(makeClient(), { chatId: 10, messageId: 200 });
+
+        expect(roomEmit).toHaveBeenCalledWith('deleteMessage:list', 200);
+        expect(roomEmit).toHaveBeenCalledWith('unpinMessage:list', {
+            chatId: 10,
+            messageId: 200,
+        });
+    });
+
+    it('returns the full pinned list from getPinnedMessages', async () => {
+        messageService.getPinned.mockResolvedValue([
+            {
+                id: 200,
+                chat: { id: 10 },
+                sender: { id: 1 },
+                type: { id: 1, name: 'text' },
+                isPinned: true,
+                attachments: [],
+            },
+        ]);
+
+        const result = await (
+            gateway as unknown as {
+                getPinnedMessages: (
+                    client: unknown,
+                    dto: unknown,
+                ) => Promise<{ ok: boolean; data: unknown[] }>;
+            }
+        ).getPinnedMessages(makeClient(), { chatId: 10 });
+
+        expect(result.ok).toBe(true);
+        expect(result.data).toHaveLength(1);
+        expect(result.data[0]).toMatchObject({ id: 200, isPinned: true });
     });
 
     it('does not emit a duplicate echo when the sender is already in the room', async () => {

@@ -1,5 +1,11 @@
 import { PermissionChatEnum } from 'src/common/enums/permissionChat.enum';
 import { RoleChatEnum } from 'src/common/enums/roleChat.enum';
+import {
+    GROUP_PERMISSIONS,
+    hasPermission,
+    PERMISSION_META,
+} from './group-permissions.util';
+import type { GroupPermission } from './group-permissions.util';
 
 /**
  * Wire role of a group member. `owner` is the member holding the `manager`
@@ -41,27 +47,29 @@ export function roleRank(
 export interface GroupCallerRules {
     isOwner: boolean;
     isAdmin: boolean;
-    permissions: PermissionChatEnum[];
+    permissions: PermissionChatEnum[] | string[];
+    /** Caller's user id, for context that needs it. */
+    userId?: number;
 }
 
-/** The three admin permissions the owner may edit from the panel. */
-export const EDITABLE_ADMIN_PERMISSIONS = [
-    PermissionChatEnum.BAN_USER,
-    PermissionChatEnum.DELETE_MESSAGE,
-    PermissionChatEnum.CHANGE_INFO_CHAT,
-] as const;
+/** Extra target facts the `promotedById` rules need. */
+export interface GroupTargetRules {
+    /** User who promoted this admin (null for legacy/owner/member rows). */
+    promotedById?: number | null;
+    /** Caller's user id (falls back to `caller.userId`). */
+    callerUserId?: number;
+}
 
-export type EditableAdminPermission =
-    (typeof EDITABLE_ADMIN_PERMISSIONS)[number];
+/** All 12 contract permissions the editor may grant. */
+export const EDITABLE_ADMIN_PERMISSIONS: readonly GroupPermission[] =
+    GROUP_PERMISSIONS;
+
+export type EditableAdminPermission = GroupPermission;
 
 export const ADMIN_PERMISSION_OPTIONS: ReadonlyArray<{
     key: EditableAdminPermission;
     label: string;
-}> = [
-    { key: PermissionChatEnum.BAN_USER, label: 'Remove members' },
-    { key: PermissionChatEnum.DELETE_MESSAGE, label: 'Delete messages' },
-    { key: PermissionChatEnum.CHANGE_INFO_CHAT, label: 'Edit group info' },
-];
+}> = GROUP_PERMISSIONS.map((key) => ({ key, label: PERMISSION_META[key].en }));
 
 export interface GroupMemberActions {
     canPromote: boolean;
@@ -69,37 +77,77 @@ export interface GroupMemberActions {
     canRemove: boolean;
     canEditPermissions: boolean;
     canBan: boolean;
+    /** Owner, or admin with `manage_permissions`, viewing a regular member. */
+    canManageMemberPermissions: boolean;
+}
+
+function callerRole(caller: GroupCallerRules): 'owner' | 'admin' | 'member' {
+    if (caller.isOwner) return 'owner';
+    return caller.isAdmin ? 'admin' : 'member';
+}
+
+function can(caller: GroupCallerRules, key: GroupPermission): boolean {
+    return hasPermission(callerRole(caller), caller.permissions, key);
 }
 
 /**
- * Owner: promote a member, demote an admin, remove admins and members.
- * Admin: remove a regular member only, and only with `ban_user` or `all`.
- * Nobody (including the owner) may act on the owner or on themselves — the
- * role comparison already excludes self: an owner target is `owner`, an
- * admin's own row is `admin`, a member has no rights.
+ * Promote: the owner always, an admin with `manage_admins`, plain members
+ * only. Nobody promotes the owner or another admin.
  */
 export function canPromote(
     caller: GroupCallerRules,
     target: GroupRole,
 ): boolean {
-    return caller.isOwner && target === 'member';
+    if (target !== 'member') return false;
+    return caller.isOwner || (caller.isAdmin && can(caller, 'manage_admins'));
 }
 
+/**
+ * Demote: the owner may demote any admin. An admin with `manage_admins` may
+ * demote only admins THEY promoted (`promotedById`). Never the owner.
+ */
 export function canDemote(
     caller: GroupCallerRules,
     target: GroupRole,
+    options: GroupTargetRules = {},
 ): boolean {
-    return caller.isOwner && target === 'admin';
+    if (target !== 'admin') return false;
+    if (caller.isOwner) return true;
+    if (!caller.isAdmin || !can(caller, 'manage_admins')) return false;
+    const callerId = options.callerUserId ?? caller.userId ?? null;
+    return (
+        callerId !== null &&
+        options.promotedById !== null &&
+        options.promotedById !== undefined &&
+        Number(options.promotedById) === Number(callerId)
+    );
 }
 
-/** Only the owner may read/change an admin's permission set. */
+/**
+ * Edit an admin's permission set: the owner always; an admin with
+ * `manage_permissions` may edit only admins THEY promoted.
+ */
 export function canEditPermissions(
     caller: GroupCallerRules,
     target: GroupRole,
+    options: GroupTargetRules = {},
 ): boolean {
-    return caller.isOwner && target === 'admin';
+    if (target !== 'admin') return false;
+    if (caller.isOwner) return true;
+    if (!caller.isAdmin || !can(caller, 'manage_permissions')) return false;
+    const callerId = options.callerUserId ?? caller.userId ?? null;
+    return (
+        callerId !== null &&
+        options.promotedById !== null &&
+        options.promotedById !== undefined &&
+        Number(options.promotedById) === Number(callerId)
+    );
 }
 
+/**
+ * Remove: the owner removes members and admins. An admin with
+ * `remove_members` removes plain members only.
+ */
 export function canRemove(
     caller: GroupCallerRules,
     target: GroupRole,
@@ -108,63 +156,42 @@ export function canRemove(
     if (caller.isOwner) return true;
     if (!caller.isAdmin) return false;
     if (target !== 'member') return false;
-    return (
-        caller.permissions.includes(PermissionChatEnum.BAN_USER) ||
-        caller.permissions.includes(PermissionChatEnum.ALL)
-    );
+    return can(caller, 'remove_members');
 }
 
 /**
- * Ban: the owner may ban members and admins; an admin may ban members only,
- * and only with `ban_user` or `all`. Nobody may ban the owner or themselves —
- * the role comparison already excludes self (the caller's own row has their
- * own role) and an owner target is rejected outright.
+ * Ban: the owner bans members and admins; an admin with `ban_users` bans
+ * plain members only. Nobody bans the owner. The caller's own row carries
+ * their own role, so self-ban is excluded structurally (owner target →
+ * rejected, admin target → admin-needs-member rule).
  */
 export function canBan(caller: GroupCallerRules, target: GroupRole): boolean {
     if (target === 'owner') return false;
     if (caller.isOwner) return true;
     if (!caller.isAdmin) return false;
     if (target !== 'member') return false;
-    return (
-        caller.permissions.includes(PermissionChatEnum.BAN_USER) ||
-        caller.permissions.includes(PermissionChatEnum.ALL)
-    );
+    return can(caller, 'ban_users');
 }
 
 /** Exactly the flags the members list exposes per row. */
 export function memberActions(
     caller: GroupCallerRules,
     target: GroupRole,
+    options: GroupTargetRules = {},
 ): GroupMemberActions {
     return {
         canPromote: canPromote(caller, target),
-        canDemote: canDemote(caller, target),
+        canDemote: canDemote(caller, target, options),
         canRemove: canRemove(caller, target),
-        canEditPermissions: canEditPermissions(caller, target),
+        canEditPermissions: canEditPermissions(caller, target, options),
         canBan: canBan(caller, target),
+        // Individual overrides only exist for plain members; owners/admins keep
+        // their role-based power, so there is nothing to override there.
+        canManageMemberPermissions:
+            target === 'member' &&
+            (caller.isOwner ||
+                (caller.isAdmin && can(caller, 'manage_permissions'))),
     };
-}
-
-/**
- * Strict body validation for the permission editor: an optional list (max 3)
- * of unique editable names. `all` and unknown names are rejected, not coerced.
- * Returns null for an invalid payload.
- */
-export function parseEditablePermissions(
-    input: unknown,
-): EditableAdminPermission[] | null {
-    if (!Array.isArray(input) || input.length > 3) return null;
-    const result: EditableAdminPermission[] = [];
-    for (const raw of input) {
-        if (typeof raw !== 'string') return null;
-        if (!(EDITABLE_ADMIN_PERMISSIONS as readonly string[]).includes(raw)) {
-            return null;
-        }
-        const permission = raw as EditableAdminPermission;
-        if (result.includes(permission)) return null;
-        result.push(permission);
-    }
-    return result;
 }
 
 /** Order-insensitive set equality (duplicates already rejected above). */

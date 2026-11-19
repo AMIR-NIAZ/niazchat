@@ -167,9 +167,9 @@ describe('inviteCodeFromUrl', () => {
     it('extracts the code from every supported link shape', () => {
         expect(inviteCodeFromUrl(inviteLinkUrl(CODE))).toBe(CODE);
         expect(inviteCodeFromUrl(`niazchat://join/${CODE}`)).toBe(CODE);
-        expect(inviteCodeFromUrl(`exp://192.168.1.2:8081/--/join/${CODE}`)).toBe(
-            CODE,
-        );
+        expect(
+            inviteCodeFromUrl(`exp://192.168.1.2:8081/--/join/${CODE}`),
+        ).toBe(CODE);
         expect(inviteCodeFromUrl(`https://x.test/join/${CODE}`)).toBe(CODE);
         expect(inviteCodeFromUrl(`https://x.test/join/${CODE}/`)).toBe(CODE);
         expect(inviteCodeFromUrl(`https://x.test/join/${CODE}?utm=1`)).toBe(

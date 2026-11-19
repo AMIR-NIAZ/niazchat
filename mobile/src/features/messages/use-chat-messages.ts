@@ -6,6 +6,7 @@ import {
     useSocketEvent,
 } from '../../core/socket';
 import { registerSessionCleanup } from '../../core/session/cleanup-registry';
+import { ApiError } from '../../core/api';
 import type { ChatDto, MessageDto, ReactionSnapshotDto } from '../../core/api';
 import {
     joinChat,
@@ -61,7 +62,16 @@ import {
     editChatMessage,
     deleteChatMessage,
     reactToMessage,
+    pinChatMessage,
+    unpinChatMessage,
+    fetchPinnedMessages,
 } from './messages-socket-api';
+import {
+    applyPinnedState,
+    removePinnedMessage,
+    replacePinnedMessage,
+    upsertPinnedMessage,
+} from './pinned-messages';
 
 /**
  * Conversation server-state over TanStack Query, backed by the documented WS
@@ -110,6 +120,12 @@ export interface ConversationDetail {
      * history/pagination). Drives the pill entrance animation; never cached.
      */
     liveMessageIds?: number[];
+    /**
+     * Every pinned message of the chat, newest pin first. Kept separately from
+     * `messages` because a pinned message can be older than the loaded page;
+     * synchronized on open/reconnect (`getPinnedMessages`) and live events.
+     */
+    pinnedMessages: ChatMessage[];
 }
 
 /**
@@ -174,9 +190,27 @@ export interface ChatMessagesApi {
     remove: (messageId: number) => Promise<void>;
     /** One-reaction-per-user toggle with optimistic update and rollback. */
     toggleReaction: (messageId: number, emoji: string) => Promise<void>;
+    /** Pin/unpin through the WS API; rejects with the server message. */
+    pin: (messageId: number) => Promise<void>;
+    unpin: (messageId: number) => Promise<void>;
+    /** Ids with an in-flight pin request (duplicate taps are ignored). */
+    pinningIds: ReadonlySet<number>;
     reactionError: string | null;
     reactingIds: ReadonlySet<number>;
     mutating: boolean;
+    /**
+     * The server answered 403/404 for this chat on a re-join: it was deleted
+     * for both (or the caller lost access). The screen must leave it.
+     */
+    gone: boolean;
+}
+
+/** `joinChat` answered "not a member" / "no such chat" (deleted for both). */
+function isChatGoneError(error: unknown): boolean {
+    return (
+        error instanceof ApiError &&
+        (error.statusCode === 403 || error.statusCode === 404)
+    );
 }
 
 type OlderPageOutcome = 'loaded' | 'noop' | 'error';
@@ -304,11 +338,16 @@ export function useChatMessages(
     const [loadingOlder, setLoadingOlder] = useState(false);
     const [loadOlderError, setLoadOlderError] = useState<string | null>(null);
     const [reactionError, setReactionError] = useState<string | null>(null);
+    const [gone, setGone] = useState(false);
     const [reactingIds, setReactingIds] = useState<ReadonlySet<number>>(
         new Set(),
     );
     const loadingOlderRef = useRef(false);
     const reactionInFlightRef = useRef<Set<number>>(new Set());
+    const pinInFlightRef = useRef<Set<number>>(new Set());
+    const [pinningIds, setPinningIds] = useState<ReadonlySet<number>>(
+        new Set(),
+    );
     const reactionErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
         null,
     );
@@ -334,13 +373,25 @@ export function useChatMessages(
             const joined = await joinChat(chatId).finally((): void => {
                 initialJoinPendingRef.current = false;
             });
+            // Offline/cold start: the full pinned list is a separate ack so a
+            // pin older than the first history page still reaches the banner.
+            const pinnedDtos = await fetchPinnedMessages(chatId).catch(
+                (): null => null,
+            );
+            const pinnedMessages = (pinnedDtos ?? [])
+                .filter((message: MessageDto): boolean => !message.isDeleted)
+                .map(toChatMessage);
             if (joined === null || joined.info === null) {
                 // Keep a locally seeded conversation instead of wiping it.
                 const seeded = queryClient.getQueryData<ConversationDetail>(
                     messagesQueryKey(chatId),
                 );
                 if (seeded !== undefined) {
-                    return seeded;
+                    // Offline: the local mirror already knows which cached rows
+                    // are pinned; a failed pinned fetch must not erase them.
+                    return pinnedDtos === null
+                        ? seeded
+                        : { ...seeded, pinnedMessages };
                 }
                 return {
                     info: null,
@@ -349,6 +400,7 @@ export function useChatMessages(
                     nextCursor: null,
                     myLastSeenId: null,
                     othersLastSeenId: null,
+                    pinnedMessages,
                 };
             }
             const history = joined.messages
@@ -372,6 +424,7 @@ export function useChatMessages(
                 nextCursorSource: 'server',
                 myLastSeenId: toNumericId(joined.info.myLastSeenId),
                 othersLastSeenId: toNumericId(joined.info.othersLastSeenId),
+                pinnedMessages,
             };
         },
     });
@@ -414,6 +467,7 @@ export function useChatMessages(
                 nextCursorSource: oldest === null ? 'server' : 'local',
                 myLastSeenId: null,
                 othersLastSeenId: null,
+                pinnedMessages: local.filter((message) => message.isPinned),
             });
         })();
         return (): void => {
@@ -490,6 +544,20 @@ export function useChatMessages(
         applyToCache((current) =>
             applyOriginalEdited(replaceMessage(current, edited), edited),
         );
+        // The banner preview follows an edit of the pinned message.
+        queryClient.setQueryData<ConversationDetail>(
+            messagesQueryKey(chatId),
+            (current) =>
+                current === undefined
+                    ? current
+                    : {
+                          ...current,
+                          pinnedMessages: replacePinnedMessage(
+                              current.pinnedMessages ?? [],
+                              edited,
+                          ),
+                      },
+        );
     };
     const onReactionUpdated = (event: ReactionSnapshotDto): void => {
         if (
@@ -513,8 +581,95 @@ export function useChatMessages(
                 messageId,
             ),
         );
+        // Deleting a pinned message also unpins it server-side; the banner
+        // must never keep a tombstoned message (even if the unpin broadcast
+        // races or is missed).
+        queryClient.setQueryData<ConversationDetail>(
+            messagesQueryKey(chatId),
+            (current) =>
+                current === undefined
+                    ? current
+                    : {
+                          ...current,
+                          pinnedMessages: removePinnedMessage(
+                              current.pinnedMessages ?? [],
+                              messageId,
+                          ),
+                      },
+        );
         // A full-screen media viewer may be showing this message's media.
         notifyMediaViewerMessageDeleted(Number(messageId));
+    };
+    const onPinnedMessage = (payload: {
+        chatId: number;
+        message: MessageDto;
+    }): void => {
+        if (
+            payload === null ||
+            typeof payload !== 'object' ||
+            Number(payload.chatId) !== chatId ||
+            payload.message === undefined ||
+            payload.message === null
+        ) {
+            return;
+        }
+        const pinned = toChatMessage(payload.message);
+        if (pinned.id === null) {
+            return;
+        }
+        applyToCache((current) =>
+            applyPinnedState(
+                current,
+                pinned.id as number,
+                true,
+                pinned.pinnedAtIso,
+            ),
+        );
+        queryClient.setQueryData<ConversationDetail>(
+            messagesQueryKey(chatId),
+            (current) =>
+                current === undefined
+                    ? current
+                    : {
+                          ...current,
+                          pinnedMessages: upsertPinnedMessage(
+                              current.pinnedMessages ?? [],
+                              pinned,
+                          ),
+                      },
+        );
+    };
+    const onUnpinnedMessage = (payload: {
+        chatId: number;
+        messageId: number;
+    }): void => {
+        if (
+            payload === null ||
+            typeof payload !== 'object' ||
+            Number(payload.chatId) !== chatId
+        ) {
+            return;
+        }
+        const messageId = toNumericId(payload.messageId);
+        if (messageId === null) {
+            return;
+        }
+        applyToCache((current) =>
+            applyPinnedState(current, messageId, false, null),
+        );
+        queryClient.setQueryData<ConversationDetail>(
+            messagesQueryKey(chatId),
+            (current) =>
+                current === undefined
+                    ? current
+                    : {
+                          ...current,
+                          pinnedMessages: removePinnedMessage(
+                              current.pinnedMessages ?? [],
+                              messageId,
+                          ),
+                      },
+        );
     };
     const onSeen = (payload: {
         chatId: number;
@@ -574,6 +729,8 @@ export function useChatMessages(
     useSocketEvent('sendMessage:list', onNewMessage);
     useSocketEvent('editMessage:list', onEditedMessage);
     useSocketEvent('deleteMessage:list', onDeletedMessage);
+    useSocketEvent('pinMessage:list', onPinnedMessage);
+    useSocketEvent('unpinMessage:list', onUnpinnedMessage);
     useSocketEvent('reaction:updated', onReactionUpdated);
     useSocketEvent('seen', onSeen);
     useSocketEvent('chat:members', onMembersCount);
@@ -596,6 +753,25 @@ export function useChatMessages(
             applyToCache((current) =>
                 reconcileMessages(current, history, currentUserId ?? -1),
             );
+            // Reconnect/refocus: resync the pinned list so pins that happened
+            // while this socket was offline are restored without a refresh.
+            const pinnedDtos =
+                (await fetchPinnedMessages(chatId).catch((): null => null)) ??
+                null;
+            if (pinnedDtos !== null) {
+                const pinnedMessages = pinnedDtos
+                    .filter(
+                        (message: MessageDto): boolean => !message.isDeleted,
+                    )
+                    .map(toChatMessage);
+                queryClient.setQueryData<ConversationDetail>(
+                    messagesQueryKey(chatId),
+                    (current) =>
+                        current === undefined
+                            ? current
+                            : { ...current, pinnedMessages },
+                );
+            }
             // Resync of the room-wide read line; never regress it.
             const others = toNumericId(joined.info?.othersLastSeenId);
             if (others !== null) {
@@ -613,8 +789,17 @@ export function useChatMessages(
                               },
                 );
             }
-        } catch {
-            // Next reconnect/focus (or a manual refetch) resyncs.
+        } catch (error: unknown) {
+            // "Delete for both" (or losing membership) while this screen was
+            // open: drop the cached history so stale messages cannot remain on
+            // display, and let the screen navigate away.
+            if (isChatGoneError(error)) {
+                setGone(true);
+                queryClient.removeQueries({
+                    queryKey: messagesQueryKey(chatId),
+                });
+            }
+            // Otherwise the next reconnect/focus (or a manual refetch) resyncs.
         }
     }, [chatId, currentUserId, applyToCache, queryClient]);
 
@@ -701,6 +886,7 @@ export function useChatMessages(
             syncingRoomRef.current = false;
             firstFocusHandledRef.current = false;
             roomSyncNeededRef.current = false;
+            setGone(false);
         };
     }, [chatId]);
 
@@ -1401,6 +1587,97 @@ export function useChatMessages(
         [chatId, currentUserId, applyToCache, queryClient],
     );
 
+    /**
+     * Pin/unpin one message. The in-flight set makes duplicate taps a no-op
+     * (the backend is idempotent too). The ack is applied to the cache in
+     * addition to the room echo, so a missed broadcast still converges.
+     */
+    const pin = useCallback(
+        async (messageId: number): Promise<void> => {
+            if (pinInFlightRef.current.has(messageId)) {
+                return;
+            }
+            pinInFlightRef.current.add(messageId);
+            setPinningIds((current) => new Set(current).add(messageId));
+            try {
+                const result = await pinChatMessage(chatId, messageId);
+                if (result === null) {
+                    return;
+                }
+                const pinned = toChatMessage(result.message);
+                if (pinned.id === null) {
+                    return;
+                }
+                applyToCache((current) =>
+                    applyPinnedState(
+                        current,
+                        pinned.id as number,
+                        true,
+                        pinned.pinnedAtIso,
+                    ),
+                );
+                queryClient.setQueryData<ConversationDetail>(
+                    messagesQueryKey(chatId),
+                    (current) =>
+                        current === undefined
+                            ? current
+                            : {
+                                  ...current,
+                                  pinnedMessages: upsertPinnedMessage(
+                                      current.pinnedMessages ?? [],
+                                      pinned,
+                                  ),
+                              },
+                );
+            } finally {
+                pinInFlightRef.current.delete(messageId);
+                setPinningIds((current) => {
+                    const next = new Set(current);
+                    next.delete(messageId);
+                    return next;
+                });
+            }
+        },
+        [chatId, applyToCache, queryClient],
+    );
+
+    const unpin = useCallback(
+        async (messageId: number): Promise<void> => {
+            if (pinInFlightRef.current.has(messageId)) {
+                return;
+            }
+            pinInFlightRef.current.add(messageId);
+            setPinningIds((current) => new Set(current).add(messageId));
+            try {
+                await unpinChatMessage(chatId, messageId);
+                applyToCache((current) =>
+                    applyPinnedState(current, messageId, false, null),
+                );
+                queryClient.setQueryData<ConversationDetail>(
+                    messagesQueryKey(chatId),
+                    (current) =>
+                        current === undefined
+                            ? current
+                            : {
+                                  ...current,
+                                  pinnedMessages: removePinnedMessage(
+                                      current.pinnedMessages ?? [],
+                                      messageId,
+                                  ),
+                              },
+                );
+            } finally {
+                pinInFlightRef.current.delete(messageId);
+                setPinningIds((current) => {
+                    const next = new Set(current);
+                    next.delete(messageId);
+                    return next;
+                });
+            }
+        },
+        [chatId, applyToCache, queryClient],
+    );
+
     const remove = useCallback(
         async (messageId: number): Promise<void> => {
             setMutating(true);
@@ -1462,9 +1739,13 @@ export function useChatMessages(
             edit,
             remove,
             toggleReaction,
+            pin,
+            unpin,
+            pinningIds,
             reactionError,
             reactingIds,
             mutating,
+            gone,
         }),
         [
             detail,
@@ -1484,9 +1765,13 @@ export function useChatMessages(
             edit,
             remove,
             toggleReaction,
+            pin,
+            unpin,
+            pinningIds,
             reactionError,
             reactingIds,
             mutating,
+            gone,
         ],
     );
 }

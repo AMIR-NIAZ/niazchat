@@ -5,6 +5,12 @@ export interface MessageActionContext {
     currentUserId: number | null;
     /** Group owner may delete another member's confirmed message. */
     canDeleteOthers?: boolean;
+    /**
+     * Server-derived pin capability (`canPinMessages`): private chats always,
+     * groups when the caller is the owner or holds the `pin_message`/`all`
+     * grant. The backend re-checks every request.
+     */
+    canPinMessages?: boolean;
 }
 
 export interface MessageActions {
@@ -19,6 +25,10 @@ export interface MessageActions {
     deleteOthers: boolean;
     /** Offer a document Share action in the sheet. */
     share: boolean;
+    /** Pin this (not yet pinned) message. */
+    pin: boolean;
+    /** Unpin this already-pinned message. */
+    unpin: boolean;
 }
 
 export const NO_MESSAGE_ACTIONS: MessageActions = {
@@ -31,6 +41,8 @@ export const NO_MESSAGE_ACTIONS: MessageActions = {
     delete: false,
     deleteOthers: false,
     share: false,
+    pin: false,
+    unpin: false,
 };
 
 /**
@@ -74,5 +86,7 @@ export function getMessageActions(
         share: message.attachments.some(
             (attachment) => attachment.kind === 'file',
         ),
+        pin: context.canPinMessages === true && !message.isPinned,
+        unpin: context.canPinMessages === true && message.isPinned,
     };
 }

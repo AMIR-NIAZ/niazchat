@@ -3,6 +3,7 @@ import type { GroupCallerRules } from '../utils/group-members.util';
 import {
     canEditInfo,
     canManageInviteLinks,
+    groupCapabilities,
 } from './chat-permission.service';
 
 function rules(overrides: Partial<GroupCallerRules> = {}): GroupCallerRules {
@@ -19,13 +20,19 @@ describe('canManageInviteLinks', () => {
         expect(canManageInviteLinks(rules({ isOwner: true }))).toBe(true);
     });
 
-    it('allows every admin, regardless of granted permissions', () => {
-        expect(canManageInviteLinks(rules({ isAdmin: true }))).toBe(true);
+    it('allows an admin holding manage_invites', () => {
         expect(
             canManageInviteLinks(
-                rules({ isAdmin: true, permissions: [] }),
+                rules({
+                    isAdmin: true,
+                    permissions: [PermissionChatEnum.MANAGE_INVITES],
+                }),
             ),
         ).toBe(true);
+    });
+
+    it('rejects an admin without manage_invites', () => {
+        expect(canManageInviteLinks(rules({ isAdmin: true }))).toBe(false);
     });
 
     it('rejects members, banned users and outsiders', () => {
@@ -97,5 +104,44 @@ describe('canEditInfo', () => {
                 }),
             ),
         ).toBe(false);
+    });
+});
+
+describe('groupCapabilities', () => {
+    it('gives the owner every capability', () => {
+        const capabilities = groupCapabilities(rules({ isOwner: true }));
+        expect(Object.values(capabilities).every(Boolean)).toBe(true);
+        expect(capabilities.canManagePermissions).toBe(true);
+        expect(capabilities.canManageAdmins).toBe(true);
+    });
+
+    it('derives each flag from the matching key, including implications', () => {
+        const capabilities = groupCapabilities(
+            rules({
+                isAdmin: true,
+                permissions: [
+                    PermissionChatEnum.DELETE_MESSAGE,
+                    PermissionChatEnum.MANAGE_MESSAGES,
+                ],
+            }),
+        );
+        expect(capabilities.canDeleteOthersMessages).toBe(true);
+        expect(capabilities.canPinMessages).toBe(true);
+        expect(capabilities.canManageMembers).toBe(false);
+        expect(capabilities.canManageBans).toBe(false);
+    });
+
+    it('exposes inactive permissions but never claims them by default', () => {
+        const capabilities = groupCapabilities(rules({ isAdmin: true }));
+        expect(capabilities.canRestrictMembers).toBe(false);
+        expect(capabilities.canManageVoiceChats).toBe(false);
+        expect(
+            groupCapabilities(
+                rules({
+                    isAdmin: true,
+                    permissions: [PermissionChatEnum.RESTRICT_MEMBERS],
+                }),
+            ).canRestrictMembers,
+        ).toBe(true);
     });
 });

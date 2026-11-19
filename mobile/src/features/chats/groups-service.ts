@@ -56,7 +56,7 @@ export async function banChatMember(memberId: number): Promise<void> {
 }
 
 /**
- * `POST /chats/:chatId/leave` → `{ message, chatId }`.
+ * `POST /chats/manage/:chatId/leave` → `{ message, chatId }`.
  * The backend rejects the group owner (`manager` chat role, 400 — ownership
  * transfer is not supported) and non-members/banned callers (403).
  */
@@ -66,7 +66,7 @@ export async function leaveGroup(
     const response = await httpClient.post<{
         message: string;
         chatId: number;
-    }>(`/chats/${chatId}/leave`);
+    }>(`/chats/manage/${chatId}/leave`);
     return response.data;
 }
 

@@ -15,6 +15,8 @@ import { User } from '../entities/user.entity';
 import { UserProfile } from '../entities/user_profile.entity';
 import { Contact } from '../entities/contact.entity';
 import { CreateContactDto, UpdateContactDto } from '../dtos/contact.dto';
+import { VisibilityService } from 'src/modules/visibility/visibility.service';
+import { sanitizeUserForViewer } from 'src/modules/visibility/visibility.util';
 
 /** Default region used when a phone is supplied without a country code. */
 const DEFAULT_CONTACT_REGION: CountryCode = 'IR';
@@ -100,6 +102,7 @@ export class ContactsService {
         @InjectRepository(UserProfile)
         private readonly profileRepository: Repository<UserProfile>,
         private readonly rateLimit: RateLimitService,
+        private readonly visibility: VisibilityService,
     ) {}
 
     async list(
@@ -111,8 +114,18 @@ export class ContactsService {
             relations: { contactUser: { profile: true } },
         });
 
+        // ONE visibility query for the page: a contact whose account blocked
+        // the caller keeps their name but loses avatars/username/phone.
+        const hidden = await this.visibility.blockersOfViewer(
+            ownerId,
+            contacts.map((contact) => Number(contact.contactUserId)),
+        );
         const items = contacts.map(
-            (contact): ContactItem => this.toItem(contact, origin),
+            (contact): ContactItem =>
+                sanitizeUserForViewer(
+                    this.toItem(contact, origin),
+                    hidden.has(Number(contact.contactUserId)),
+                ),
         );
         items.sort((left, right) =>
             collator.compare(
@@ -192,6 +205,11 @@ export class ContactsService {
         }
         if (Number(user.id) === Number(ownerId)) {
             throw new BadRequestException('You cannot add yourself');
+        }
+        // A user who blocked the caller is indistinguishable from a user that
+        // does not exist: the same generic 404, no saved contact row.
+        if (await this.visibility.isBlockedBy(ownerId, Number(user.id))) {
+            throw new NotFoundException("This person isn't on the app yet");
         }
 
         const existing = await this.contactRepository.findOne({

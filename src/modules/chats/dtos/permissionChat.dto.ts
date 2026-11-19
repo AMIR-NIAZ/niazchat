@@ -1,7 +1,12 @@
-import { IsEnum } from 'class-validator';
-import { PermissionChatEnum } from '../../../common/enums/permissionChat.enum';
+import { IsArray, IsOptional, IsString } from 'class-validator';
 
+/**
+ * Legacy permission body (`/chats/manage/admin/*`). Accepts the contract keys,
+ * legacy aliases and `all`; the service normalizes/pre-validates them.
+ */
 export class PermissionChatDto {
-    @IsEnum(PermissionChatEnum, { each: true })
-    permissions: PermissionChatEnum[];
+    @IsOptional()
+    @IsArray()
+    @IsString({ each: true })
+    permissions?: string[];
 }

@@ -42,6 +42,10 @@ function makeService(findOne: jest.Mock): UserService {
         profileRepository as never,
         dataSource as never,
         { consume: jest.fn() } as never,
+        {
+            isBlockedBy: () => Promise.resolve(false),
+            assertCanViewUserProfile: () => Promise.resolve(),
+        } as never,
     );
 }
 

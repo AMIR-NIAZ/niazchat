@@ -57,10 +57,6 @@ export class GroupInviteLinksController {
         @Param('chatId', ParseIntPipe) chatId: ChatId,
         @Param('linkId', ParseIntPipe) linkId: number,
     ): Promise<InviteLinkRevokeResponse> {
-        return this.inviteLinks.revokeLink(
-            chatId,
-            linkId,
-            request.user.sub,
-        );
+        return this.inviteLinks.revokeLink(chatId, linkId, request.user.sub);
     }
 }

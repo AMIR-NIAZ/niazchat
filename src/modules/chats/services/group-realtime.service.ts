@@ -109,7 +109,85 @@ export class GroupRealtimeService {
         }
     }
 
-    /** An owner replaced an admin's permission set. */
+    /** A member was promoted to admin (reason `member_promoted`). */
+    memberPromoted(chatId: unknown, userId: unknown): void {
+        if (!this.server) return;
+        this.server.to(chatRoom(chatId as ChatId)).emit('group:changed', {
+            chatId: num(chatId),
+            reason: 'member_promoted',
+            userId: num(userId),
+        });
+    }
+
+    /** An admin was demoted (reason `member_demoted`). */
+    memberDemoted(chatId: unknown, userId: unknown): void {
+        if (!this.server) return;
+        this.server.to(chatRoom(chatId as ChatId)).emit('group:changed', {
+            chatId: num(chatId),
+            reason: 'member_demoted',
+            userId: num(userId),
+        });
+    }
+
+    /**
+     * The group's MEMBER permission policy changed: the full config goes to
+     * every connected member in the chat room (`group:member-permissions`) and
+     * `group:changed` tells group screens to refetch their capabilities.
+     * Clients that were offline resync from
+     * `GET /chats/:chatId/member-permissions` on their next join/reconnect.
+     */
+    groupMemberPermissionsChanged(
+        chatId: unknown,
+        permissions: Record<string, boolean>,
+    ): void {
+        if (!this.server) return;
+        this.server
+            .to(chatRoom(chatId as ChatId))
+            .emit('group:member-permissions', {
+                chatId: num(chatId),
+                permissions,
+            });
+        this.server.to(chatRoom(chatId as ChatId)).emit('group:changed', {
+            chatId: num(chatId),
+            reason: 'member_permissions_changed',
+        });
+    }
+
+    /**
+     * One member's INDIVIDUAL overrides changed. Sends the resolved state to
+     * the whole chat room (managers keep their editor in sync) and directly to
+     * the affected user's personal room (their controls update even when that
+     * socket has not joined the chat room yet). `group:changed` makes group
+     * screens refetch capabilities; offline clients resync from
+     * `GET /chats/:chatId/members/:memberId/permission-overrides`.
+     */
+    memberPermissionOverridesChanged(
+        chatId: unknown,
+        userId: unknown,
+        overrides: object,
+        effective: object,
+    ): void {
+        if (!this.server) return;
+        const payload = {
+            chatId: num(chatId),
+            userId: num(userId),
+            overrides,
+            effective,
+        };
+        this.server
+            .to(chatRoom(chatId as ChatId))
+            .emit('group:member-permission-overrides', payload);
+        this.server
+            .to(userRoom(userId as UserId))
+            .emit('group:member-permission-overrides', payload);
+        this.server.to(chatRoom(chatId as ChatId)).emit('group:changed', {
+            chatId: num(chatId),
+            reason: 'member_permission_overrides_changed',
+            userId: num(userId),
+        });
+    }
+
+    /** Someone replaced an admin's permission set. */
     memberPermissionsChanged(chatId: unknown, userId: unknown): void {
         if (!this.server) return;
         this.server.to(chatRoom(chatId as ChatId)).emit('group:changed', {

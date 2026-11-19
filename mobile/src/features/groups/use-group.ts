@@ -18,6 +18,7 @@ import { absoluteUploadUrl } from '../../core/config/env';
 import type { ProfileAvatar } from '../users/use-profile';
 import * as api from './groups-api';
 import type {
+    AddMembersResult,
     GroupAvatarMutationResponse,
     GroupBannedPage,
     GroupBannedUser,
@@ -26,8 +27,14 @@ import type {
     GroupInfoUpdateResponse,
     GroupMember,
     GroupMemberPage,
+    GroupMemberPermissionsConfig,
+    GroupMemberPermissionsResponse,
+    GroupMemberPermissionsUpdateResponse,
     MemberActionResponse,
     MemberPermissionKey,
+    MemberPermissionOverridesResponse,
+    MemberPermissionOverridesUpdateResponse,
+    MemberPermissionOverrideState,
     MemberPermissions,
     MemberPermissionsUpdate,
 } from './group-model';
@@ -37,12 +44,20 @@ import {
     GROUP_MEMBERS_STALE_TIME_MS,
     groupBannedQueryKey,
     groupInfoQueryKey,
+    groupMemberIdsQueryKey,
+    groupMemberPermissionsQueryKey,
     groupMembersPrefix,
     groupMembersQueryKey,
+    memberPermissionOverridesPrefix,
+    memberPermissionOverridesQueryKey,
     memberPermissionsPrefix,
     memberPermissionsQueryKey,
     patchMembersPages,
 } from './group-model';
+import {
+    normalizeGroupMemberPermissions,
+    normalizeMemberPermissionOverrides,
+} from './permissions';
 
 type MemberPages = InfiniteData<GroupMemberPage, string | null>;
 
@@ -254,6 +269,63 @@ export function useGroupMembers(chatId: number, search: string) {
  * callers whose server-computed `canManageBans` is true; the endpoint answers
  * 403 for everybody else.
  */
+/** Active member ids of the group (contacts picker: disable existing members). */
+export function useGroupMemberIdSet(chatId: number, enabled: boolean = true) {
+    return useQuery<Set<number>>({
+        queryKey: groupMemberIdsQueryKey(chatId),
+        queryFn: (): Promise<Set<number>> => api.fetchGroupMemberIds(chatId),
+        staleTime: GROUP_MEMBERS_STALE_TIME_MS,
+        retry: false,
+        enabled: enabled && chatId > 0,
+    });
+}
+
+/**
+ * Adds one batch. On success the member-id set and the group member count are
+ * patched immediately, then the authoritative info / member pages / chat list
+ * are refetched so every open surface (including this picker) is consistent.
+ */
+export function useAddGroupMembers(chatId: number) {
+    const queryClient = useQueryClient();
+    return useMutation<AddMembersResult, Error, number[]>({
+        mutationFn: (userIds): Promise<AddMembersResult> =>
+            api.addGroupMembers(chatId, userIds),
+        onSuccess: async (result): Promise<void> => {
+            if (result.added.length > 0) {
+                queryClient.setQueryData<Set<number>>(
+                    groupMemberIdsQueryKey(chatId),
+                    (current) => {
+                        const next = new Set(current ?? []);
+                        for (const member of result.added) {
+                            next.add(member.userId);
+                        }
+                        return next;
+                    },
+                );
+                queryClient.setQueryData<GroupInfo>(
+                    groupInfoQueryKey(chatId),
+                    (current) =>
+                        current === undefined
+                            ? current
+                            : {
+                                  ...current,
+                                  membersCount: result.membersCount,
+                              },
+                );
+            }
+            await Promise.all([
+                queryClient.invalidateQueries({
+                    queryKey: groupInfoQueryKey(chatId),
+                }),
+                queryClient.invalidateQueries({
+                    queryKey: groupMembersPrefix(chatId),
+                }),
+                queryClient.invalidateQueries({ queryKey: CHATS_QUERY_KEY }),
+            ]);
+        },
+    });
+}
+
 export function useGroupBannedUsers(chatId: number, enabled: boolean = true) {
     return useInfiniteQuery<
         GroupBannedPage,
@@ -330,6 +402,232 @@ export function useUnbanMember(chatId: number) {
     });
 }
 
+export function useGroupMemberPermissions(
+    chatId: number,
+    enabled: boolean = true,
+) {
+    return useQuery<GroupMemberPermissionsResponse>({
+        queryKey: groupMemberPermissionsQueryKey(chatId),
+        queryFn: (): Promise<GroupMemberPermissionsResponse> =>
+            api.fetchGroupMemberPermissions(chatId),
+        staleTime: 0,
+        retry: (failureCount, error): boolean => {
+            if (
+                error instanceof ApiError &&
+                (error.statusCode === 403 || error.statusCode === 404)
+            ) {
+                return false;
+            }
+            return failureCount < 2;
+        },
+        enabled: enabled && chatId > 0,
+    });
+}
+
+export function useUpdateGroupMemberPermissions(chatId: number) {
+    const queryClient = useQueryClient();
+    const queryKey = groupMemberPermissionsQueryKey(chatId);
+    return useMutation<
+        GroupMemberPermissionsUpdateResponse,
+        Error,
+        Partial<GroupMemberPermissionsConfig>
+    >({
+        mutationFn: (patch): Promise<GroupMemberPermissionsUpdateResponse> =>
+            api.updateGroupMemberPermissions(chatId, patch),
+        onSuccess: (result): void => {
+            queryClient.setQueryData<GroupMemberPermissionsResponse>(queryKey, {
+                chatId: result.chatId,
+                permissions: result.permissions,
+                canEdit: result.canEdit,
+            });
+            // Capabilities (add members / invite links / pin) derive from the
+            // policy too, so the group info must refresh for every role.
+            void queryClient.invalidateQueries({
+                queryKey: groupInfoQueryKey(chatId),
+            });
+        },
+    });
+}
+
+/**
+ * Real-time policy sync: a connected member applies the pushed config to the
+ * cache immediately; a payload without a usable object refetches instead.
+ * Offline clients refetch on their next focus/join (`staleTime: 0`).
+ */
+export function useGroupMemberPermissionsEvents(chatId: number): void {
+    const queryClient = useQueryClient();
+    const queryKey = groupMemberPermissionsQueryKey(chatId);
+    const handler = useCallback(
+        (payload: { chatId?: unknown; permissions?: unknown }): void => {
+            if (Number(payload.chatId) !== chatId) return;
+            const next = payload.permissions;
+            if (next !== null && typeof next === 'object') {
+                queryClient.setQueryData<GroupMemberPermissionsResponse>(
+                    queryKey,
+                    (current) =>
+                        current === undefined
+                            ? current
+                            : {
+                                  ...current,
+                                  // Normalized again in the API layer on refetch;
+                                  // here the server payload is authoritative.
+                                  permissions:
+                                      next as GroupMemberPermissionsConfig,
+                              },
+                );
+            }
+            void queryClient.invalidateQueries({ queryKey });
+        },
+        [chatId, queryClient, queryKey],
+    );
+    useSocketEvent('group:member-permissions', handler);
+}
+
+export function useMemberPermissionOverrides(
+    chatId: number,
+    memberId: number,
+    enabled: boolean = true,
+) {
+    return useQuery<MemberPermissionOverridesResponse>({
+        queryKey: memberPermissionOverridesQueryKey(chatId, memberId),
+        queryFn: (): Promise<MemberPermissionOverridesResponse> =>
+            api.fetchMemberPermissionOverrides(chatId, memberId),
+        staleTime: 0,
+        retry: (failureCount, error): boolean => {
+            if (
+                error instanceof ApiError &&
+                (error.statusCode === 403 ||
+                    error.statusCode === 404 ||
+                    error.statusCode === 409)
+            ) {
+                return false;
+            }
+            return failureCount < 2;
+        },
+        enabled: enabled && chatId > 0 && memberId > 0,
+    });
+}
+
+export function useUpdateMemberPermissionOverrides(
+    chatId: number,
+    memberId: number,
+) {
+    const queryClient = useQueryClient();
+    const queryKey = memberPermissionOverridesQueryKey(chatId, memberId);
+    return useMutation<
+        MemberPermissionOverridesUpdateResponse,
+        Error,
+        Partial<Record<MemberPermissionKey, MemberPermissionOverrideState>>
+    >({
+        mutationFn: (patch): Promise<MemberPermissionOverridesUpdateResponse> =>
+            api.updateMemberPermissionOverrides(chatId, memberId, patch),
+        onSuccess: (result): void => {
+            queryClient.setQueryData<MemberPermissionOverridesResponse>(
+                queryKey,
+                {
+                    chatId: result.chatId,
+                    memberId: result.memberId,
+                    userId: result.userId,
+                    role: 'member',
+                    groupPermissions: result.groupPermissions,
+                    overrides: result.overrides,
+                    effective: result.effective,
+                    canEdit: result.canEdit,
+                },
+            );
+            // The affected member's controls elsewhere in the app may change.
+            void queryClient.invalidateQueries({
+                queryKey: groupInfoQueryKey(chatId),
+            });
+        },
+    });
+}
+
+export function useResetMemberPermissionOverrides(
+    chatId: number,
+    memberId: number,
+) {
+    const queryClient = useQueryClient();
+    const queryKey = memberPermissionOverridesQueryKey(chatId, memberId);
+    return useMutation<MemberPermissionOverridesUpdateResponse, Error, void>({
+        mutationFn: (): Promise<MemberPermissionOverridesUpdateResponse> =>
+            api.resetMemberPermissionOverrides(chatId, memberId),
+        onSuccess: (result): void => {
+            queryClient.setQueryData<MemberPermissionOverridesResponse>(
+                queryKey,
+                {
+                    chatId: result.chatId,
+                    memberId: result.memberId,
+                    userId: result.userId,
+                    role: 'member',
+                    groupPermissions: result.groupPermissions,
+                    overrides: result.overrides,
+                    effective: result.effective,
+                    canEdit: result.canEdit,
+                },
+            );
+            void queryClient.invalidateQueries({
+                queryKey: groupInfoQueryKey(chatId),
+            });
+        },
+    });
+}
+
+/**
+ * Realtime sync for one member's overrides. The server pushes the full map
+ * and the resolved effective config, so the editor and any capability UI
+ * update immediately; an unrecognized payload refetches instead. Offline
+ * clients refetch on focus (`staleTime: 0`).
+ */
+export function useMemberPermissionOverridesEvents(
+    chatId: number,
+    memberId: number,
+): void {
+    const queryClient = useQueryClient();
+    const queryKey = memberPermissionOverridesQueryKey(chatId, memberId);
+    const handler = useCallback(
+        (payload: {
+            chatId?: unknown;
+            userId?: unknown;
+            overrides?: unknown;
+            effective?: unknown;
+        }): void => {
+            if (Number(payload.chatId) !== chatId) return;
+            const nextOverrides = payload.overrides;
+            const nextEffective = payload.effective;
+            if (
+                nextOverrides === null ||
+                typeof nextOverrides !== 'object' ||
+                nextEffective === null ||
+                typeof nextEffective !== 'object'
+            ) {
+                void queryClient.invalidateQueries({ queryKey });
+                return;
+            }
+            queryClient.setQueryData<MemberPermissionOverridesResponse>(
+                queryKey,
+                (current) =>
+                    current === undefined ||
+                    Number(payload.userId) !== current.userId
+                        ? current
+                        : {
+                              ...current,
+                              overrides:
+                                  normalizeMemberPermissionOverrides(
+                                      nextOverrides,
+                                  ),
+                              effective: normalizeGroupMemberPermissions(
+                                  nextEffective,
+                              ) as GroupMemberPermissionsConfig,
+                          },
+            );
+            void queryClient.invalidateQueries({ queryKey });
+        },
+        [chatId, queryClient, queryKey],
+    );
+    useSocketEvent('group:member-permission-overrides', handler);
+}
+
 export function useMemberPermissions(
     chatId: number,
     memberId: number,
@@ -357,20 +655,48 @@ export function useMemberPermissions(
 
 export function useSetMemberPermissions(chatId: number, memberId: number) {
     const queryClient = useQueryClient();
-    return useMutation<MemberPermissionsUpdate, Error, MemberPermissionKey[]>({
+    const queryKey = memberPermissionsQueryKey(chatId, memberId);
+    return useMutation<
+        MemberPermissionsUpdate,
+        Error,
+        MemberPermissionKey[],
+        { previous: MemberPermissions | undefined }
+    >({
         mutationFn: (permissions): Promise<MemberPermissionsUpdate> =>
             api.updateMemberPermissions(chatId, memberId, permissions),
+        // Optimistic: the editor shows the new set immediately; a failed save
+        // restores the previous cached grant set.
+        onMutate: async (
+            permissions,
+        ): Promise<{ previous: MemberPermissions | undefined }> => {
+            await queryClient.cancelQueries({ queryKey });
+            const previous =
+                queryClient.getQueryData<MemberPermissions>(queryKey);
+            queryClient.setQueryData<MemberPermissions>(queryKey, (current) =>
+                current === undefined
+                    ? current
+                    : {
+                          ...current,
+                          granted: permissions,
+                          hasAll: false,
+                      },
+            );
+            return { previous };
+        },
+        onError: (_error, _permissions, context): void => {
+            if (context?.previous !== undefined) {
+                queryClient.setQueryData(queryKey, context.previous);
+            }
+        },
         onSuccess: (result): void => {
-            queryClient.setQueryData<MemberPermissions>(
-                memberPermissionsQueryKey(chatId, memberId),
-                (current) =>
-                    current === undefined
-                        ? current
-                        : {
-                              ...current,
-                              granted: result.granted,
-                              hasAll: false,
-                          },
+            queryClient.setQueryData<MemberPermissions>(queryKey, (current) =>
+                current === undefined
+                    ? current
+                    : {
+                          ...current,
+                          granted: result.granted,
+                          hasAll: result.hasAll,
+                      },
             );
             void queryClient.invalidateQueries({
                 queryKey: memberPermissionsQueryKey(chatId, memberId),
@@ -465,10 +791,35 @@ function useMemberMutation(
     });
 }
 
+export interface PromoteMemberInput {
+    memberId: number;
+    permissions: MemberPermissionKey[];
+}
+
+/**
+ * Promote with the chosen initial permission set. Invalidates the member pages
+ * and info so the new admin's role/actions/summary appear immediately.
+ */
 export function usePromoteMember(chatId: number) {
-    return useMemberMutation(chatId, (memberId) =>
-        api.promoteMember(chatId, memberId),
-    );
+    const queryClient = useQueryClient();
+    return useMutation<MemberActionResponse, Error, PromoteMemberInput>({
+        mutationFn: (input): Promise<MemberActionResponse> =>
+            api.promoteMember(chatId, input.memberId, input.permissions),
+        onSuccess: async (result): Promise<void> => {
+            updateMemberCaches(queryClient, chatId, result);
+            await Promise.all([
+                queryClient.invalidateQueries({
+                    queryKey: groupInfoQueryKey(chatId),
+                }),
+                queryClient.invalidateQueries({
+                    queryKey: groupMembersPrefix(chatId),
+                }),
+                queryClient.invalidateQueries({
+                    queryKey: memberPermissionsPrefix(chatId),
+                }),
+            ]);
+        },
+    });
 }
 
 export function useDemoteMember(chatId: number) {
@@ -542,6 +893,8 @@ export function useBanMember(chatId: number) {
 export interface GroupChangedEvent {
     chatId: number;
     reason:
+        | 'member_promoted'
+        | 'member_demoted'
         | 'role_changed'
         | 'member_removed'
         | 'permissions_changed'
@@ -550,7 +903,9 @@ export interface GroupChangedEvent {
         | 'invite_links_changed'
         | 'member_joined'
         | 'member_banned'
-        | 'member_unbanned';
+        | 'member_unbanned'
+        | 'member_permissions_changed'
+        | 'member_permission_overrides_changed';
     userId?: number;
 }
 
@@ -604,12 +959,22 @@ export function useGroupChangedEvents(chatId: number): void {
             void queryClient.invalidateQueries({
                 queryKey: memberPermissionsPrefix(chatId),
             });
+            // Group-default edits change every member's effective permissions,
+            // and a demotion/promotion changes whether overrides still apply.
+            void queryClient.invalidateQueries({
+                queryKey: memberPermissionOverridesPrefix(chatId),
+            });
             if (
                 payload.reason === 'member_banned' ||
                 payload.reason === 'member_unbanned'
             ) {
                 void queryClient.invalidateQueries({
                     queryKey: groupBannedQueryKey(chatId),
+                });
+            }
+            if (payload.reason === 'member_permissions_changed') {
+                void queryClient.invalidateQueries({
+                    queryKey: groupMemberPermissionsQueryKey(chatId),
                 });
             }
             if (

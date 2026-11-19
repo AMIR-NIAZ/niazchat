@@ -126,6 +126,10 @@ describe('UserService avatars', () => {
             profileRepository as never,
             store as never,
             { consume: jest.fn() } as never,
+            {
+                isBlockedBy: () => Promise.resolve(false),
+                assertCanViewUserProfile: () => Promise.resolve(),
+            } as never,
         );
     });
 

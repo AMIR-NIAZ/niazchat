@@ -40,6 +40,7 @@ import {
 } from '../utils/invite-link.util';
 import { ChatId } from 'src/common/types/brands.type';
 import { RequestAuth } from 'src/common/types/RequestAuth.type';
+import { ChatAccessService } from '../services/chat-access.service';
 
 /**
  * Group management surface. Class guard: `ManagerChatGuard` (member of THAT
@@ -54,6 +55,7 @@ export class ManageChatsController {
         private readonly chatService: ChatService,
         private readonly permissionChatService: PermissionChatService,
         private readonly inviteLinks: GroupInviteLinksService,
+        private readonly access: ChatAccessService,
     ) {}
 
     // ── members ────────────────────────────────────────────────────────────
@@ -82,7 +84,7 @@ export class ManageChatsController {
     @Role([RoleEnum.ALL])
     @ChatAccess({
         minRole: RoleChatEnum.ADMIN,
-        permissions: [PermissionChatEnum.CHANGE_INFO_CHAT],
+        permissions: [PermissionChatEnum.EDIT_GROUP_INFO],
     })
     async updateTitle(
         @Req() request: RequestAuth,
@@ -100,7 +102,7 @@ export class ManageChatsController {
     @Role([RoleEnum.ALL])
     @ChatAccess({
         minRole: RoleChatEnum.ADMIN,
-        permissions: [PermissionChatEnum.CHANGE_INFO_CHAT],
+        permissions: [PermissionChatEnum.EDIT_GROUP_INFO],
     })
     @UseInterceptors(
         FileInterceptor('avatar', {
@@ -130,7 +132,7 @@ export class ManageChatsController {
     @Role([RoleEnum.ALL])
     @ChatAccess({
         minRole: RoleChatEnum.ADMIN,
-        permissions: [PermissionChatEnum.CHANGE_INFO_CHAT],
+        permissions: [PermissionChatEnum.EDIT_GROUP_INFO],
     })
     async deleteAvatar(
         @Req() request: RequestAuth,
@@ -146,10 +148,14 @@ export class ManageChatsController {
 
     // ── members mutation ───────────────────────────────────────────────────
 
-    /** Add by phone — any admin may (lookup by contact). */
+    /**
+     * Add by phone. Owners/admins need `manage_members`; a regular member is
+     * allowed when the group's member policy enables `add_members`. The
+     * service performs the whole authorization, so no route-level role gate
+     * (which would make the member switch unreachable).
+     */
     @Post('/:groupId/add/:userPhone')
     @Role([RoleEnum.ALL])
-    @ChatAccess({ minRole: RoleChatEnum.ADMIN })
     async addMemberByPhone(
         @Req() request: RequestAuth,
         @Param('groupId', ParseIntPipe) groupId: ChatId,
@@ -167,7 +173,7 @@ export class ManageChatsController {
     @Role([RoleEnum.ALL])
     @ChatAccess({
         minRole: RoleChatEnum.ADMIN,
-        permissions: [PermissionChatEnum.BAN_USER],
+        permissions: [PermissionChatEnum.REMOVE_MEMBERS],
     })
     async kickMember(
         @Req() request: RequestAuth,
@@ -197,7 +203,10 @@ export class ManageChatsController {
     /** Owner-only: `manager` is the group owner; chat `admin` cannot ban. */
     @Post('/ban/:memberId')
     @Role([RoleEnum.ALL])
-    @ChatAccess({ minRole: RoleChatEnum.MANAGER })
+    @ChatAccess({
+        minRole: RoleChatEnum.ADMIN,
+        permissions: [PermissionChatEnum.BAN_USERS],
+    })
     async banMember(
         @Req() request: RequestAuth,
         @Param('memberId', ParseIntPipe) memberId: number,
@@ -210,7 +219,7 @@ export class ManageChatsController {
     @Role([RoleEnum.ALL])
     @ChatAccess({
         minRole: RoleChatEnum.ADMIN,
-        permissions: [PermissionChatEnum.BAN_USER],
+        permissions: [PermissionChatEnum.BAN_USERS],
     })
     async onBanMember(
         @Req() request: RequestAuth,
@@ -223,7 +232,7 @@ export class ManageChatsController {
     @Role([RoleEnum.ALL])
     @ChatAccess({
         minRole: RoleChatEnum.ADMIN,
-        permissions: [PermissionChatEnum.BAN_USER],
+        permissions: [PermissionChatEnum.BAN_USERS],
     })
     async getAllBanUsers(@Param('chatId', ParseIntPipe) chatId: ChatId) {
         return await this.chatService.getAllBanUser(chatId);
@@ -237,58 +246,102 @@ export class ManageChatsController {
         return await this.chatService.banChat(chatId);
     }
 
-    // ── admins & permissions (owner only) ─────────────────────────────────
+    // ── admins & permissions (manage_admins / manage_permissions) ──────────
 
     @Post('/admin/add/:memberId')
     @Role([RoleEnum.ALL])
-    @ChatAccess({ minRole: RoleChatEnum.MANAGER })
+    @ChatAccess({
+        minRole: RoleChatEnum.ADMIN,
+        permissions: [PermissionChatEnum.MANAGE_ADMINS],
+    })
     async addAdmin(
+        @Req() request: RequestAuth,
         @Param('memberId', ParseIntPipe) memberId: number,
         @Body() permissions: PermissionChatDto,
     ) {
-        return await this.permissionChatService.addAdmin(memberId, permissions);
+        return await this.permissionChatService.addAdmin(
+            await this.chatIdOf(memberId),
+            memberId,
+            request.user.sub,
+            permissions,
+        );
     }
 
     @Delete('/admin/delete/:memberId')
     @Role([RoleEnum.ALL])
-    @ChatAccess({ minRole: RoleChatEnum.MANAGER })
-    async deleteAdmin(@Param('memberId', ParseIntPipe) memberId: number) {
-        return await this.permissionChatService.removeAdmin(memberId);
+    @ChatAccess({
+        minRole: RoleChatEnum.ADMIN,
+        permissions: [PermissionChatEnum.MANAGE_ADMINS],
+    })
+    async deleteAdmin(
+        @Req() request: RequestAuth,
+        @Param('memberId', ParseIntPipe) memberId: number,
+    ) {
+        return await this.permissionChatService.removeAdmin(
+            await this.chatIdOf(memberId),
+            memberId,
+            request.user.sub,
+        );
     }
 
     @Post('/admin/permissions/:memberId')
     @Role([RoleEnum.ALL])
-    @ChatAccess({ minRole: RoleChatEnum.MANAGER })
+    @ChatAccess({
+        minRole: RoleChatEnum.ADMIN,
+        permissions: [PermissionChatEnum.MANAGE_PERMISSIONS],
+    })
     async addPermissionforAdmin(
+        @Req() request: RequestAuth,
         @Param('memberId', ParseIntPipe) memberId: number,
         @Body() permissionDto: PermissionChatDto,
     ) {
         return await this.permissionChatService.addPermissionforAdmin(
+            await this.chatIdOf(memberId),
             memberId,
+            request.user.sub,
             permissionDto,
         );
     }
 
     @Delete('/admin/permissions/:memberId')
     @Role([RoleEnum.ALL])
-    @ChatAccess({ minRole: RoleChatEnum.MANAGER })
+    @ChatAccess({
+        minRole: RoleChatEnum.ADMIN,
+        permissions: [PermissionChatEnum.MANAGE_PERMISSIONS],
+    })
     async deletePermissionforAdmin(
+        @Req() request: RequestAuth,
         @Param('memberId', ParseIntPipe) memberId: number,
         @Body() permissionDto: PermissionChatDto,
     ) {
         return await this.permissionChatService.deletePermissionforAdmin(
+            await this.chatIdOf(memberId),
             memberId,
+            request.user.sub,
             permissionDto,
         );
     }
 
     @Get('/admin/permissions/:memberId')
     @Role([RoleEnum.ALL])
-    @ChatAccess({ minRole: RoleChatEnum.MANAGER })
+    @ChatAccess({
+        minRole: RoleChatEnum.ADMIN,
+        permissions: [PermissionChatEnum.MANAGE_PERMISSIONS],
+    })
     async getAdminPermissions(
+        @Req() request: RequestAuth,
         @Param('memberId', ParseIntPipe) memberId: number,
     ) {
-        return await this.permissionChatService.getAdminPermissions(memberId);
+        return await this.permissionChatService.getAdminPermissions(
+            await this.chatIdOf(memberId),
+            memberId,
+            request.user.sub,
+        );
+    }
+
+    private async chatIdOf(memberId: number): Promise<ChatId> {
+        const target = await this.access.getTargetMember(memberId);
+        return target.chat.id;
     }
 
     // ── invite links (any admin) ───────────────────────────────────────────
@@ -300,7 +353,10 @@ export class ManageChatsController {
      */
     @Post('/:chatId/link')
     @Role([RoleEnum.ALL])
-    @ChatAccess({ minRole: RoleChatEnum.ADMIN })
+    @ChatAccess({
+        minRole: RoleChatEnum.ADMIN,
+        permissions: [PermissionChatEnum.MANAGE_INVITES],
+    })
     async createLink(
         @Req() request: RequestAuth,
         @Param('chatId', ParseIntPipe) chatId: ChatId,
@@ -342,7 +398,10 @@ export class ManageChatsController {
 
     @Get('/:chatId/link')
     @Role([RoleEnum.ALL])
-    @ChatAccess({ minRole: RoleChatEnum.ADMIN })
+    @ChatAccess({
+        minRole: RoleChatEnum.ADMIN,
+        permissions: [PermissionChatEnum.MANAGE_INVITES],
+    })
     async getLinkChats(
         @Req() request: RequestAuth,
         @Param('chatId', ParseIntPipe) chatId: ChatId,
@@ -352,7 +411,10 @@ export class ManageChatsController {
 
     @Delete('/:chatId/link/:linkId')
     @Role([RoleEnum.ALL])
-    @ChatAccess({ minRole: RoleChatEnum.ADMIN })
+    @ChatAccess({
+        minRole: RoleChatEnum.ADMIN,
+        permissions: [PermissionChatEnum.MANAGE_INVITES],
+    })
     async deleteLink(
         @Req() request: RequestAuth,
         @Param('chatId', ParseIntPipe) chatId: ChatId,

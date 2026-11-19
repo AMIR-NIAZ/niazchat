@@ -49,6 +49,9 @@ describe('ChatService membersCount', () => {
             {} as never,
             access as never,
             {} as never,
+            {
+                blockersOfViewer: () => Promise.resolve(new Set<number>()),
+            } as never,
         );
 
         const summary = await service.getChatSummary(1 as never, 2 as never);

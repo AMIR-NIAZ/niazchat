@@ -42,6 +42,18 @@ export class Message extends BaseEntity {
     isDeleted: boolean;
 
     /**
+     * Pinned state. A chat may pin any number of non-deleted messages; the
+     * message row itself stays the single source of truth (no copy/duplicate).
+     * `pinnedAt` orders the banner's pinned list (newest pin first) and is
+     * null whenever `isPinned` is false.
+     */
+    @Column({ default: false })
+    isPinned: boolean;
+
+    @Column({ type: 'timestamp', nullable: true })
+    pinnedAt: Date | null;
+
+    /**
      * Forward origin snapshot. Both stay NULL for ordinary messages and are
      * copied unchanged when a forwarded message is forwarded again.
      */

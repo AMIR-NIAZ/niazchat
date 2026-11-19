@@ -8,6 +8,7 @@ import type {
     ForwardMessagesResult,
     ReactMessageSocketPayload,
     MessageReactionsSocketPayload,
+    PinMessageSocketPayload,
 } from '../../core/socket';
 import { socketOrThrow } from '../chats/chats-socket-api';
 import { ApiError } from '../../core/api';
@@ -109,6 +110,39 @@ export async function deleteChatMessage(
 ): Promise<unknown> {
     const payload: DeleteMessageSocketPayload = { messageId, chatId };
     return request(connectedSocket(), 'deleteMessage', payload);
+}
+
+/** Ack of `pinMessage`: the serialized pinned message + idempotency flag. */
+export interface PinMessageResult {
+    message: MessageDto;
+    alreadyPinned: boolean;
+}
+
+/** WS `pinMessage` — idempotent; repeats return `alreadyPinned: true`. */
+export async function pinChatMessage(
+    chatId: number,
+    messageId: number,
+): Promise<PinMessageResult | null> {
+    const payload: PinMessageSocketPayload = { chatId, messageId };
+    return request<PinMessageResult>(connectedSocket(), 'pinMessage', payload);
+}
+
+/** WS `unpinMessage` — idempotent; repeats return `alreadyUnpinned: true`. */
+export async function unpinChatMessage(
+    chatId: number,
+    messageId: number,
+): Promise<{ messageId: number; alreadyUnpinned: boolean } | null> {
+    const payload: PinMessageSocketPayload = { chatId, messageId };
+    return request(connectedSocket(), 'unpinMessage', payload);
+}
+
+/** WS `getPinnedMessages` — full pinned list, newest pin first (offline sync). */
+export async function fetchPinnedMessages(
+    chatId: number,
+): Promise<MessageDto[] | null> {
+    return request<MessageDto[]>(connectedSocket(), 'getPinnedMessages', {
+        chatId,
+    });
 }
 
 /** WS `reactMessage` — one reaction per user; null clears, same emoji toggles. */

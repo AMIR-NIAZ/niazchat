@@ -1,5 +1,6 @@
 import {
     BadRequestException,
+    ForbiddenException,
     Injectable,
     NotFoundException,
 } from '@nestjs/common';
@@ -7,6 +8,8 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { Chat } from '../entities/chat.entity';
 import { ChatMember } from '../entities/chat_members.entity';
+import { ChatSeen } from '../entities/chats_seen.entity';
+import { Message } from 'src/modules/messages/entities/message.entity';
 import { RoleChat } from '../entities/role_chat.entity';
 import { RoleChatEnum } from 'src/common/enums/roleChat.enum';
 import { TypeChatEnum } from 'src/common/enums/typeChat.enum';
@@ -16,6 +19,8 @@ import { RateLimitService } from 'src/common/services/rate-limit.service';
 import { JwtPayload } from 'src/common/types/jwt-payload.type';
 import { ChatId, UserId } from 'src/common/types/brands.type';
 import { isUniqueViolation, pairKeyOf } from '../utils/private-chat.util';
+import { VisibilityService } from 'src/modules/visibility/visibility.service';
+import { sanitizeUserForViewer } from 'src/modules/visibility/visibility.util';
 
 /** Private-chat peer projection: never includes a phone number. */
 export interface PeerDto {
@@ -64,6 +69,9 @@ export class PrivateChatService {
         @InjectDataSource()
         private readonly dataSource: DataSource,
         private readonly rateLimit: RateLimitService,
+        @InjectRepository(ChatMember)
+        private readonly memberRepository: Repository<ChatMember>,
+        private readonly visibility: VisibilityService,
     ) {}
 
     /**
@@ -115,10 +123,17 @@ export class PrivateChatService {
             throw new BadRequestException('This chat is unavailable');
         }
 
+        const peer = toPeerDto(target);
         return {
             chatId: Number(chat.id),
             created,
-            peer: toPeerDto(target),
+            peer: sanitizeUserForViewer(
+                peer,
+                await this.visibility.isBlockedBy(
+                    Number(caller.sub),
+                    Number(targetUserId),
+                ),
+            ),
         };
     }
 
@@ -193,6 +208,150 @@ export class PrivateChatService {
         );
 
         return chat.id;
+    }
+
+    /**
+     * "Delete chat for me": hides the conversation and its history from THIS
+     * member only. Persisted as `chat_members.clearedBeforeId` (the id of the
+     * newest message at deletion time); nothing is deleted for the peer and the
+     * peer receives no event.
+     *
+     * Restore policy (documented, identical for every recipient): the chat
+     * reappears in this member's list as soon as a NEW message (from either
+     * side) has an id above the marker, and only messages above the marker are
+     * returned by history. The marker is never cleared implicitly, so old
+     * history cannot reappear later.
+     */
+    async deleteForMe(
+        chatId: ChatId,
+        callerId: UserId,
+    ): Promise<{ chatId: number; clearedBeforeId: number | null }> {
+        await this.assertPrivateMembership(chatId, callerId);
+
+        return this.dataSource.transaction(async (manager) => {
+            // Serialize concurrent deletes/sends for this chat so the boundary
+            // and the "newest message" snapshot cannot skew.
+            await manager.query('SELECT pg_advisory_xact_lock($1)', [
+                Number(chatId),
+            ]);
+
+            const latest = await manager.getRepository(Message).findOne({
+                where: { chat: { id: chatId } },
+                order: { id: 'DESC' },
+                select: { id: true },
+            });
+            const boundary = latest === null ? null : Number(latest.id);
+
+            await manager
+                .getRepository(ChatMember)
+                .update(
+                    { chat: { id: chatId }, user: { id: callerId } },
+                    { clearedBeforeId: boundary },
+                );
+            // The caller's read position is meaningless behind the new
+            // boundary; clearing it keeps future unread counts honest.
+            await manager.getRepository(ChatSeen).delete({
+                chat: { id: chatId },
+                user: { id: callerId },
+            });
+
+            return { chatId: Number(chatId), clearedBeforeId: boundary };
+        });
+    }
+
+    /**
+     * "Delete chat for both": irreversibly removes the private chat row and,
+     * through `ON DELETE CASCADE`, every message, attachment row, membership
+     * and read position of BOTH participants. Either participant may delete;
+     * membership is re-checked inside (never trusting the socket guard alone).
+     *
+     * Idempotent: a repeat/concurrent request finds no row (or deletes 0 rows)
+     * and reports success, so the two clients converge on the same state.
+     */
+    async deleteForBoth(
+        chatId: ChatId,
+        callerId: UserId,
+    ): Promise<{
+        chatId: number;
+        memberIds: number[];
+        alreadyDeleted: boolean;
+    }> {
+        // A missing chat means an earlier (or concurrent) delete already won:
+        // answer success so both clients converge. A GROUP id is never a valid
+        // target for this private-only action.
+        const chat = await this.chatRepository.findOne({
+            where: { id: chatId },
+            select: { id: true, type: true },
+        });
+        if (!chat) {
+            return {
+                chatId: Number(chatId),
+                memberIds: [],
+                alreadyDeleted: true,
+            };
+        }
+        if (chat.type !== TypeChatEnum.PRIVATE) {
+            throw new BadRequestException(
+                'This action is only available in private chats',
+            );
+        }
+
+        const members = await this.memberRepository.find({
+            where: { chat: { id: chatId } },
+            relations: { user: true },
+            select: { id: true, user: { id: true } },
+        });
+        const memberIds = [
+            ...new Set(members.map((member) => Number(member.user.id))),
+        ];
+        if (!memberIds.includes(Number(callerId))) {
+            throw new ForbiddenException('you are not a member of this chat');
+        }
+
+        const affected = await this.dataSource.transaction(
+            async (manager): Promise<number> => {
+                await manager.query('SELECT pg_advisory_xact_lock($1)', [
+                    Number(chatId),
+                ]);
+                const result = await manager
+                    .getRepository(Chat)
+                    .delete({ id: chatId, type: TypeChatEnum.PRIVATE });
+                return result.affected ?? 0;
+            },
+        );
+
+        return {
+            chatId: Number(chatId),
+            memberIds,
+            alreadyDeleted: affected === 0,
+        };
+    }
+
+    /** Private chat + active membership, or the matching 4xx. */
+    private async assertPrivateMembership(
+        chatId: ChatId,
+        callerId: UserId,
+    ): Promise<void> {
+        const chat = await this.chatRepository.findOne({
+            where: { id: chatId },
+            select: { id: true, type: true, isBan: true },
+        });
+        if (!chat) throw new NotFoundException('chat not found');
+        if (chat.type !== TypeChatEnum.PRIVATE) {
+            throw new BadRequestException(
+                'This action is only available in private chats',
+            );
+        }
+        if (chat.isBan) {
+            throw new BadRequestException('This chat is unavailable');
+        }
+        const member = await this.memberRepository.findOne({
+            where: { chat: { id: chatId }, user: { id: callerId } },
+            select: { id: true },
+        });
+        if (!member) {
+            throw new ForbiddenException('you are not a member of this chat');
+        }
     }
 
     private createRateKey(userId: number): string {

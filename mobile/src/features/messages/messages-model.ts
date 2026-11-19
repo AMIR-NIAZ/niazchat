@@ -86,6 +86,10 @@ export interface ChatMessage {
     createdAtIso: string;
     isEdited: boolean;
     isDeleted: boolean;
+    /** Pinned state (multiple messages per chat may be pinned). */
+    isPinned: boolean;
+    /** ISO timestamp of the pin, newest first; null when not pinned. */
+    pinnedAtIso: string | null;
     senderId: number;
     senderName: string;
     /** Resolved (absolute) avatar urls of the sender, when present. */

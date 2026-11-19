@@ -34,6 +34,8 @@ import { MusicBubble } from '../music/music-bubble';
 import type { MusicTrack } from '../../shared/music-player';
 import { splitLinkifiedText } from '../groups/invite-links-model';
 import { childPressBlocksMenu, resolveBubblePress } from './bubble-press';
+import { Check, CheckCheck, Clock3 } from 'lucide-react-native';
+import { MessageHighlight } from './message-highlight';
 /**
  * A single message bubble. Mine → primary, right-aligned; others → white,
  * left-aligned with the sender name shown in group chats. Pending/failed
@@ -289,7 +291,6 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                 styles.bubble,
                 mine ? styles.mine : styles.theirs,
                 showFailedHint && styles.failed,
-                highlighted && styles.highlighted,
                 selected && styles.selectedBubble,
                 isStatic ? null : hiddenStyle,
             ]}
@@ -584,13 +585,16 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                     )}
                 </View>
             )}
-            <Text style={[styles.meta, mine && styles.metaMine]}>
-                {formatMessageTime(message.createdAtIso)}
-                {message.isEdited ? ' · edited' : ''}
-                {isSending ? ' · sending…' : ''}
-                {showFailedHint ? ' · not sent' : ''}
+            <View style={[styles.metaRow, mine && styles.metaRowMine]}>
+                <Text style={[styles.meta, mine && styles.metaMine]}>
+                    {formatMessageTime(message.createdAtIso)}
+                    {message.isEdited ? ' · edited' : ''}
+                    {isSending ? ' · sending' : ''}
+                    {showFailedHint ? ' · not sent' : ''}
+                </Text>
+
                 {mine && !showFailedHint && (
-                    <Text
+                    <View
                         accessibilityLabel={
                             seenByOthers
                                 ? 'Seen'
@@ -598,12 +602,25 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                                   ? 'Sending'
                                   : 'Sent'
                         }
-                        style={[styles.ticks, seenByOthers && styles.ticksSeen]}
+                        style={styles.ticks}
                     >
-                        {isSending ? ' 🕓' : seenByOthers ? ' ✓✓' : ' ✓'}
-                    </Text>
+                        {isSending ? (
+                            <Clock3 size={13} color={palette.text.secondary} />
+                        ) : seenByOthers ? (
+                            <CheckCheck
+                                size={15}
+                                color={palette.text.onAccent}
+                            />
+                        ) : (
+                            <Check size={15} color={palette.text.onAccent} />
+                        )}
+                    </View>
                 )}
-            </Text>
+            </View>
+            {/* Jump-target wash: absolutely positioned, never affects layout.
+                Mounting it only for the target also replaces the previous
+                animation instead of letting two washes compete. */}
+            {highlighted && <MessageHighlight mine={mine} />}
         </Reanimated.View>
     );
 
@@ -1047,10 +1064,6 @@ const styles = StyleSheet.create({
     theirs: { borderBottomLeftRadius: 4 },
     failed: { opacity: 0.65 },
     pressed: { opacity: 0.6 },
-    highlighted: {
-        borderColor: palette.semantic.warning,
-        borderWidth: 2,
-    },
     selectedBubble: {
         borderColor: palette.primary[600],
         borderWidth: 2,
@@ -1212,7 +1225,6 @@ const styles = StyleSheet.create({
         marginTop: 2,
     },
     metaMine: { color: 'rgba(255,255,255,0.72)' },
-    ticks: { fontSize: 10 },
     ticksSeen: { color: palette.text.onAccent, fontWeight: '700' },
     unreadRow: {
         flexDirection: 'row',
@@ -1238,4 +1250,19 @@ const styles = StyleSheet.create({
         backgroundColor: palette.neutral[100],
     },
     separatorLabel: { color: palette.neutral[500], fontSize: 12 },
+    metaRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'flex-end',
+        gap: 3,
+        marginTop: 2,
+    },
+    metaRowMine: {
+        alignSelf: 'flex-end',
+    },
+    ticks: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        transform: [{ translateY: 1 }],
+    },
 });

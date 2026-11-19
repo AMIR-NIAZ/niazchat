@@ -28,6 +28,7 @@ import {
 } from '../utils/avatar.util';
 import { removeAvatarThumbnails } from 'src/modules/media/avatar-thumbnail.util';
 import { RateLimitService } from 'src/common/services/rate-limit.service';
+import { VisibilityService } from 'src/modules/visibility/visibility.service';
 import {
     USER_SEARCH_RATE_LIMIT,
     USER_SEARCH_RATE_WINDOW_SECONDS,
@@ -60,6 +61,7 @@ export class UserService {
         private readonly profileRepository: Repository<UserProfile>,
         private readonly dataSource: DataSource,
         private readonly rateLimit: RateLimitService,
+        private readonly visibility: VisibilityService,
     ) {}
 
     async onlineUser(user: JwtPayload) {
@@ -117,6 +119,14 @@ export class UserService {
             .where('user.status = :status', { status: UserStatusEnum.ACTIVE })
             .andWhere('user.id != :callerId', { callerId })
             .andWhere('profile.username IS NOT NULL')
+            .andWhere(
+                `NOT EXISTS (
+                     SELECT 1 FROM user_blocks block
+                      WHERE block."blockerId" = "user".id
+                        AND block."blockedId" = :callerId
+                 )`,
+                { callerId },
+            )
             .andWhere("profile.username ILIKE :pattern ESCAPE '\\'", {
                 pattern,
             })
@@ -167,6 +177,14 @@ export class UserService {
                 status: UserStatusEnum.ACTIVE,
             })
             .andWhere('user.id != :callerId', { callerId })
+            .andWhere(
+                `NOT EXISTS (
+                     SELECT 1 FROM user_blocks block
+                      WHERE block."blockerId" = "user".id
+                        AND block."blockedId" = :callerId
+                 )`,
+                { callerId },
+            )
             .orderBy('user.phone', 'ASC')
             .getMany();
 
@@ -185,7 +203,7 @@ export class UserService {
         };
     }
 
-    async getUserByUsername(username: string) {
+    async getUserByUsername(username: string, viewerId?: number) {
         const profile = await this.profileRepository.findOne({
             where: { username },
             relations: { user: true },
@@ -209,6 +227,14 @@ export class UserService {
             },
         });
         if (!profile) throw new NotFoundException('user not found');
+
+        if (viewerId !== undefined) {
+            // Same generic answer as an unknown username: a block cannot be probed.
+            await this.visibility.assertCanViewUserProfile(
+                Number(viewerId),
+                Number(profile.user.id),
+            );
+        }
 
         return { data: toUserResponse({ ...profile.user, profile }) };
     }

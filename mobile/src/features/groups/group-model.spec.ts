@@ -1,8 +1,20 @@
+jest.mock('lucide-react-native', () => ({
+    Link: () => null,
+    PencilSparkles: () => null,
+    Shield: () => null,
+    UserX: () => null,
+}));
+
 import { ApiError } from '../../core/api';
 import {
     GROUP_DESCRIPTION_MAX_LENGTH,
     GROUP_TITLE_MAX_LENGTH,
+    canBan,
+    canDemote,
+    canEditPermissions,
     canOpenGroupSettings,
+    canPromote,
+    canRemove,
     canSaveGroupInfo,
     groupDescriptionError,
     groupInfoChanges,
@@ -23,7 +35,17 @@ import {
     visibleGroupSettingsFeatures,
     visibleMemberActions,
 } from './group-model';
-import type { GroupMember, GroupMemberPage } from './group-model';
+import type {
+    GroupMember,
+    GroupMemberPage,
+    MemberPermissionKey,
+} from './group-model';
+import {
+    PERMISSION_META,
+    PERMISSION_PRESETS,
+    hasPermission,
+    permissionSummary,
+} from './permissions';
 import { describeMemberActionError } from './group-errors';
 
 function member(overrides: Partial<GroupMember> = {}): GroupMember {
@@ -36,6 +58,8 @@ function member(overrides: Partial<GroupMember> = {}): GroupMember {
         isOnline: false,
         lastSeen: null,
         role: 'member',
+        permissions: [],
+        promotedById: null,
         actions: {
             canPromote: true,
             canDemote: false,
@@ -224,41 +248,118 @@ describe('members cache updates', () => {
     });
 });
 
-describe('permission editor helpers', () => {
+describe('permission helpers', () => {
+    const caller = (
+        role: 'owner' | 'admin' | 'member',
+        permissions: MemberPermissionKey[] = [],
+        userId: number | null = 2,
+    ) => ({ role, permissions, userId });
+
     it('detects dirty sets ignoring order', () => {
         expect(permissionSetEquals([], [])).toBe(true);
         expect(
             permissionSetEquals(
-                ['ban_user', 'delete_message'],
-                ['delete_message', 'ban_user'],
+                ['ban_users', 'delete_other_messages'],
+                ['delete_other_messages', 'ban_users'],
             ),
         ).toBe(true);
-        expect(permissionSetEquals(['ban_user'], [])).toBe(false);
+        expect(permissionSetEquals(['ban_users'], [])).toBe(false);
         expect(
-            permissionSetEquals(['ban_user'], ['ban_user', 'change_info_chat']),
+            permissionSetEquals(
+                ['ban_users'],
+                ['ban_users', 'edit_group_info'],
+            ),
         ).toBe(false);
     });
 
     it('toggles one permission without mutating the current set', () => {
-        const current = ['ban_user'] as const;
-        expect(togglePermissionSelection(current, 'delete_message')).toEqual([
-            'ban_user',
-            'delete_message',
-        ]);
-        expect(togglePermissionSelection(current, 'ban_user')).toEqual([]);
-        expect(current).toEqual(['ban_user']);
+        const current = ['ban_users'] as const;
+        expect(
+            togglePermissionSelection(current, 'delete_other_messages'),
+        ).toEqual(['ban_users', 'delete_other_messages']);
+        expect(togglePermissionSelection(current, 'ban_users')).toEqual([]);
+        expect(current).toEqual(['ban_users']);
     });
 
-    it('has the exact descriptions shown in the sheet', () => {
-        expect(permissionDescription('ban_user')).toBe(
-            'can remove regular members from the group',
+    it('has the exact descriptions shown in the editor', () => {
+        expect(permissionDescription('ban_users')).toBe(
+            'Ban, unban and review banned users.',
         );
-        expect(permissionDescription('delete_message')).toBe(
-            "can delete other members' messages",
+        expect(permissionDescription('manage_messages')).toContain('Moderate');
+    });
+
+    it('mirrors the backend promotedById rules', () => {
+        const member = { role: 'member' as const };
+        const ownAdmin = { role: 'admin' as const, promotedById: 2 };
+        const otherAdmin = { role: 'admin' as const, promotedById: 9 };
+
+        expect(canPromote(caller('owner'), member)).toBe(true);
+        expect(canPromote(caller('admin', ['manage_admins']), member)).toBe(
+            true,
         );
-        expect(permissionDescription('change_info_chat')).toBe(
-            "can change the group's title and photo",
+        expect(canPromote(caller('admin', ['ban_users']), member)).toBe(false);
+        expect(canDemote(caller('owner'), ownAdmin)).toBe(true);
+        expect(canDemote(caller('admin', ['manage_admins']), ownAdmin)).toBe(
+            true,
         );
+        expect(canDemote(caller('admin', ['manage_admins']), otherAdmin)).toBe(
+            false,
+        );
+        expect(
+            canEditPermissions(
+                caller('admin', ['manage_permissions']),
+                ownAdmin,
+            ),
+        ).toBe(true);
+        expect(
+            canEditPermissions(
+                caller('admin', ['manage_permissions']),
+                otherAdmin,
+            ),
+        ).toBe(false);
+        expect(canRemove(caller('admin', ['remove_members']), member)).toBe(
+            true,
+        );
+        expect(canBan(caller('admin', ['ban_users']), member)).toBe(true);
+        expect(canBan(caller('admin', ['ban_users']), ownAdmin)).toBe(false);
+        expect(canBan(caller('owner'), ownAdmin)).toBe(true);
+    });
+
+    it('treats manage_messages as an umbrella', () => {
+        expect(
+            hasPermission(
+                'admin',
+                ['manage_messages'],
+                'delete_other_messages',
+            ),
+        ).toBe(true);
+        expect(
+            hasPermission('admin', ['manage_messages'], 'pin_messages'),
+        ).toBe(true);
+        expect(hasPermission('member', [], 'pin_messages')).toBe(false);
+        expect(hasPermission('owner', [], 'manage_permissions')).toBe(true);
+    });
+
+    it('summarizes an admin permission set', () => {
+        expect(permissionSummary('owner', ['all'])).toBeNull();
+        expect(permissionSummary('admin', ['all'])).toBe('Full admin');
+        expect(permissionSummary('admin', ['ban_users'])).toBe('1 permission');
+        expect(permissionSummary('admin', ['ban_users', 'ban_user'])).toBe(
+            '1 permission',
+        );
+        expect(permissionSummary('admin', [])).toBe('No permissions');
+    });
+
+    it('maps presets including the inactive keys', () => {
+        const moderator = PERMISSION_PRESETS.find(
+            (preset) => preset.key === 'moderator',
+        );
+        expect(moderator?.permissions).toContain('restrict_members');
+        expect(PERMISSION_META.restrict_members.active).toBe(false);
+        expect(
+            PERMISSION_PRESETS.find((preset) => preset.key === 'manager')
+                ?.permissions,
+        ).not.toContain('manage_admins');
     });
 });
 
@@ -314,9 +415,7 @@ describe('group settings access', () => {
         });
         expect(links.map((row) => row.key)).toEqual(['invite_links']);
         expect(links[0]?.title).toBe('Invite links');
-        expect(links[0]?.route(12)).toBe(
-            '/group-settings/12/invite-links',
-        );
+        expect(links[0]?.route(12)).toBe('/group-settings/12/invite-links');
 
         expect(
             visibleGroupSettingsFeatures({

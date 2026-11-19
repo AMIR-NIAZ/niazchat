@@ -33,24 +33,32 @@ import {
 import type { PopupRect } from '../../../shared/context-popup';
 import { useHomeTabReselect, useTabBarInset } from '../../../shared/tab-bar';
 import { dialog, toast } from '../../../shared/dialog';
-import { ApiError } from '../../../core/api';
 import {
+    applyChatBlockedEvent,
+    blockChatPeer,
+    CHATS_QUERY_KEY,
     ChatRowContent,
     ChatRowPreview,
     chatPreviewText,
+    deleteChatForBoth,
+    deleteChatForMe,
     getChatListActions,
     invalidateChats,
+    leaveGroupFailure,
+    LEAVE_GROUP_SUCCESS_MESSAGE,
     myChatRoleQuery,
     isPrivateChat,
     purgeChatFromCaches,
     setChatUnreadCount,
     sortPinnedFirst,
+    unblockChatPeer,
     useChats,
     useLeaveGroup,
     usePinnedChatIds,
 } from '../../../features/chats';
 import type { ChatListActionId, ChatRole } from '../../../features/chats';
 import { markChatSeen } from '../../../features/messages';
+import { deleteLocalChatMessages } from '../../../shared/local-db';
 import { openUserProfile } from '../../../features/users';
 import { useCurrentUserId } from '../../../features/auth';
 import { Search } from 'lucide-react-native';
@@ -198,31 +206,189 @@ export default function ChatsScreen(): React.ReactElement {
                     .mutateAsync(chatId)
                     .then((): void => {
                         purgeChatFromCaches(queryClient, chatId);
-                        toast.show('You are no longer a member of this group.');
+                        toast.show(LEAVE_GROUP_SUCCESS_MESSAGE);
                     })
                     .catch((error: unknown) => {
-                        // 403/404: membership is already gone server side —
-                        // drop local access the same way.
-                        if (
-                            error instanceof ApiError &&
-                            (error.statusCode === 403 ||
-                                error.statusCode === 404)
-                        ) {
+                        const failure = leaveGroupFailure(error);
+                        // 403/404: access is already gone server side — drop
+                        // local access. The leave itself did NOT happen, so
+                        // surface the server's reason instead of a success
+                        // message (a route/404 must never look like a leave).
+                        if (failure.purge) {
                             purgeChatFromCaches(queryClient, chatId);
-                            toast.show(
-                                'You are no longer a member of this group.',
-                            );
-                            return;
                         }
                         dialog.show({
                             title: 'Could not leave group',
-                            message:
-                                error instanceof Error
-                                    ? error.message
-                                    : 'Try again in a moment.',
+                            message: failure.message,
                             tone: 'danger',
                         });
                     });
+            });
+    };
+
+    // ── Private-chat actions (block / delete) ──────────────────────────────
+    // One request per chat at a time: repeated taps and double confirmations
+    // are ignored while the first call is in flight.
+    const privateActionInFlightRef = useRef<Set<number>>(new Set());
+
+    const reportActionError = (title: string, error: unknown): void => {
+        dialog.show({
+            title,
+            message:
+                error instanceof Error
+                    ? error.message
+                    : 'Try again in a moment.',
+            tone: 'danger',
+        });
+    };
+
+    const runPrivateAction = (
+        chatId: number,
+        run: () => Promise<void>,
+    ): void => {
+        if (privateActionInFlightRef.current.has(chatId)) {
+            return;
+        }
+        privateActionInFlightRef.current.add(chatId);
+        void run().finally((): void => {
+            privateActionInFlightRef.current.delete(chatId);
+        });
+    };
+
+    const patchBlockedRow = (
+        chatId: number,
+        blockedByMe: boolean,
+        blockedMe: boolean,
+    ): void => {
+        const current = queryClient.getQueryData<ChatRow[]>(CHATS_QUERY_KEY);
+        if (current === undefined) {
+            return;
+        }
+        const next = applyChatBlockedEvent(current, {
+            chatId,
+            blockedByMe,
+            blockedMe,
+        });
+        if (next !== current) {
+            queryClient.setQueryData<ChatRow[]>(CHATS_QUERY_KEY, [...next]);
+        }
+    };
+
+    const confirmBlockUser = (chat: ChatRow): void => {
+        const chatId = Number(chat.id);
+        const peerName = chat.peer?.name.trim() || 'this user';
+        void dialog
+            .confirm({
+                title: `Block ${peerName}?`,
+                message:
+                    'They will no longer be able to send you messages. Existing messages stay, and you can unblock them at any time.',
+                confirmText: 'Block',
+                destructive: true,
+            })
+            .then((confirmed): void => {
+                if (!confirmed) {
+                    return;
+                }
+                runPrivateAction(chatId, async (): Promise<void> => {
+                    try {
+                        const result = await blockChatPeer(chatId);
+                        if (result !== null) {
+                            patchBlockedRow(
+                                chatId,
+                                result.blockedByMe,
+                                result.blockedMe,
+                            );
+                        }
+                        toast.show('User blocked');
+                    } catch (error: unknown) {
+                        reportActionError('Could not block user', error);
+                    }
+                });
+            });
+    };
+
+    const unblockUser = (chat: ChatRow): void => {
+        const chatId = Number(chat.id);
+        runPrivateAction(chatId, async (): Promise<void> => {
+            try {
+                const result = await unblockChatPeer(chatId);
+                if (result !== null) {
+                    patchBlockedRow(
+                        chatId,
+                        result.blockedByMe,
+                        result.blockedMe,
+                    );
+                }
+                toast.show('User unblocked');
+            } catch (error: unknown) {
+                reportActionError('Could not unblock user', error);
+            }
+        });
+    };
+
+    /** One-sided delete: only this account loses the conversation + history. */
+    const confirmDeleteForMe = (chat: ChatRow): void => {
+        const chatId = Number(chat.id);
+        void dialog
+            .confirm({
+                title: 'Delete chat for me?',
+                message:
+                    'This removes the conversation and its messages from your account only. The other person keeps their copy and is not notified.',
+                confirmText: 'Delete',
+                destructive: true,
+            })
+            .then((confirmed): void => {
+                if (!confirmed) {
+                    return;
+                }
+                runPrivateAction(chatId, async (): Promise<void> => {
+                    try {
+                        await deleteChatForMe(chatId);
+                        purgeChatFromCaches(queryClient, chatId);
+                        if (currentUserId !== null) {
+                            void deleteLocalChatMessages(
+                                currentUserId,
+                                chatId,
+                            ).catch((): void => undefined);
+                        }
+                        toast.show('Chat deleted for you');
+                    } catch (error: unknown) {
+                        reportActionError('Could not delete chat', error);
+                    }
+                });
+            });
+    };
+
+    /** Irreversible: both participants lose the conversation and its history. */
+    const confirmDeleteForBoth = (chat: ChatRow): void => {
+        const chatId = Number(chat.id);
+        const peerName = chat.peer?.name.trim() || 'the other person';
+        void dialog
+            .confirm({
+                title: 'Delete chat for both?',
+                message: `This permanently deletes the conversation and all of its messages for you and ${peerName}. This cannot be undone.`,
+                confirmText: 'Delete for both',
+                destructive: true,
+            })
+            .then((confirmed): void => {
+                if (!confirmed) {
+                    return;
+                }
+                runPrivateAction(chatId, async (): Promise<void> => {
+                    try {
+                        await deleteChatForBoth(chatId);
+                        purgeChatFromCaches(queryClient, chatId);
+                        if (currentUserId !== null) {
+                            void deleteLocalChatMessages(
+                                currentUserId,
+                                chatId,
+                            ).catch((): void => undefined);
+                        }
+                        toast.show('Chat deleted for both');
+                    } catch (error: unknown) {
+                        reportActionError('Could not delete chat', error);
+                    }
+                });
             });
     };
 
@@ -251,6 +417,18 @@ export default function ChatsScreen(): React.ReactElement {
             }
             case 'leave-group':
                 confirmLeaveGroup(chat);
+                return;
+            case 'block-user':
+                confirmBlockUser(chat);
+                return;
+            case 'unblock-user':
+                unblockUser(chat);
+                return;
+            case 'delete-for-me':
+                confirmDeleteForMe(chat);
+                return;
+            case 'delete-for-both':
+                confirmDeleteForBoth(chat);
                 return;
         }
     };
@@ -357,6 +535,7 @@ export default function ChatsScreen(): React.ReactElement {
                                 pinned={pinned.has(Number(item.id))}
                                 onHold={prefetchRole}
                                 onLongPress={openChatMenu}
+                                onMenu={openChatMenu}
                             />
                         )}
                         ItemSeparatorComponent={RowSeparator}
@@ -487,6 +666,8 @@ interface ChatRowItemProps {
     /** Runs while the row is held: warms whatever the menu needs. */
     onHold: (chat: ChatRow) => void;
     onLongPress: (chat: ChatRow, anchor: PopupRect) => void | Promise<void>;
+    /** Same menu as the long press, from the visible trailing ellipsis. */
+    onMenu: (chat: ChatRow, anchor: PopupRect) => void | Promise<void>;
 }
 
 const LONG_PRESS_MS = 350;
@@ -496,11 +677,28 @@ function ChatRowItem(props: ChatRowItemProps): React.ReactElement {
     const rowRef = useRef<ComponentRef<typeof View>>(null);
     // Releasing a hold that opened the menu must not also navigate.
     const pressStartedAtRef = useRef(0);
-    const previewText = chatPreviewText(chat.lastMessage, currentUserId);
+    const previewText = chat.blockedByMe
+        ? 'You blocked this user'
+        : chat.blockedMe
+          ? "You can't message this user"
+          : chatPreviewText(chat.lastMessage, currentUserId);
     // Hidden (opacity only, UI thread) while the popup draws this row's copy on
     // top of it. Applied to the row's own Pressable: no extra node, so the row
     // keeps its exact layout whether the popup is open or not.
     const hiddenStyle = usePopupHidden(`chat:${chat.id}`);
+
+    /** One measurement path for the long press and the ellipsis button. */
+    const openMenu = (): void => {
+        // Warm the role query too: the ellipsis does not run the row's own
+        // `onPressIn`, so without this a group menu would wait on the network.
+        props.onHold(chat);
+        void measureInWindow(rowRef).then((anchor): void => {
+            if (anchor === null) {
+                return;
+            }
+            void props.onMenu(chat, anchor);
+        });
+    };
 
     return (
         <Pressable
@@ -537,6 +735,7 @@ function ChatRowItem(props: ChatRowItemProps): React.ReactElement {
                 chat={chat}
                 pinned={pinned}
                 previewText={previewText}
+                onMenuPress={openMenu}
             />
         </Pressable>
     );

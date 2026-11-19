@@ -9,7 +9,9 @@ import { TypeChatEnum } from 'src/common/enums/typeChat.enum';
 import { Chat } from '../entities/chat.entity';
 import { ChatMember } from '../entities/chat_members.entity';
 import { Link } from '../entities/link.entity';
+import { PermissionAdmin } from '../entities/permission_admin.entity';
 import { RoleChat } from '../entities/role_chat.entity';
+import { DEFAULT_MEMBER_PERMISSIONS } from '../utils/member-permissions.util';
 import { TypeMessage } from 'src/modules/messages/entities/typeMessage.entity';
 import { Message } from 'src/modules/messages/entities/message.entity';
 import type { ChatCallerContext } from './chat-permission.service';
@@ -44,6 +46,7 @@ function makeHarness(
         description: 'A group',
         avatars: ['uploads/group.jpg'],
         createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        memberPermissions: { ...DEFAULT_MEMBER_PERMISSIONS },
     } as unknown as Chat;
 
     const store: Store = {
@@ -121,8 +124,7 @@ function makeHarness(
                         store.links.find(
                             (link) =>
                                 Number(link.id) === Number(params.linkId) &&
-                                Number(link.chatId) ===
-                                    Number(params.chatId),
+                                Number(link.chatId) === Number(params.chatId),
                         ) ?? null
                     );
                 }
@@ -223,10 +225,8 @@ function makeHarness(
             store.members
                 .filter(
                     (row) =>
-                        Number(row.chatId) ===
-                            Number(options.where.chat.id) &&
-                        Number(row.userId) ===
-                            Number(options.where.user.id),
+                        Number(row.chatId) === Number(options.where.chat.id) &&
+                        Number(row.userId) === Number(options.where.user.id),
                 )
                 .map(
                     (row, index) =>
@@ -283,6 +283,16 @@ function makeHarness(
             ({ id: 1, name: RoleChatEnum.USER }) as unknown as RoleChat,
     };
 
+    // Admins need an explicit `manage_invites` grant; the owner bypasses it.
+    const permissionAdminRepository = {
+        find: (): Promise<Array<{ permission: { name: string } }>> =>
+            Promise.resolve(
+                role === 'admin'
+                    ? [{ permission: { name: 'manage_invites' } }]
+                    : [],
+            ),
+    };
+
     const profileRepository = {
         query: async (): Promise<Array<{ userId: number; name: string }>> => [],
     };
@@ -312,6 +322,7 @@ function makeHarness(
             if (entity === ChatMember) return memberRepository;
             if (entity === Chat) return chatRepository;
             if (entity === RoleChat) return roleRepository;
+            if (entity === PermissionAdmin) return permissionAdminRepository;
             if (entity === TypeMessage) return typeMessageRepository;
             if (entity === Message) return messageRepository;
             return {};
@@ -394,7 +405,7 @@ function makeHarness(
               ? RoleChatEnum.ADMIN
               : RoleChatEnum.USER,
         role: isOwner ? 'owner' : isAdmin ? 'admin' : 'member',
-        permissions: [],
+        permissions: isAdmin ? (['manage_invites'] as never[]) : [],
         isOwner,
         isAdmin,
     } as unknown as ChatCallerContext;
@@ -421,6 +432,9 @@ function makeHarness(
         permissions as never,
         realtime as never,
         rateLimit as never,
+        {
+            resolve: jest.fn(() => Promise.resolve(chat.memberPermissions)),
+        } as never,
     );
 
     return {
@@ -491,22 +505,31 @@ describe('GroupInviteLinksService management', () => {
         ).resolves.toMatchObject({ activeCount: 1, maxActive: 10 });
     });
 
-    it('rejects a member for create, list and revoke', async () => {
-        const { service, makeLink, store } = makeHarness('user');
+    it('lets a member share links per policy but never revoke', async () => {
+        const { service, makeLink, store, chat } = makeHarness('user');
         const link = makeLink();
         store.links.push(link);
-        await expectStatus(
+
+        // `invite_via_link` defaults to ON: the member may list and create,
+        // but revoking stays a moderator capability.
+        await expect(
             service.listLinks(1 as never, 7 as never),
-            403,
-        );
-        await expectStatus(
+        ).resolves.toBeDefined();
+        await expect(
             service.createLink(1 as never, 7 as never, {}),
-            403,
-        );
+        ).resolves.toBeDefined();
         await expectStatus(
             service.revokeLink(1 as never, Number(link.id), 7 as never),
             403,
         );
+
+        // Policy off: both sharing paths are rejected server-side.
+        chat.memberPermissions = {
+            ...DEFAULT_MEMBER_PERMISSIONS,
+            invite_via_link: false,
+        };
+        await expectStatus(service.listLinks(1 as never, 7 as never), 403);
+        await expectStatus(service.createLink(1 as never, 7 as never, {}), 403);
     });
 
     it('returns active links plus inactive ones with computed statuses', async () => {
@@ -548,9 +571,7 @@ describe('GroupInviteLinksService management', () => {
         expect(fulfilled).toHaveLength(10);
         expect(rejected).toHaveLength(2);
         for (const result of rejected) {
-            expect(
-                (result as PromiseRejectedResult).reason,
-            ).toBeInstanceOf(ConflictException);
+            expect(result.reason).toBeInstanceOf(ConflictException);
         }
         expect(store.links.filter((link) => link.isActive)).toHaveLength(10);
     });
@@ -568,8 +589,7 @@ describe('GroupInviteLinksService management', () => {
     });
 
     it('revokes idempotently and keeps the legacy active flag consistent', async () => {
-        const { service, makeLink, store, realtime } =
-            makeHarness('manager');
+        const { service, makeLink, store, realtime } = makeHarness('manager');
         const link = makeLink();
         store.links.push(link);
 
@@ -604,9 +624,7 @@ describe('GroupInviteLinksService join side', () => {
         const link = makeLink();
         store.links.push(link);
 
-        await expect(
-            service.preview(link.code, 99 as never),
-        ).resolves.toEqual({
+        await expect(service.preview(link.code, 99 as never)).resolves.toEqual({
             title: 'Team',
             description: 'A group',
             avatar: 'uploads/group.jpg',
@@ -633,7 +651,10 @@ describe('GroupInviteLinksService join side', () => {
     });
 
     it('joins a valid link with role user, one use and realtime events', async () => {
-        const { service, makeLink, store, realtime } = makeHarness('manager', false);
+        const { service, makeLink, store, realtime } = makeHarness(
+            'manager',
+            false,
+        );
         const link = makeLink();
         store.links.push(link);
 
@@ -708,8 +729,16 @@ describe('GroupInviteLinksService join side', () => {
         const message = 'This invite link is invalid or has expired';
 
         const malformed = 'deadbeef'.repeat(4);
-        await expectStatus(service.joinByCode(malformed, 99 as never), 404, message);
-        await expectStatus(service.preview(malformed, 99 as never), 404, message);
+        await expectStatus(
+            service.joinByCode(malformed, 99 as never),
+            404,
+            message,
+        );
+        await expectStatus(
+            service.preview(malformed, 99 as never),
+            404,
+            message,
+        );
 
         await expectStatus(
             service.joinByCode('A'.repeat(22), 99 as never),
@@ -724,12 +753,12 @@ describe('GroupInviteLinksService join side', () => {
         ]) {
             store.links = [makeLink(patch)];
             await expectStatus(
-                service.joinByCode(store.links[0]!.code, 99 as never),
+                service.joinByCode(store.links[0].code, 99 as never),
                 404,
                 message,
             );
             await expectStatus(
-                service.preview(store.links[0]!.code, 99 as never),
+                service.preview(store.links[0].code, 99 as never),
                 404,
                 message,
             );
@@ -741,14 +770,18 @@ describe('GroupInviteLinksService join side', () => {
             type: TypeChatEnum.PRIVATE,
         } as Chat;
         await expectStatus(
-            service.joinByCode(store.links[0]!.code, 99 as never),
+            service.joinByCode(store.links[0].code, 99 as never),
             404,
             message,
         );
 
-        store.chat = { ...store.chat, type: TypeChatEnum.GRUPE, isBan: true } as Chat;
+        store.chat = {
+            ...store.chat,
+            type: TypeChatEnum.GRUPE,
+            isBan: true,
+        } as Chat;
         await expectStatus(
-            service.joinByCode(store.links[0]!.code, 99 as never),
+            service.joinByCode(store.links[0].code, 99 as never),
             404,
             message,
         );
@@ -778,15 +811,15 @@ describe('GroupInviteLinksService join side', () => {
     });
 
     it('propagates the join/preview rate limit', async () => {
-        const { service, makeLink, store, rateLimit } = makeHarness('manager', false);
+        const { service, makeLink, store, rateLimit } = makeHarness(
+            'manager',
+            false,
+        );
         const link = makeLink();
         store.links.push(link);
         rateLimit.consume.mockRejectedValueOnce(
             new HttpException('Too many join attempts', 429),
         );
-        await expectStatus(
-            service.joinByCode(link.code, 99 as never),
-            429,
-        );
+        await expectStatus(service.joinByCode(link.code, 99 as never), 429);
     });
 });

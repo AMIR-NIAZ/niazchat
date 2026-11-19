@@ -9,6 +9,8 @@ import {
     Share2,
     Pencil,
     Trash2,
+    Pin,
+    PinOff,
 } from 'lucide-react-native';
 
 /**
@@ -24,6 +26,8 @@ const ACTION_ICONS = {
     share: Share2,
     edit: Pencil,
     delete: Trash2,
+    pin: Pin,
+    unpin: PinOff,
 } as const;
 
 export type MessageMenuActionId =
@@ -33,7 +37,9 @@ export type MessageMenuActionId =
     | 'select'
     | 'share'
     | 'edit'
-    | 'delete';
+    | 'delete'
+    | 'pin'
+    | 'unpin';
 
 export interface MessageMenuHandlers {
     onReply: () => void;
@@ -43,6 +49,8 @@ export interface MessageMenuHandlers {
     onShare: () => void;
     onEdit: () => void;
     onDelete: () => void;
+    onPin: () => void;
+    onUnpin: () => void;
 }
 
 /**
@@ -76,6 +84,22 @@ export function buildMessageMenuItems(
             label: 'Copy',
             icon: ACTION_ICONS.copy,
             onPress: handlers.onCopy,
+        });
+    }
+    if (actions.pin) {
+        items.push({
+            id: 'pin',
+            label: 'Pin Message',
+            icon: ACTION_ICONS.pin,
+            onPress: handlers.onPin,
+        });
+    }
+    if (actions.unpin) {
+        items.push({
+            id: 'unpin',
+            label: 'Unpin Message',
+            icon: ACTION_ICONS.unpin,
+            onPress: handlers.onUnpin,
         });
     }
     if (actions.select) {
@@ -143,6 +167,8 @@ export function getBubbleAccessibilityActions(
     if (actions.forward) list.push({ name: 'forward', label: 'Forward' });
     if (canReact) list.push({ name: 'react', label: 'React' });
     if (actions.edit) list.push({ name: 'edit', label: 'Edit' });
+    if (actions.pin) list.push({ name: 'pin', label: 'Pin Message' });
+    if (actions.unpin) list.push({ name: 'unpin', label: 'Unpin Message' });
     if (actions.delete) {
         list.push({
             name: 'delete',

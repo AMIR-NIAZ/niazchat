@@ -36,9 +36,9 @@ describe('openJoinLink', () => {
     });
 
     it('extracts the code from Expo Go and https links too', () => {
-        expect(
-            openJoinLink(`exp://192.168.1.2:8081/--/join/${CODE}`),
-        ).toBe(true);
+        expect(openJoinLink(`exp://192.168.1.2:8081/--/join/${CODE}`)).toBe(
+            true,
+        );
         now += 10_000;
         expect(openJoinLink(`https://x.test/join/${CODE}`)).toBe(true);
         expect(router.push).toHaveBeenNthCalledWith(1, {

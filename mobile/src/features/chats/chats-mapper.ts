@@ -28,6 +28,10 @@ export function toChatPreview(chat: ChatDto): ChatPreview {
         isBan: chat.isBan,
         ...(chat.isMember !== undefined ? { isMember: chat.isMember } : {}),
         ...(chat.myRole !== undefined ? { myRole: chat.myRole } : {}),
+        ...(chat.blockedByMe !== undefined
+            ? { blockedByMe: chat.blockedByMe }
+            : {}),
+        ...(chat.blockedMe !== undefined ? { blockedMe: chat.blockedMe } : {}),
         avatarUrls: chat.avatars.map(absoluteUploadUrl),
         createdAt: chat.createdAt,
         updatedAt: chat.updatedAt,

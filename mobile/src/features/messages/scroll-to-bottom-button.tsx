@@ -1,22 +1,37 @@
-import { useEffect, useRef, useState } from 'react';
-import {
-    AccessibilityInfo,
-    Animated,
+import { useEffect, useState } from 'react';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
+import Animated, {
     Easing,
-    Pressable,
-    StyleSheet,
-    Text,
-    View,
-} from 'react-native';
-import { palette, radii, spacing } from '../../shared/theme';
+    interpolate,
+    useAnimatedStyle,
+    useSharedValue,
+    withSpring,
+    withTiming,
+} from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
+import { ArrowDown } from 'lucide-react-native';
+import { GlassSurface } from '../../shared/components/glass-surface';
+import { useReducedMotion } from '../../shared/hooks/use-reduced-motion';
+import {
+    blur,
+    motion,
+    palette,
+    radii,
+    shadows,
+    spacing,
+} from '../../shared/theme';
 
 /**
- * Round floating "scroll to latest" button, anchored to the end side of the
- * list container (above the composer, so it follows the keyboard).
+ * Floating "scroll to latest" control: a small glass circle with a lavender
+ * arrow, anchored above the composer by the screen (which owns the safe-area
+ * and keyboard offsets).
  *
- * Fades/scales in and out with the native driver; unmounted once the fade-out
- * finishes so it can never intercept touches while hidden. Reduced motion
- * shows/hides it instantly.
+ * Visibility is animated rather than toggled: the button fades/scales in when
+ * the user scrolls away from the newest message and back out when they reach
+ * it, then unmounts so its blur and touch surface never linger. Reduced motion
+ * swaps the transition for an instant state change.
  */
 
 interface ScrollToBottomButtonProps {
@@ -32,7 +47,20 @@ interface ScrollToBottomButtonProps {
     onPress: () => void;
 }
 
-const ANIMATION_MS = 170;
+const SIZE = 44;
+const BADGE_SIZE = 18;
+
+const ENTER = {
+    duration: motion.duration.normal,
+    easing: Easing.out(Easing.cubic),
+} as const;
+const EXIT = {
+    duration: motion.duration.fast + 30,
+    easing: Easing.in(Easing.cubic),
+} as const;
+
+const PRESS_IN = { damping: 18, stiffness: 320, mass: 0.6 } as const;
+const PRESS_OUT = { damping: 16, stiffness: 280, mass: 0.6 } as const;
 
 function badgeLabel(count: number): string {
     return count > 99 ? '99+' : String(count);
@@ -41,60 +69,46 @@ function badgeLabel(count: number): string {
 export function ScrollToBottomButton(
     props: ScrollToBottomButtonProps,
 ): React.ReactElement | null {
-    const progress = useRef(new Animated.Value(0)).current;
-    const [reduceMotion, setReduceMotion] = useState(false);
-    const [interactive, setInteractive] = useState(false);
+    const reduceMotion = useReducedMotion();
+    const progress = useSharedValue(0);
+    const pressScale = useSharedValue(1);
+    const [mounted, setMounted] = useState(props.visible);
 
-    useEffect((): (() => void) => {
-        let mounted = true;
-        AccessibilityInfo.isReduceMotionEnabled()
-            .then((enabled): void => {
-                if (mounted) {
-                    setReduceMotion(enabled);
-                }
-            })
-            .catch((): void => undefined);
-        const subscription = AccessibilityInfo.addEventListener(
-            'reduceMotionChanged',
-            (enabled): void => setReduceMotion(enabled),
-        );
-        return (): void => {
-            mounted = false;
-            subscription.remove();
-        };
-    }, []);
-
-    useEffect((): (() => void) => {
+    useEffect((): void => {
+        pressScale.value = 1;
         if (props.visible) {
-            setInteractive(true);
+            setMounted(true);
+            progress.value = reduceMotion ? 1 : withTiming(1, ENTER);
+            return;
         }
-        progress.stopAnimation();
         if (reduceMotion) {
-            progress.setValue(props.visible ? 1 : 0);
-            if (!props.visible) {
-                setInteractive(false);
-            }
-            return (): void => undefined;
+            progress.value = 0;
+            setMounted(false);
+            return;
         }
-        const animation = Animated.timing(progress, {
-            toValue: props.visible ? 1 : 0,
-            duration: ANIMATION_MS,
-            easing: props.visible
-                ? Easing.out((value: number): number => Easing.quad(value))
-                : Easing.in((value: number): number => Easing.quad(value)),
-            useNativeDriver: true,
-        });
-        animation.start(({ finished }): void => {
-            if (finished && !props.visible) {
-                setInteractive(false);
+        progress.value = withTiming(0, EXIT, (finished): void => {
+            'worklet';
+            if (finished) {
+                scheduleOnRN(setMounted, false);
             }
         });
-        return (): void => {
-            animation.stop();
-        };
-    }, [progress, props.visible, reduceMotion]);
+    }, [pressScale, progress, props.visible, reduceMotion]);
 
-    if (!props.visible && !interactive) {
+    const animatedStyle = useAnimatedStyle(() => ({
+        opacity: progress.value,
+        transform: [
+            {
+                translateY: interpolate(progress.value, [0, 1], [12, 0]),
+            },
+            {
+                scale:
+                    interpolate(progress.value, [0, 1], [0.9, 1]) *
+                    pressScale.value,
+            },
+        ],
+    }));
+
+    if (!mounted) {
         return null;
     }
 
@@ -105,51 +119,86 @@ export function ScrollToBottomButton(
 
     return (
         <Animated.View
-            pointerEvents={interactive ? 'auto' : 'none'}
+            pointerEvents={props.visible ? 'auto' : 'none'}
             style={[
                 styles.wrap,
                 { bottom: props.bottomOffset ?? spacing.sm },
-                {
-                    opacity: progress,
-                    transform: [
-                        {
-                            translateY: progress.interpolate({
-                                inputRange: [0, 1],
-                                outputRange: [8, 0],
-                            }),
-                        },
-                        {
-                            scale: progress.interpolate({
-                                inputRange: [0, 1],
-                                outputRange: [0.85, 1],
-                            }),
-                        },
-                    ],
-                },
+                animatedStyle,
             ]}
+            accessibilityElementsHidden={!props.visible}
+            importantForAccessibility={
+                props.visible ? 'auto' : 'no-hide-descendants'
+            }
         >
-            <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={label}
-                hitSlop={8}
-                onPress={props.onPress}
-                style={styles.button}
-                android_ripple={{
-                    color: 'rgba(255,255,255,0.82)',
-                    borderless: true,
-                }}
-            >
-                <Text style={styles.chevron} allowFontScaling={false}>
-                    ⌄
-                </Text>
-                {props.count > 0 && (
-                    <View style={styles.badge} pointerEvents="none">
-                        <Text style={styles.badgeText} allowFontScaling={false}>
-                            {badgeLabel(props.count)}
-                        </Text>
-                    </View>
-                )}
-            </Pressable>
+            <View style={styles.shadow}>
+                <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={label}
+                    accessibilityHint="Scrolls to the newest message"
+                    hitSlop={10}
+                    onPress={props.onPress}
+                    onPressIn={(): void => {
+                        if (!reduceMotion) {
+                            pressScale.value = withSpring(0.93, PRESS_IN);
+                        }
+                        // Selection feedback only: the action is a jump, not a
+                        // confirmation. Unavailable on some simulators.
+                        try {
+                            void Haptics.selectionAsync();
+                        } catch {
+                            // Ignore unsupported haptics targets.
+                        }
+                    }}
+                    onPressOut={(): void => {
+                        pressScale.value = reduceMotion
+                            ? 1
+                            : withSpring(1, PRESS_OUT);
+                    }}
+                    style={({ pressed }) => [
+                        styles.press,
+                        pressed && styles.pressPressed,
+                    ]}
+                    android_ripple={{ color: 'rgba(220,197,255,0.12)' }}
+                >
+                    <GlassSurface
+                        intensity={blur.strong}
+                        tone="elevated"
+                        radius={radii.full}
+                        style={styles.glass}
+                    >
+                        <LinearGradient
+                            pointerEvents="none"
+                            colors={[
+                                'rgba(169,112,245,0.26)',
+                                'rgba(117,69,184,0.08)',
+                                'rgba(9,7,15,0)',
+                            ]}
+                            locations={[0, 0.55, 1]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={StyleSheet.absoluteFill}
+                        />
+                        <ArrowDown
+                            size={20}
+                            strokeWidth={2.4}
+                            color={palette.primary[700]}
+                        />
+                    </GlassSurface>
+                </Pressable>
+            </View>
+
+            {props.count > 0 && (
+                <View
+                    style={styles.badge}
+                    pointerEvents="none"
+                    accessibilityElementsHidden={true}
+                    importantForAccessibility="no-hide-descendants"
+                >
+                    <Text style={styles.badgeText} allowFontScaling={false}>
+                        {badgeLabel(props.count)}
+                    </Text>
+                </View>
+            )}
         </Animated.View>
     );
 }
@@ -158,49 +207,59 @@ const styles = StyleSheet.create({
     wrap: {
         position: 'absolute',
         end: spacing.md,
-        bottom: spacing.sm,
-        width: 46,
-        height: 46,
+        width: SIZE,
+        height: SIZE,
     },
-    button: {
-        width: 46,
-        height: 46,
+    shadow: {
+        width: SIZE,
+        height: SIZE,
         borderRadius: radii.full,
+        // The shadow stays on this transparent wrapper (iOS) so the glass keeps
+        // its own overflow clipping; Android elevation lives on the glass.
+        shadowColor: shadows.glass.shadowColor,
+        shadowOpacity: shadows.glass.shadowOpacity,
+        shadowRadius: shadows.glass.shadowRadius,
+        shadowOffset: shadows.glass.shadowOffset,
+    },
+    press: {
+        width: SIZE,
+        height: SIZE,
+        borderRadius: radii.full,
+        overflow: 'hidden',
+    },
+    pressPressed: {
+        backgroundColor: 'rgba(220,197,255,0.06)',
+    },
+    glass: {
+        flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: palette.neutral[0],
-        borderWidth: 1,
-        borderColor: palette.neutral[300],
-        shadowColor: palette.neutral[900],
-        shadowOpacity: 0.18,
-        shadowRadius: 6,
-        shadowOffset: { width: 0, height: 3 },
-        elevation: 4,
-    },
-    chevron: {
-        color: palette.primary[700],
-        fontSize: 22,
-        fontWeight: '700',
-        lineHeight: 26,
-        textAlign: 'center',
+        borderColor: palette.border.strong,
+        elevation: shadows.glass.elevation,
     },
     badge: {
         position: 'absolute',
-        top: -4,
-        end: -4,
-        minWidth: 20,
-        height: 20,
-        paddingHorizontal: 5,
+        top: -5,
+        end: -5,
+        minWidth: BADGE_SIZE,
+        height: BADGE_SIZE,
+        paddingHorizontal: 4,
         borderRadius: radii.full,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: palette.semantic.danger,
-        borderWidth: 1,
-        borderColor: palette.neutral[0],
+        backgroundColor: palette.primary[500],
+        borderWidth: Platform.OS === 'android' ? 1.5 : 2,
+        borderColor: palette.background,
+        shadowColor: palette.primary[500],
+        shadowOpacity: 0.35,
+        shadowRadius: 5,
+        shadowOffset: { width: 0, height: 2 },
     },
     badgeText: {
         color: palette.text.onAccent,
-        fontSize: 11,
+        fontSize: 10,
         fontWeight: '700',
+        lineHeight: 13,
+        fontVariant: ['tabular-nums'],
     },
 });

@@ -1,5 +1,6 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
+import { EllipsisVertical } from 'lucide-react-native';
 import { UserAvatar } from '../../shared/components';
 import { palette, radii, spacing, typography } from '../../shared/theme';
 import { getChatDisplay } from './chats-model';
@@ -15,16 +16,26 @@ export function ChatRowContent({
     pinned,
     previewText,
     style,
+    onMenuPress,
 }: {
     chat: ChatPreview;
     pinned: boolean;
     previewText: string;
     style?: StyleProp<ViewStyle>;
+    /** Opens the chat action menu. Omitted in the popup's lifted copy. */
+    onMenuPress?: (() => void) | undefined;
 }): React.ReactElement {
     const display = getChatDisplay(chat);
     const unread = chat.unreadCount;
     const unreadLabel = unread > 99 ? '99+' : String(unread);
     const time = chat.lastMessage?.createdAt ?? chat.updatedAt;
+    const menuGlyph = (
+        <EllipsisVertical
+            size={18}
+            strokeWidth={2}
+            color={palette.text.secondary}
+        />
+    );
 
     return (
         <View style={[styles.row, style]}>
@@ -76,6 +87,25 @@ export function ChatRowContent({
                 <Text style={typography.caption}>{time.slice(11, 16)}</Text>
                 {chat.isBan && <Text style={styles.banBadge}>banned</Text>}
             </View>
+            {onMenuPress === undefined ? (
+                // The lifted popup copy keeps the same trailing width and the
+                // same glyph, so the row does not shift or lose a control when
+                // the menu opens.
+                <View style={styles.menuSlot}>{menuGlyph}</View>
+            ) : (
+                <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Chat actions for ${display.title}`}
+                    hitSlop={8}
+                    onPress={onMenuPress}
+                    style={({ pressed }) => [
+                        styles.menuButton,
+                        pressed && styles.menuButtonPressed,
+                    ]}
+                >
+                    {menuGlyph}
+                </Pressable>
+            )}
         </View>
     );
 }
@@ -115,4 +145,20 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     banBadge: { color: palette.semantic.danger, fontSize: 10 },
+    // 32 px visual with an 8 px hitSlop: a comfortable iOS target inside the
+    // row without widening the trailing column too much.
+    menuSlot: {
+        width: 32,
+        height: 32,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    menuButton: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    menuButtonPressed: { backgroundColor: palette.glass.elevated },
 });

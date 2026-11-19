@@ -28,6 +28,11 @@ import { removeAvatarThumbnails } from 'src/modules/media/avatar-thumbnail.util'
 import { PeerDto, toPeerDto } from './private-chat.service';
 import { isChatVisibleInList } from '../utils/private-chat.util';
 import { createServiceMessage } from '../utils/service-message.util';
+import { hasPermission } from '../utils/group-permissions.util';
+
+import { MEMBER_PERMISSION_FORBIDDEN } from '../utils/member-permissions.util';
+import { VisibilityService } from 'src/modules/visibility/visibility.service';
+import { sanitizeUserForViewer } from 'src/modules/visibility/visibility.util';
 
 export interface ChatMemberPageOptions {
     search?: string;
@@ -81,6 +86,7 @@ export class ChatService {
         private readonly userRepository: Repository<User>,
         private readonly access: ChatAccessService,
         private readonly groupRealtime: GroupRealtimeService,
+        private readonly visibility: VisibilityService,
     ) {}
 
     async createGroup(dto: createChatDto, user: JwtPayload) {
@@ -145,6 +151,28 @@ export class ChatService {
 
         if (!chat) {
             throw new NotFoundException('chat not found');
+        }
+
+        // Adding people is gated by `manage_members` for owners/admins. A
+        // regular member is allowed only when the group's member policy has
+        // `add_members` enabled (default: off). Banned callers never pass.
+        const caller = await this.access.getCallerContext(chatId, callerUserId);
+        this.access.assertUsableGroup(caller);
+        this.access.assertRole(caller, RoleChatEnum.USER);
+        const canAddMembers =
+            caller.isManager || caller.isAdmin
+                ? hasPermission(
+                      caller.isManager ? 'owner' : 'admin',
+                      caller.permissions,
+                      'manage_members',
+                  )
+                : caller.effectiveMemberPermissions.add_members;
+        if (!canAddMembers) {
+            throw new ForbiddenException(
+                caller.isManager || caller.isAdmin
+                    ? "You don't have permission to do this"
+                    : MEMBER_PERMISSION_FORBIDDEN.add_members,
+            );
         }
 
         const existingMember = await this.memberRepository.findOne({
@@ -244,9 +272,14 @@ export class ChatService {
         // Per-row membership answer, so the app never has to ask again before
         // deciding between "open the chat" and "show the join flow".
         const roleById = new Map<string, string | null>();
+        // The caller's own one-sided deletion marker, per chat.
+        const clearedById = new Map<string, number>();
         for (const m of memberships) {
             byId.set(String(m.chat.id), m.chat);
             roleById.set(String(m.chat.id), m.role?.name ?? null);
+            if (m.clearedBeforeId !== null && m.clearedBeforeId !== undefined) {
+                clearedById.set(String(m.chat.id), Number(m.clearedBeforeId));
+            }
         }
 
         const activity = (c: Chat): number =>
@@ -263,9 +296,27 @@ export class ChatService {
             .filter((chat) => chat.type === TypeChatEnum.PRIVATE)
             .map((chat) => chat.id);
         const withAnyMessage = await this.getChatIdsWithAnyMessage(privateIds);
-        const visible = [...byId.values()].filter((chat) =>
-            isChatVisibleInList(chat.type, withAnyMessage.has(String(chat.id))),
+        // Chats deleted for this member stay hidden until a message NEWER than
+        // their deletion marker exists (one query, not one per chat).
+        const clearedIds = [...clearedById.keys()].map(
+            (id) => Number(id) as ChatId,
         );
+        const latestMessageIds = await this.getLatestMessageIds(clearedIds);
+        const visible = [...byId.values()].filter((chat) => {
+            const clearedBefore = clearedById.get(String(chat.id));
+            if (
+                chat.type === TypeChatEnum.PRIVATE &&
+                clearedBefore !== undefined
+            ) {
+                return (
+                    (latestMessageIds.get(String(chat.id)) ?? 0) > clearedBefore
+                );
+            }
+            return isChatVisibleInList(
+                chat.type,
+                withAnyMessage.has(String(chat.id)),
+            );
+        });
 
         // ONE query for every peer (other member + profile), never one per chat.
         const peers = await this.getPeersForChats(
@@ -290,6 +341,46 @@ export class ChatService {
                     isMember: true,
                 });
             });
+    }
+
+    /**
+     * The caller's one-sided deletion boundary for a chat, or null when the
+     * chat is not deleted for them. History and unread counts only consider
+     * messages with a greater id.
+     */
+    async getClearedBeforeId(
+        chatId: ChatId,
+        userId: UserId,
+    ): Promise<number | null> {
+        const member = await this.memberRepository.findOne({
+            where: { chat: { id: chatId }, user: { id: userId } },
+            select: { id: true, clearedBeforeId: true },
+        });
+        return member?.clearedBeforeId === null ||
+            member?.clearedBeforeId === undefined
+            ? null
+            : Number(member.clearedBeforeId);
+    }
+
+    /** Newest message id per chat, ONE grouped query (empty map when none). */
+    private async getLatestMessageIds(
+        chatIds: ChatId[],
+    ): Promise<Map<string, number>> {
+        if (chatIds.length === 0) return new Map();
+        const rows = await this.messageRepository
+            .createQueryBuilder('message')
+            .select('message.chatId', 'chatId')
+            .addSelect('MAX(message.id)', 'maxId')
+            .where('message.chatId IN (:...chatIds)', { chatIds })
+            .groupBy('message.chatId')
+            .getRawMany<{ chatId: string; maxId: string | null }>();
+        const latest = new Map<string, number>();
+        for (const row of rows) {
+            if (row.maxId !== null) {
+                latest.set(String(row.chatId), Number(row.maxId));
+            }
+        }
+        return latest;
     }
 
     /** Chat ids that have at least one row in `messages`, deleted included. */
@@ -322,8 +413,22 @@ export class ChatService {
             },
             relations: { chat: true, user: { profile: true } },
         });
+        // A private chat with someone who blocked the caller keeps its history
+        // but the peer is rendered without photo/details (one query).
+        const hidden = await this.visibility.blockersOfViewer(
+            callerId,
+            rows.map((row) => Number(row.user?.id ?? 0)).filter((id) => id > 0),
+        );
         for (const row of rows) {
-            if (row.user) peers.set(String(row.chat.id), toPeerDto(row.user));
+            if (row.user) {
+                peers.set(
+                    String(row.chat.id),
+                    sanitizeUserForViewer(
+                        toPeerDto(row.user),
+                        hidden.has(Number(row.user.id)),
+                    ),
+                );
+            }
         }
         return peers;
     }
@@ -364,6 +469,10 @@ export class ChatService {
                      ON message."chatId" = member."chatId"
                     AND message."isDeleted" = false
                     AND message."senderId" <> member."userId"
+                    AND (
+                        member."clearedBeforeId" IS NULL
+                        OR message.id > member."clearedBeforeId"
+                    )
                     AND (
                         seen."messageId" IS NULL
                         OR message.id > seen."messageId"
@@ -449,8 +558,10 @@ export class ChatService {
         return {
             myRole:
                 caller.roleName === RoleChatEnum.BAN ? null : caller.roleName,
-            myPermissions:
-                caller.isManager || !caller.isAdmin ? null : caller.permissions,
+            // Grants are exposed for admins AND regular members: the pin action
+            // is an explicit member capability too. Owners need none (always
+            // allowed), so they keep `null`.
+            myPermissions: caller.isManager ? null : caller.permissions,
             membersCount,
         };
     }
@@ -534,9 +645,16 @@ export class ChatService {
                 ? Number(page[page.length - 1].id)
                 : null;
 
+        const hidden = await this.visibility.blockersOfViewer(
+            Number(callerUserId),
+            page.map((member) => Number(member.user.id)),
+        );
         return {
             data: page.map((member) =>
-                this.recordMemberWithPhone(member, includePhone),
+                sanitizeUserForViewer(
+                    this.recordMemberWithPhone(member, includePhone),
+                    hidden.has(Number(member.user.id)),
+                ),
             ),
             nextCursor,
             ...(await this.summarizeCaller(caller)),
@@ -638,8 +756,23 @@ export class ChatService {
             callerUserId,
         );
         this.access.assertUsableGroup(caller);
-        // Owner-only: `manager` is the group owner; chat `admin` cannot ban.
-        this.access.assertOwner(caller, 'ban members');
+        // Owner always; an admin needs `ban_users` and only plain members are
+        // targetable (`assertCanTarget` rejects admins and the owner).
+        if (
+            !hasPermission(
+                caller.isManager
+                    ? 'owner'
+                    : caller.isAdmin
+                      ? 'admin'
+                      : 'member',
+                caller.permissions,
+                'ban_users',
+            )
+        ) {
+            throw new ForbiddenException(
+                "You don't have permission to do this",
+            );
+        }
         this.access.assertCanTarget(caller, target, 'ban');
 
         if (Number(target.user.id) === Number(callerUserId)) {
@@ -816,6 +949,20 @@ export class ChatService {
         }
 
         const target = Math.min(givenLastSeenId, latestId);
+
+        // A chat deleted for this member has no visible history at or below the
+        // boundary: a stale client must not advance (or resurrect) a position
+        // over messages it can no longer see.
+        const clearedBefore = await this.getClearedBeforeId(chatId, userId);
+        if (clearedBefore !== null && target <= clearedBefore) {
+            return {
+                lastSeenId:
+                    (await this.getMyLastSeenId(chatId, userId)) ??
+                    clearedBefore,
+                changed: false,
+            };
+        }
+
         const exists = await this.messageRepository.exists({
             where: { id: target, chat: { id: chatId } },
         });

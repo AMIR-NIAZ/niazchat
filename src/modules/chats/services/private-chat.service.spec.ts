@@ -79,6 +79,11 @@ function build(options: {
         userRepository as never,
         dataSource as unknown as DataSource,
         rateLimit as unknown as RateLimitService,
+        // Deletion paths only; create() never touches the member repository.
+        {} as never,
+        {
+            isBlockedBy: () => Promise.resolve(false),
+        } as never,
     );
 
     return {

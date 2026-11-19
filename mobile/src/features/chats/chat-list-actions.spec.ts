@@ -1,3 +1,10 @@
+// The icon package pulls in react-native-svg, which needs the RN JSX
+// transform; this Node test only cares about the action rows.
+jest.mock(
+    'lucide-react-native',
+    () => new Proxy({}, { get: () => () => null }),
+);
+
 import { getChatListActions } from './chat-list-actions';
 import type { ChatPreview } from './chats-model';
 
@@ -23,11 +30,27 @@ function group(overrides: Partial<ChatPreview> = {}): ChatPreview {
             firstAttachmentKind: null,
             firstAttachmentDuration: null,
             firstAttachmentName: null,
-            firstAttachmentTitle: null
+            firstAttachmentTitle: null,
         },
         unreadCount: 2,
         ...overrides,
     };
+}
+
+function privateChat(overrides: Partial<ChatPreview> = {}): ChatPreview {
+    return group({
+        type: 'private',
+        title: null,
+        peer: {
+            id: 42,
+            name: 'Ali',
+            username: 'ali',
+            avatars: [],
+            isOnline: false,
+            lastSeen: null,
+        },
+        ...overrides,
+    });
 }
 
 const base = { markSeenAvailable: true, pinned: false, role: 'user' as const };
@@ -71,24 +94,43 @@ describe('getChatListActions', () => {
     });
 
     it('offers view profile for a private chat with a known peer', () => {
-        const privateChat = group({
-            type: 'private',
-            title: null,
-            peer: {
-                id: 42,
-                name: 'Ali',
-                username: 'ali',
-                avatars: [],
-                isOnline: false,
-                lastSeen: null,
-            },
-        });
-        const ids = getChatListActions(privateChat, base).map(
+        const ids = getChatListActions(privateChat(), base).map(
             (action) => action.id,
         );
         expect(ids).toContain('view-profile');
         expect(ids).not.toContain('group-info');
         expect(ids).not.toContain('leave-group');
+    });
+
+    it('offers block, delete for me and delete for both on a private chat', () => {
+        const ids = getChatListActions(privateChat(), base).map(
+            (action) => action.id,
+        );
+        expect(ids).toContain('block-user');
+        expect(ids).toContain('delete-for-me');
+        expect(ids).toContain('delete-for-both');
+        expect(ids).not.toContain('unblock-user');
+    });
+
+    it('offers unblock instead of block when the caller blocked the peer', () => {
+        const actions = getChatListActions(
+            privateChat({ blockedByMe: true, blockedMe: false }),
+            base,
+        );
+        expect(actions.map((action) => action.id)).toContain('unblock-user');
+        expect(actions.map((action) => action.id)).not.toContain('block-user');
+        expect(
+            actions.find((action) => action.id === 'unblock-user')?.label,
+        ).toBe('Unblock user');
+    });
+
+    it('keeps block available when only the peer blocked the caller', () => {
+        const ids = getChatListActions(
+            privateChat({ blockedByMe: false, blockedMe: true }),
+            base,
+        ).map((action) => action.id);
+        expect(ids).toContain('block-user');
+        expect(ids).not.toContain('unblock-user');
     });
 
     it('does not offer view profile for a private chat without a peer', () => {
@@ -97,6 +139,9 @@ describe('getChatListActions', () => {
             base,
         ).map((action) => action.id);
         expect(ids).not.toContain('view-profile');
+        // Delete rows do not need a loaded peer (the server derives it).
+        expect(ids).toContain('delete-for-me');
+        expect(ids).toContain('delete-for-both');
     });
 
     it('never offers leave group to the owner', () => {
@@ -121,6 +166,18 @@ describe('getChatListActions', () => {
             (action) => action.id === 'leave-group',
         );
         expect(leave?.destructive).toBe(true);
+    });
+
+    it('marks both delete actions as destructive', () => {
+        const actions = getChatListActions(privateChat(), base);
+        expect(
+            actions.find((action) => action.id === 'delete-for-me')
+                ?.destructive,
+        ).toBe(true);
+        expect(
+            actions.find((action) => action.id === 'delete-for-both')
+                ?.destructive,
+        ).toBe(true);
     });
 
     it('returns nothing for a closed menu', () => {

@@ -369,7 +369,7 @@ export class DemoSeeder extends Seeder {
     private async loadReferenceData(): Promise<{
         userRole: Role;
         roles: Record<RoleChatEnum, RoleChat>;
-        permissions: Record<PermissionChatEnum, PermissionChat>;
+        permissions: Partial<Record<PermissionChatEnum, PermissionChat>>;
     }> {
         const userRole = await this.dataSource
             .getRepository(Role)
@@ -411,6 +411,7 @@ export class DemoSeeder extends Seeder {
             PermissionChatEnum.BAN_USER,
             PermissionChatEnum.CHANGE_INFO_CHAT,
             PermissionChatEnum.DELETE_MESSAGE,
+            PermissionChatEnum.PIN_MESSAGE,
         ] as const;
         for (const name of requiredPermissions) {
             if (!permissionByName.has(name)) {
@@ -440,6 +441,9 @@ export class DemoSeeder extends Seeder {
                 )!,
                 [PermissionChatEnum.DELETE_MESSAGE]: permissionByName.get(
                     PermissionChatEnum.DELETE_MESSAGE,
+                )!,
+                [PermissionChatEnum.PIN_MESSAGE]: permissionByName.get(
+                    PermissionChatEnum.PIN_MESSAGE,
                 )!,
             },
         };

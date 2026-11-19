@@ -72,9 +72,9 @@ describe('computeInviteStatus', () => {
     });
 
     it('is expired at or after expiresAt', () => {
-        expect(
-            computeInviteStatus(state({ expiresAt: NOW }), NOW),
-        ).toBe('expired');
+        expect(computeInviteStatus(state({ expiresAt: NOW }), NOW)).toBe(
+            'expired',
+        );
         expect(
             computeInviteStatus(
                 state({ expiresAt: new Date(NOW.getTime() - 1) }),
@@ -102,9 +102,9 @@ describe('computeInviteStatus', () => {
     });
 
     it('is revoked when revokedAt is set or the legacy active flag is false', () => {
-        expect(
-            computeInviteStatus(state({ revokedAt: NOW }), NOW),
-        ).toBe('revoked');
+        expect(computeInviteStatus(state({ revokedAt: NOW }), NOW)).toBe(
+            'revoked',
+        );
         expect(computeInviteStatus(state({ isActive: false }), NOW)).toBe(
             'revoked',
         );
@@ -134,9 +134,7 @@ describe('computeInviteStatus', () => {
 
 describe('allowlists', () => {
     it('accepts only the documented expiries and null', () => {
-        for (const value of [
-            3600, 86_400, 604_800, 2_592_000, null,
-        ]) {
+        for (const value of [3600, 86_400, 604_800, 2_592_000, null]) {
             expect(isAllowedExpiry(value)).toBe(true);
         }
         for (const value of [1, 7200, 0, -1, '3600', undefined]) {

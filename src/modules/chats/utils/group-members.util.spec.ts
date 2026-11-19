@@ -12,7 +12,6 @@ import {
     encodeMemberCursor,
     escapeLikeTerm,
     memberActions,
-    parseEditablePermissions,
     roleRank,
     samePermissionSet,
     sortMembersForList,
@@ -24,29 +23,54 @@ const OWNER: GroupCallerRules = {
     isOwner: true,
     isAdmin: false,
     permissions: [],
+    userId: 1,
 };
-const ADMIN_WITH_BAN: GroupCallerRules = {
+const ADMIN_BAN: GroupCallerRules = {
     isOwner: false,
     isAdmin: true,
-    permissions: [PermissionChatEnum.BAN_USER],
+    permissions: [PermissionChatEnum.BAN_USERS],
+    userId: 2,
 };
-const ADMIN_WITH_ALL: GroupCallerRules = {
+const ADMIN_REMOVE: GroupCallerRules = {
+    isOwner: false,
+    isAdmin: true,
+    permissions: [PermissionChatEnum.REMOVE_MEMBERS],
+    userId: 2,
+};
+const ADMIN_ALL: GroupCallerRules = {
     isOwner: false,
     isAdmin: true,
     permissions: [PermissionChatEnum.ALL],
+    userId: 2,
 };
-const ADMIN_WITHOUT_BAN: GroupCallerRules = {
+const ADMIN_MANAGE_ADMINS: GroupCallerRules = {
     isOwner: false,
     isAdmin: true,
-    permissions: [PermissionChatEnum.DELETE_MESSAGE],
+    permissions: [PermissionChatEnum.MANAGE_ADMINS],
+    userId: 2,
+};
+const ADMIN_MANAGE_PERMISSIONS: GroupCallerRules = {
+    isOwner: false,
+    isAdmin: true,
+    permissions: [PermissionChatEnum.MANAGE_PERMISSIONS],
+    userId: 2,
+};
+const ADMIN_WITHOUT_RIGHTS: GroupCallerRules = {
+    isOwner: false,
+    isAdmin: true,
+    permissions: [PermissionChatEnum.DELETE_OTHER_MESSAGES],
+    userId: 2,
 };
 const MEMBER: GroupCallerRules = {
     isOwner: false,
     isAdmin: false,
     permissions: [],
+    userId: 3,
 };
 
 const TARGETS: GroupRole[] = ['owner', 'admin', 'member'];
+const OWN_PROMOTEE = { promotedById: 2, callerUserId: 2 };
+const OTHER_PROMOTEE = { promotedById: 9, callerUserId: 2 };
 
 describe('group role mapping', () => {
     it('maps seeded role names to wire roles', () => {
@@ -81,58 +105,82 @@ describe('permission matrix', () => {
         expect(canRemove(OWNER, 'owner')).toBe(false);
     });
 
-    it('admin removes a member only with ban_user or all', () => {
-        expect(canRemove(ADMIN_WITH_BAN, 'member')).toBe(true);
-        expect(canRemove(ADMIN_WITH_ALL, 'member')).toBe(true);
-        expect(canRemove(ADMIN_WITHOUT_BAN, 'member')).toBe(false);
-        expect(canRemove(ADMIN_WITH_BAN, 'admin')).toBe(false);
-        expect(canRemove(ADMIN_WITH_BAN, 'owner')).toBe(false);
+    it('admin removes a member only with remove_members or all', () => {
+        expect(canRemove(ADMIN_REMOVE, 'member')).toBe(true);
+        expect(canRemove(ADMIN_ALL, 'member')).toBe(true);
+        expect(canRemove(ADMIN_BAN, 'member')).toBe(false);
+        expect(canRemove(ADMIN_REMOVE, 'admin')).toBe(false);
+        expect(canRemove(ADMIN_REMOVE, 'owner')).toBe(false);
     });
 
-    it('owner bans members and admins, never the owner or themselves', () => {
+    it('owner bans members and admins, never the owner', () => {
         expect(canBan(OWNER, 'member')).toBe(true);
         expect(canBan(OWNER, 'admin')).toBe(true);
         expect(canBan(OWNER, 'owner')).toBe(false);
-        // The caller's own row carries their own role: an owner targeting
-        // themselves meets the owner rule, an admin meets the admin rule.
-        expect(canBan(ADMIN_WITH_BAN, 'admin')).toBe(false);
     });
 
-    it('admin bans members only with ban_user or all', () => {
-        expect(canBan(ADMIN_WITH_BAN, 'member')).toBe(true);
-        expect(canBan(ADMIN_WITH_ALL, 'member')).toBe(true);
-        expect(canBan(ADMIN_WITHOUT_BAN, 'member')).toBe(false);
-        expect(canBan(ADMIN_WITH_BAN, 'owner')).toBe(false);
-        expect(canBan(ADMIN_WITH_BAN, 'admin')).toBe(false);
+    it('admin bans members only with ban_users or all', () => {
+        expect(canBan(ADMIN_BAN, 'member')).toBe(true);
+        expect(canBan(ADMIN_ALL, 'member')).toBe(true);
+        expect(canBan(ADMIN_REMOVE, 'member')).toBe(false);
+        expect(canBan(ADMIN_BAN, 'owner')).toBe(false);
+        expect(canBan(ADMIN_BAN, 'admin')).toBe(false);
     });
 
-    it('plain member can ban nobody', () => {
+    it('plain member can manage nobody', () => {
         for (const target of TARGETS) {
             expect(canBan(MEMBER, target)).toBe(false);
+            expect(canRemove(MEMBER, target)).toBe(false);
         }
     });
 
-    it('admin can never promote, demote or touch another admin/owner', () => {
-        for (const admin of [
-            ADMIN_WITH_BAN,
-            ADMIN_WITH_ALL,
-            ADMIN_WITHOUT_BAN,
-        ]) {
+    it('admins without manage_admins can never promote or demote', () => {
+        for (const admin of [ADMIN_BAN, ADMIN_REMOVE]) {
             for (const target of TARGETS) {
                 expect(canPromote(admin, target)).toBe(false);
                 expect(canDemote(admin, target)).toBe(false);
             }
-            expect(canRemove(admin, 'admin')).toBe(false);
-            expect(canRemove(admin, 'owner')).toBe(false);
         }
     });
 
-    it('plain member has no management action on any target', () => {
-        for (const target of TARGETS) {
-            expect(canPromote(MEMBER, target)).toBe(false);
-            expect(canDemote(MEMBER, target)).toBe(false);
-            expect(canRemove(MEMBER, target)).toBe(false);
-        }
+    it('all implies manage_admins but still only own promotees', () => {
+        expect(canPromote(ADMIN_ALL, 'member')).toBe(true);
+        expect(canDemote(ADMIN_ALL, 'admin', OWN_PROMOTEE)).toBe(true);
+        expect(canDemote(ADMIN_ALL, 'admin', OTHER_PROMOTEE)).toBe(false);
+    });
+
+    it('manage_admins promotes members and demotes only own promotees', () => {
+        expect(canPromote(ADMIN_MANAGE_ADMINS, 'member')).toBe(true);
+        expect(canPromote(ADMIN_MANAGE_ADMINS, 'admin')).toBe(false);
+        expect(canDemote(ADMIN_MANAGE_ADMINS, 'admin', OWN_PROMOTEE)).toBe(
+            true,
+        );
+        expect(canDemote(ADMIN_MANAGE_ADMINS, 'admin', OTHER_PROMOTEE)).toBe(
+            false,
+        );
+        expect(canDemote(ADMIN_MANAGE_ADMINS, 'admin', {})).toBe(false);
+        expect(canDemote(ADMIN_MANAGE_ADMINS, 'owner', OWN_PROMOTEE)).toBe(
+            false,
+        );
+    });
+
+    it('manage_permissions edits only own promoted admins', () => {
+        expect(canEditPermissions(OWNER, 'admin')).toBe(true);
+        expect(
+            canEditPermissions(ADMIN_MANAGE_PERMISSIONS, 'admin', OWN_PROMOTEE),
+        ).toBe(true);
+        expect(
+            canEditPermissions(
+                ADMIN_MANAGE_PERMISSIONS,
+                'admin',
+                OTHER_PROMOTEE,
+            ),
+        ).toBe(false);
+        expect(canEditPermissions(ADMIN_MANAGE_PERMISSIONS, 'member')).toBe(
+            false,
+        );
+        expect(canEditPermissions(ADMIN_WITHOUT_RIGHTS, 'admin')).toBe(false);
+        expect(canEditPermissions(MEMBER, 'admin')).toBe(false);
     });
 
     it('row actions mirror the same rules', () => {
@@ -142,6 +190,7 @@ describe('permission matrix', () => {
             canRemove: true,
             canEditPermissions: false,
             canBan: true,
+            canManageMemberPermissions: true,
         });
         expect(memberActions(OWNER, 'admin')).toEqual({
             canPromote: false,
@@ -149,6 +198,7 @@ describe('permission matrix', () => {
             canRemove: true,
             canEditPermissions: true,
             canBan: true,
+            canManageMemberPermissions: false,
         });
         expect(memberActions(OWNER, 'owner')).toEqual({
             canPromote: false,
@@ -156,20 +206,25 @@ describe('permission matrix', () => {
             canRemove: false,
             canEditPermissions: false,
             canBan: false,
+            canManageMemberPermissions: false,
         });
-        expect(memberActions(ADMIN_WITH_BAN, 'member')).toEqual({
-            canPromote: false,
-            canDemote: false,
-            canRemove: true,
-            canEditPermissions: false,
-            canBan: true,
-        });
-        expect(memberActions(ADMIN_WITHOUT_BAN, 'member')).toEqual({
+        expect(memberActions(ADMIN_BAN, 'member')).toEqual({
             canPromote: false,
             canDemote: false,
             canRemove: false,
             canEditPermissions: false,
+            canBan: true,
+            canManageMemberPermissions: false,
+        });
+        expect(
+            memberActions(ADMIN_MANAGE_ADMINS, 'admin', OWN_PROMOTEE),
+        ).toEqual({
+            canPromote: false,
+            canDemote: true,
+            canRemove: false,
+            canEditPermissions: false,
             canBan: false,
+            canManageMemberPermissions: false,
         });
         expect(memberActions(MEMBER, 'member')).toEqual({
             canPromote: false,
@@ -177,58 +232,38 @@ describe('permission matrix', () => {
             canRemove: false,
             canEditPermissions: false,
             canBan: false,
+            canManageMemberPermissions: false,
         });
-    });
-
-    it('only the owner may edit an admin, never a member/owner/self', () => {
-        expect(canEditPermissions(OWNER, 'admin')).toBe(true);
-        expect(canEditPermissions(OWNER, 'member')).toBe(false);
-        expect(canEditPermissions(OWNER, 'owner')).toBe(false);
-        expect(canEditPermissions(ADMIN_WITH_ALL, 'admin')).toBe(false);
-        expect(canEditPermissions(ADMIN_WITH_BAN, 'member')).toBe(false);
-        expect(canEditPermissions(MEMBER, 'admin')).toBe(false);
+        // Individual overrides are a manage_permissions capability on members
+        // only; admins/owners keep their role-based powers.
+        expect(
+            memberActions(ADMIN_MANAGE_PERMISSIONS, 'member')
+                .canManageMemberPermissions,
+        ).toBe(true);
+        expect(
+            memberActions(ADMIN_MANAGE_ADMINS, 'member')
+                .canManageMemberPermissions,
+        ).toBe(false);
+        expect(memberActions(OWNER, 'owner').canManageMemberPermissions).toBe(
+            false,
+        );
+        expect(memberActions(OWNER, 'admin').canManageMemberPermissions).toBe(
+            false,
+        );
     });
 });
 
-describe('permission editor payloads', () => {
-    it('accepts an empty set and any unique editable subset', () => {
-        expect(parseEditablePermissions([])).toEqual([]);
-        expect(parseEditablePermissions(['ban_user'])).toEqual(['ban_user']);
-        expect(
-            parseEditablePermissions([
-                'ban_user',
-                'delete_message',
-                'change_info_chat',
-            ]),
-        ).toEqual(['ban_user', 'delete_message', 'change_info_chat']);
-    });
-
-    it('rejects all, unknown names, duplicates, non-arrays and >3 entries', () => {
-        expect(parseEditablePermissions(['all'])).toBeNull();
-        expect(parseEditablePermissions(['unknown'])).toBeNull();
-        expect(parseEditablePermissions([1])).toBeNull();
-        expect(parseEditablePermissions('ban_user')).toBeNull();
-        expect(parseEditablePermissions(['ban_user', 'ban_user'])).toBeNull();
-        expect(
-            parseEditablePermissions([
-                'ban_user',
-                'delete_message',
-                'change_info_chat',
-                'ban_user',
-            ]),
-        ).toBeNull();
-    });
-
+describe('permission set comparison', () => {
     it('compares sets without depending on order', () => {
         expect(
             samePermissionSet(
-                ['ban_user', 'delete_message'],
-                ['delete_message', 'ban_user'],
+                ['ban_users', 'delete_other_messages'],
+                ['delete_other_messages', 'ban_users'],
             ),
         ).toBe(true);
-        expect(samePermissionSet(['ban_user'], [])).toBe(false);
+        expect(samePermissionSet(['ban_users'], [])).toBe(false);
         expect(
-            samePermissionSet(['ban_user'], ['ban_user', 'change_info_chat']),
+            samePermissionSet(['ban_users'], ['ban_users', 'edit_group_info']),
         ).toBe(false);
     });
 });

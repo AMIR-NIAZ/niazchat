@@ -16,6 +16,7 @@ import { Message } from 'src/modules/messages/entities/message.entity';
 import { RoleChat } from '../entities/role_chat.entity';
 import { ChatPermissionService } from './chat-permission.service';
 import type { ChatCallerContext } from './chat-permission.service';
+import { DEFAULT_MEMBER_PERMISSIONS } from '../utils/member-permissions.util';
 import { GroupMembersService } from './group-members.service';
 import { decodeMemberCursor } from '../utils/group-members.util';
 
@@ -64,6 +65,7 @@ function callerContext(
         permissions: [],
         isOwner: true,
         isAdmin: false,
+        effectiveMemberPermissions: { ...DEFAULT_MEMBER_PERMISSIONS },
         ...overrides,
     };
 }
@@ -155,9 +157,11 @@ function buildHarness(options: {
             }
             if (entity === PermissionChat) {
                 const rows = options.permissionRows ?? [
-                    { id: 1, name: PermissionChatEnum.BAN_USER },
-                    { id: 2, name: PermissionChatEnum.DELETE_MESSAGE },
-                    { id: 3, name: PermissionChatEnum.CHANGE_INFO_CHAT },
+                    { id: 1, name: PermissionChatEnum.BAN_USERS },
+                    { id: 2, name: PermissionChatEnum.DELETE_OTHER_MESSAGES },
+                    { id: 3, name: PermissionChatEnum.EDIT_GROUP_INFO },
+                    { id: 4, name: PermissionChatEnum.REMOVE_MEMBERS },
+                    { id: 5, name: PermissionChatEnum.PIN_MESSAGES },
                 ];
                 return {
                     find: (args?: {
@@ -218,10 +222,13 @@ function buildHarness(options: {
     const permissionService = new ChatPermissionService(
         {} as never,
         {} as never,
+        {} as never,
     );
     jest.spyOn(permissionService, 'getCallerContext').mockResolvedValue(caller);
     const realtime = {
         memberRoleChanged: jest.fn(),
+        memberPromoted: jest.fn(),
+        memberDemoted: jest.fn(),
         memberPermissionsChanged: jest.fn(),
         memberRemoved: jest.fn((): Promise<void> => Promise.resolve()),
         membersCountChanged: jest.fn(),
@@ -255,6 +262,9 @@ function buildHarness(options: {
                 inserts.push(payload);
                 return Promise.resolve();
             },
+        } as never,
+        {
+            blockersOfViewer: () => Promise.resolve(new Set<number>()),
         } as never,
     );
 
@@ -302,8 +312,8 @@ describe('GroupMembersService actions', () => {
         expect(harness.updates).toHaveLength(1);
         expectDeletedValues(harness.deletes, 'permission_admin', [10]);
         expect(harness.inserts).toHaveLength(1);
-        expect((harness.inserts[0] as unknown[]).length).toBe(3);
-        expect(harness.realtime.memberRoleChanged).toHaveBeenCalledWith(1, 7);
+        expect((harness.inserts[0] as unknown[]).length).toBe(4);
+        expect(harness.realtime.memberPromoted).toHaveBeenCalledWith(1, 7);
     });
 
     it('promoting an admin again is an idempotent no-op', async () => {
@@ -343,7 +353,7 @@ describe('GroupMembersService actions', () => {
 
         expect(result).toEqual({ memberId: 10, role: 'member', changed: true });
         expectDeletedValues(harness.deletes, 'permission_admin', [10]);
-        expect(harness.realtime.memberRoleChanged).toHaveBeenCalledWith(1, 7);
+        expect(harness.realtime.memberDemoted).toHaveBeenCalledWith(1, 7);
     });
 
     it('demoting a member again is an idempotent no-op', async () => {
@@ -391,7 +401,7 @@ describe('GroupMembersService actions', () => {
         expect(harness.realtime.memberRemoved).toHaveBeenCalledWith(1, 7);
     });
 
-    it('an admin with ban_user may remove a regular member', async () => {
+    it('an admin with remove_members may remove a regular member', async () => {
         const target = memberRow(10, 7, RoleChatEnum.USER);
         const harness = buildHarness({
             caller: callerContext({
@@ -399,14 +409,16 @@ describe('GroupMembersService actions', () => {
                 roleName: RoleChatEnum.ADMIN,
                 isOwner: false,
                 isAdmin: true,
-                permissions: [PermissionChatEnum.BAN_USER],
+                permissions: [PermissionChatEnum.REMOVE_MEMBERS],
             }),
             targetRow: target,
             rows: {
                 callerRows: [memberRow(100, 2, RoleChatEnum.ADMIN)],
                 targetRows: [target],
             },
-            grants: [{ permission: { name: PermissionChatEnum.BAN_USER } }],
+            grants: [
+                { permission: { name: PermissionChatEnum.REMOVE_MEMBERS } },
+            ],
         });
         const result = await harness.service.removeMember(
             1 as never,
@@ -417,21 +429,25 @@ describe('GroupMembersService actions', () => {
         expect(result.changed).toBe(true);
     });
 
-    it('an admin without ban_user cannot remove a member', async () => {
+    it('an admin without remove_members cannot remove a member', async () => {
         const harness = buildHarness({
             caller: callerContext({
                 role: 'admin',
                 roleName: RoleChatEnum.ADMIN,
                 isOwner: false,
                 isAdmin: true,
-                permissions: [PermissionChatEnum.DELETE_MESSAGE],
+                permissions: [PermissionChatEnum.DELETE_OTHER_MESSAGES],
             }),
             rows: {
                 callerRows: [memberRow(100, 2, RoleChatEnum.ADMIN)],
                 targetRows: [memberRow(10, 7, RoleChatEnum.USER)],
             },
             grants: [
-                { permission: { name: PermissionChatEnum.DELETE_MESSAGE } },
+                {
+                    permission: {
+                        name: PermissionChatEnum.DELETE_OTHER_MESSAGES,
+                    },
+                },
             ],
         });
 
@@ -441,15 +457,30 @@ describe('GroupMembersService actions', () => {
         expect(harness.deletes).toHaveLength(0);
     });
 
-    it('an admin can never promote, demote or remove another admin', async () => {
-        for (const operation of ['promote', 'demote', 'remove'] as const) {
-            const target = memberRow(
-                10,
-                7,
-                operation === 'promote'
-                    ? RoleChatEnum.USER
-                    : RoleChatEnum.ADMIN,
-            );
+    it('an admin with manage_admins may promote a member', async () => {
+        const harness = buildHarness({
+            caller: callerContext({
+                role: 'admin',
+                roleName: RoleChatEnum.ADMIN,
+                isOwner: false,
+                isAdmin: true,
+                permissions: [PermissionChatEnum.MANAGE_ADMINS],
+            }),
+            grants: [
+                { permission: { name: PermissionChatEnum.MANAGE_ADMINS } },
+            ],
+        });
+        const result = await harness.service.promoteMember(
+            1 as never,
+            10,
+            2 as never,
+        );
+        expect(result.changed).toBe(true);
+    });
+
+    it('an admin can never demote or remove another admin without outranking', async () => {
+        for (const operation of ['demote', 'remove'] as const) {
+            const target = memberRow(10, 7, RoleChatEnum.ADMIN);
             const harness = buildHarness({
                 caller: callerContext({
                     role: 'admin',
@@ -466,15 +497,9 @@ describe('GroupMembersService actions', () => {
                 grants: [{ permission: { name: PermissionChatEnum.ALL } }],
             });
             const run =
-                operation === 'promote'
-                    ? harness.service.promoteMember(1 as never, 10, 2 as never)
-                    : operation === 'demote'
-                      ? harness.service.demoteMember(1 as never, 10, 2 as never)
-                      : harness.service.removeMember(
-                            1 as never,
-                            10,
-                            2 as never,
-                        );
+                operation === 'demote'
+                    ? harness.service.demoteMember(1 as never, 10, 2 as never)
+                    : harness.service.removeMember(1 as never, 10, 2 as never);
             await expect(run).rejects.toBeInstanceOf(ForbiddenException);
         }
     });
@@ -570,6 +595,7 @@ describe('GroupMembersService permissions', () => {
                 grant(PermissionChatEnum.BAN_USER),
                 grant(PermissionChatEnum.DELETE_MESSAGE),
                 grant(PermissionChatEnum.CHANGE_INFO_CHAT),
+                grant(PermissionChatEnum.PIN_MESSAGE),
             ],
         });
 
@@ -584,25 +610,37 @@ describe('GroupMembersService permissions', () => {
             userId: 7,
             role: 'admin',
             hasAll: false,
+            // Legacy names are migrated and returned in contract order.
             granted: [
-                PermissionChatEnum.BAN_USER,
-                PermissionChatEnum.DELETE_MESSAGE,
-                PermissionChatEnum.CHANGE_INFO_CHAT,
+                'edit_group_info',
+                'ban_users',
+                'pin_messages',
+                'delete_other_messages',
             ],
         });
+        expect(result.available).toHaveLength(12);
         expect(result.available.map((option) => option.key)).toEqual([
-            'ban_user',
-            'delete_message',
-            'change_info_chat',
+            'edit_group_info',
+            'manage_members',
+            'remove_members',
+            'ban_users',
+            'manage_invites',
+            'pin_messages',
+            'delete_other_messages',
+            'manage_messages',
+            'restrict_members',
+            'manage_voice_chats',
+            'manage_admins',
+            'manage_permissions',
         ]);
-        expect(result.available.map((option) => option.label)).toEqual([
-            'Remove members',
-            'Delete messages',
-            'Edit group info',
-        ]);
+        expect(result.available[0]?.label).toBe('Edit Group Info');
+        expect(result.available[8]).toMatchObject({
+            key: 'restrict_members',
+            active: false,
+        });
     });
 
-    it('a legacy all grant is reported as all three plus hasAll', async () => {
+    it('a legacy all grant is reported as every key plus hasAll', async () => {
         const target = adminTarget();
         const harness = buildHarness({
             targetRow: target,
@@ -616,14 +654,12 @@ describe('GroupMembersService permissions', () => {
             2 as never,
         );
         expect(result.hasAll).toBe(true);
-        expect(result.granted).toEqual([
-            PermissionChatEnum.BAN_USER,
-            PermissionChatEnum.DELETE_MESSAGE,
-            PermissionChatEnum.CHANGE_INFO_CHAT,
-        ]);
+        expect(result.granted).toHaveLength(12);
+        expect(result.granted).toContain('manage_permissions');
     });
 
     it('admins, members and outsiders cannot read permissions', async () => {
+        const target = adminTarget();
         const harness = buildHarness({
             caller: callerContext({
                 role: 'admin',
@@ -631,6 +667,8 @@ describe('GroupMembersService permissions', () => {
                 isOwner: false,
                 isAdmin: true,
             }),
+            targetRow: target,
+            lookupRows: [target],
         });
         await expect(
             harness.service.getMemberPermissions(1 as never, 10, 2 as never),
@@ -672,7 +710,12 @@ describe('GroupMembersService permissions', () => {
             [],
         );
 
-        expect(result).toEqual({ memberId: 10, granted: [], changed: true });
+        expect(result).toEqual({
+            memberId: 10,
+            granted: [],
+            hasAll: false,
+            changed: true,
+        });
         expectDeletedValues(harness.deletes, 'permission_admin', [10]);
         expect(harness.inserts).toHaveLength(0);
         expect(harness.realtime.memberPermissionsChanged).toHaveBeenCalledWith(
@@ -720,7 +763,8 @@ describe('GroupMembersService permissions', () => {
 
         expect(result).toEqual({
             memberId: 10,
-            granted: ['ban_user'],
+            granted: ['ban_users'],
+            hasAll: false,
             changed: true,
         });
         expectDeletedValues(harness.deletes, 'permission_admin', [10]);
@@ -895,6 +939,8 @@ describe('GroupMembersService permissions', () => {
             canDemote: false,
             canRemove: false,
             canEditPermissions: false,
+            canBan: false,
+            canManageMemberPermissions: false,
         });
     });
 
@@ -924,6 +970,8 @@ describe('GroupMembersService permissions', () => {
             canDemote: true,
             canRemove: true,
             canEditPermissions: true,
+            canBan: true,
+            canManageMemberPermissions: false,
         });
     });
 });
@@ -977,9 +1025,20 @@ describe('GroupMembersService reads', () => {
             1 as never,
             2 as never,
         );
-        expect(allowed.capabilities).toEqual({
+        expect(allowed.capabilities).toMatchObject({
             canEditInfo: true,
-            canManageInviteLinks: true,
+            // Links/bans need their own keys, not the info-editing grant.
+            canManageInvites: false,
+            canManageInviteLinks: false,
+            canManageBans: false,
+            canRemoveMembers: false,
+            canManageMembers: false,
+            canDeleteOthersMessages: false,
+            canPinMessages: false,
+            canManageAdmins: false,
+            canManagePermissions: false,
+            canRestrictMembers: false,
+            canManageVoiceChats: false,
         });
 
         const withoutPermission = buildHarness({
@@ -996,10 +1055,14 @@ describe('GroupMembersService reads', () => {
             1 as never,
             2 as never,
         );
-        expect(denied.capabilities).toEqual({
+        expect(denied.capabilities).toMatchObject({
             canEditInfo: false,
-            // Any admin may manage links; only info editing needs the grant.
-            canManageInviteLinks: true,
+            canManageInvites: false,
+            canManageInviteLinks: false,
+            canManageBans: false,
+            // A legacy `delete_message` grant maps to the new key.
+            canDeleteOthersMessages: true,
+            canPinMessages: false,
         });
     });
 
@@ -1085,14 +1148,17 @@ describe('GroupMembersService reads', () => {
         });
     });
 
-    it('computes remove-only actions for an admin with ban_user on a member', async () => {
+    it('computes remove-only actions for an admin with remove_members on a member', async () => {
         const harness = buildHarness({
             caller: callerContext({
                 role: 'admin',
                 roleName: RoleChatEnum.ADMIN,
                 isOwner: false,
                 isAdmin: true,
-                permissions: [PermissionChatEnum.BAN_USER],
+                permissions: [
+                    PermissionChatEnum.REMOVE_MEMBERS,
+                    PermissionChatEnum.BAN_USERS,
+                ],
             }),
         });
         harness.memberRepository.query.mockResolvedValue([
@@ -1120,6 +1186,8 @@ describe('GroupMembersService reads', () => {
             canDemote: false,
             canRemove: true,
             canEditPermissions: false,
+            canBan: true,
+            canManageMemberPermissions: false,
         });
         expect(page.items[0]?.avatars).toEqual([]);
         expect(page.nextCursor).toBeNull();

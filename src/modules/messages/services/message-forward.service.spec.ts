@@ -116,6 +116,26 @@ describe('MessageForwardService', () => {
             } as unknown as DataSource,
             attachments as unknown as AttachmentService,
             store as unknown as ForwardRequestStore,
+            // Forwarding into a blocked private chat is rejected by this guard.
+            {
+                assertCanCommunicate: jest.fn().mockResolvedValue(undefined),
+            } as never,
+            {
+                resolve: jest.fn(() =>
+                    Promise.resolve({
+                        send_messages: true,
+                        send_media: true,
+                        send_files: true,
+                        send_voice: true,
+                        send_links: true,
+                        add_members: false,
+                        invite_via_link: true,
+                        pin_messages: false,
+                        edit_own_messages: true,
+                        delete_own_messages: true,
+                    }),
+                ),
+            } as never,
         );
     });
 

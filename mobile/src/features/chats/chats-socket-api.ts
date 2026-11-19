@@ -32,6 +32,67 @@ export function fetchChats(): Promise<ChatDto[] | null> {
     return request<ChatDto[]>(socketOrThrow(), 'getAllChats');
 }
 
+/** Ack of `blockUser` / `unblockUser`: the caller's directional block state. */
+export interface ChatBlockStateDto {
+    chatId: number;
+    peerId: number;
+    blockedByMe: boolean;
+    blockedMe: boolean;
+    /** Either direction: the conversation accepts no new messages. */
+    blocked: boolean;
+}
+
+/** WS `blockUser` — blocking is directional and keeps all history. */
+export function blockChatPeer(
+    chatId: number,
+): Promise<ChatBlockStateDto | null> {
+    return request<ChatBlockStateDto>(socketOrThrow(), 'blockUser', { chatId });
+}
+
+/** WS `unblockUser` — idempotent; resolves the restored block state. */
+export function unblockChatPeer(
+    chatId: number,
+): Promise<ChatBlockStateDto | null> {
+    return request<ChatBlockStateDto>(socketOrThrow(), 'unblockUser', {
+        chatId,
+    });
+}
+
+/** Ack of `deleteChatForMe`: history boundary hidden for the caller only. */
+export interface ChatDeletedForMeDto {
+    chatId: number;
+    clearedBeforeId: number | null;
+}
+
+/** WS `deleteChatForMe` — one-sided; the peer is never notified. */
+export function deleteChatForMe(
+    chatId: number,
+): Promise<ChatDeletedForMeDto | null> {
+    return request<ChatDeletedForMeDto>(socketOrThrow(), 'deleteChatForMe', {
+        chatId,
+    });
+}
+
+/** Ack of `deleteChatForBoth`: the chat row is gone for both participants. */
+export interface ChatDeletedForBothDto {
+    chatId: number;
+    memberIds: number[];
+    alreadyDeleted: boolean;
+}
+
+/** WS `deleteChatForBoth` — irreversible; both participants are notified. */
+export function deleteChatForBoth(
+    chatId: number,
+): Promise<ChatDeletedForBothDto | null> {
+    return request<ChatDeletedForBothDto>(
+        socketOrThrow(),
+        'deleteChatForBoth',
+        {
+            chatId,
+        },
+    );
+}
+
 /**
  * WS `getMessages` → one page of history, newest first.
  *

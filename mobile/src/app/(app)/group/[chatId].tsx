@@ -31,13 +31,14 @@ import {
     AvatarViewer,
 } from '../../../features/users/avatar-gallery';
 import { openUserProfile } from '../../../features/users';
+import { deleteLocalChatMessages } from '../../../shared/local-db';
 import { MemberActionsSheet } from '../../../features/groups/member-actions-sheet';
-import { MemberPermissionsSheet } from '../../../features/groups/member-permissions-sheet';
 import {
     canOpenGroupSettings,
     groupHasPhotoGallery,
     groupPhotoActions,
     hasMemberActions,
+    permissionSummary,
     roleBadgeLabel,
 } from '../../../features/groups/group-model';
 import type {
@@ -54,14 +55,13 @@ import {
     useGroupInfo,
     useGroupMembers,
     useGroupRemovedEvent,
-    usePromoteMember,
     useRefetchGroupOnFocus,
     useRemoveMember,
     useGroupUpdatedEvents,
     useSetMainGroupAvatar,
 } from '../../../features/groups/use-group';
 import { describeGroupAvatarError } from '../../../features/groups/group-errors';
-import { Settings } from 'lucide-react-native';
+import { Settings, UserPlus } from 'lucide-react-native';
 
 /**
  * GROUP INFO panel — reachable from a group chat header only.
@@ -75,7 +75,7 @@ import { Settings } from 'lucide-react-native';
 
 const NOTICE_MS = 2500;
 
-type ManageMemberAction = Exclude<GroupMemberAction, 'permissions'>;
+type ManageMemberAction = Exclude<GroupMemberAction, 'permissions' | 'promote'>;
 
 type GroupRouteParams = { chatId?: string | string[] };
 
@@ -107,7 +107,6 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
         debouncedSearch.trim().length > 0 ? debouncedSearch.trim() : '';
     const membersQuery = useGroupMembers(chatId, search);
 
-    const promote = usePromoteMember(chatId);
     const demote = useDemoteMember(chatId);
     const remove = useRemoveMember(chatId);
     const ban = useBanMember(chatId);
@@ -115,13 +114,12 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
     const setMainAvatar = useSetMainGroupAvatar(chatId);
 
     const [actionTarget, setActionTarget] = useState<GroupMember | null>(null);
-    const [permissionsTarget, setPermissionsTarget] =
-        useState<GroupMember | null>(null);
     const [pendingMemberId, setPendingMemberId] = useState<number | null>(null);
     const [notice, setNotice] = useState<string | null>(null);
     const [viewerIndex, setViewerIndex] = useState<number | null>(null);
     const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const settingsNavRef = useRef(false);
+    const addMembersNavRef = useRef(false);
 
     /** One push for one tap; the settings screen is not opened twice. */
     const openSettings = (): void => {
@@ -163,6 +161,24 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
         );
     };
 
+    const bannedFromGroup =
+        infoQuery.error instanceof ApiError &&
+        infoQuery.error.statusCode === 403;
+    const bannedHandled = useRef(false);
+
+    // A banned viewer keeps no local trace of the group: list row, conversation
+    // cache, chat info and mirrored SQLite messages are dropped once.
+    useEffect((): void => {
+        if (!bannedFromGroup || bannedHandled.current) return;
+        bannedHandled.current = true;
+        purgeChatFromCaches(queryClient, chatId);
+        if (currentUserId !== null) {
+            void deleteLocalChatMessages(currentUserId, chatId).catch(
+                (): void => undefined,
+            );
+        }
+    }, [bannedFromGroup, queryClient, chatId, currentUserId]);
+
     const info = infoQuery.data;
     const members = useMemo(
         () => membersQuery.data?.pages.flatMap((page) => page.items) ?? [],
@@ -181,20 +197,12 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
         setActionTarget(null);
         setPendingMemberId(member.memberId);
         const mutation =
-            action === 'promote'
-                ? promote
-                : action === 'demote'
-                    ? demote
-                    : action === 'ban'
-                      ? ban
-                      : remove;
+            action === 'demote' ? demote : action === 'ban' ? ban : remove;
         mutation
             .mutateAsync(member.memberId)
             .then((result): void => {
                 if (!result.changed) {
                     showNotice('No change needed');
-                } else if (action === 'promote') {
-                    showNotice(`${member.name || 'Member'} is now an admin`);
                 } else if (action === 'demote') {
                     showNotice(`${member.name || 'Member'} is now a member`);
                 } else if (action === 'ban') {
@@ -218,21 +226,6 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
         member: GroupMember,
     ): void => {
         const name = member.name || member.username || 'This member';
-        if (action === 'promote') {
-            void dialog
-                .confirm({
-                    title: `Make ${name} an admin?`,
-                    message:
-                        'They will be able to manage members according to their permissions.',
-                    confirmText: 'Make admin',
-                })
-                .then((confirmed): void => {
-                    if (confirmed) {
-                        runAction(action, member);
-                    }
-                });
-            return;
-        }
         if (action === 'demote') {
             void dialog
                 .confirm({
@@ -287,22 +280,24 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
         const error = infoQuery.error;
         const privateChat =
             error instanceof ApiError && error.statusCode === 400;
+        const banned = error instanceof ApiError && error.statusCode === 403;
         return (
             <InvalidGroup
+                {...(banned ? { title: "You can't access this group" } : {})}
                 reason={
                     privateChat
                         ? 'This screen is only available for groups.'
-                        : error instanceof ApiError && error.statusCode === 403
-                            ? "You don't have access to this group."
-                            : 'Could not load this group.'
+                        : banned
+                          ? 'This group is no longer available to you.'
+                          : 'Could not load this group.'
                 }
-                {...(privateChat
+                {...(privateChat || banned
                     ? {}
                     : {
-                        onRetry: (): void => {
-                            void infoQuery.refetch();
-                        },
-                    })}
+                          onRetry: (): void => {
+                              void infoQuery.refetch();
+                          },
+                      })}
             />
         );
     }
@@ -384,6 +379,33 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
 
             <View style={styles.sectionHeader}>
                 <Text style={styles.sectionTitle}>Members</Text>
+                {info.capabilities.canAddMembers === true && (
+                    <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Add members"
+                        style={({ pressed }) => [
+                            styles.addMembersButton,
+                            pressed && styles.rowPressed,
+                        ]}
+                        onPress={(): void => {
+                            if (addMembersNavRef.current) return;
+                            addMembersNavRef.current = true;
+                            router.push(
+                                `/(app)/group-settings/${chatId}/add-members`,
+                            );
+                            setTimeout((): void => {
+                                addMembersNavRef.current = false;
+                            }, 700);
+                        }}
+                    >
+                        <UserPlus
+                            size={16}
+                            color={palette.primary[300]}
+                            strokeWidth={2}
+                        />
+                        <Text style={styles.addMembersText}>Add</Text>
+                    </Pressable>
+                )}
             </View>
             <TextInput
                 value={searchInput}
@@ -429,11 +451,7 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
                         style={styles.iconButton}
                         onPress={openSettings}
                     >
-                        <Settings
-                            size={21}
-                            color="#FFFFFF"
-                            strokeWidth={1.8}
-                        />
+                        <Settings size={21} color="#FFFFFF" strokeWidth={1.8} />
                     </Pressable>
                 ) : (
                     <View style={styles.topBarSpacer} />
@@ -548,35 +566,30 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
                         canRemove: false,
                         canEditPermissions: false,
                         canBan: false,
+                        canManageMemberPermissions: false,
                     }
                 }
                 busy={pendingMemberId !== null}
                 onClose={(): void => setActionTarget(null)}
                 onAction={(action): void => {
                     if (actionTarget === null) return;
-                    if (action === 'permissions') {
+                    if (action === 'member-permissions') {
                         const member = actionTarget;
                         setActionTarget(null);
-                        setPermissionsTarget(member);
+                        router.push(
+                            `/(app)/group-settings/${chatId}/member-overrides?memberId=${member.memberId}&userId=${member.userId}&name=${encodeURIComponent(member.name || member.username || 'Member')}`,
+                        );
+                        return;
+                    }
+                    if (action === 'permissions' || action === 'promote') {
+                        const member = actionTarget;
+                        setActionTarget(null);
+                        router.push(
+                            `/(app)/group-settings/${chatId}/admin-permissions?userId=${member.userId}&memberId=${member.memberId}&mode=${action === 'promote' ? 'promote' : 'edit'}`,
+                        );
                         return;
                     }
                     confirmAction(action, actionTarget);
-                }}
-            />
-
-            <MemberPermissionsSheet
-                visible={permissionsTarget !== null}
-                chatId={chatId}
-                member={permissionsTarget}
-                onClose={(): void => setPermissionsTarget(null)}
-                onSaved={(message): void => {
-                    setPermissionsTarget(null);
-                    showNotice(message);
-                }}
-                onStale={(message): void => {
-                    setPermissionsTarget(null);
-                    showNotice(message);
-                    void membersQuery.refetch();
                 }}
             />
 
@@ -622,8 +635,9 @@ function MemberRow(props: {
     return (
         <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`${name}${badge === null ? '' : `, ${badge}`
-                }${props.isSelf ? ', you' : ''}`}
+            accessibilityLabel={`${name}${
+                badge === null ? '' : `, ${badge}`
+            }${props.isSelf ? ', you' : ''}`}
             accessibilityState={{ disabled: props.pending }}
             disabled={props.pending}
             onPress={props.onOpenProfile}
@@ -654,6 +668,12 @@ function MemberRow(props: {
                 {member.username !== '' && (
                     <Text style={styles.rowUsername} numberOfLines={1}>
                         @{member.username}
+                    </Text>
+                )}
+                {permissionSummary(member.role, member.permissions) !==
+                    null && (
+                    <Text style={styles.rowUsername} numberOfLines={1}>
+                        {permissionSummary(member.role, member.permissions)}
                     </Text>
                 )}
             </View>
@@ -710,12 +730,15 @@ function LoadingBlock({ label }: { label: string }): React.ReactElement {
 }
 
 function InvalidGroup(props: {
+    title?: string;
     reason: string;
     onRetry?: () => void;
 }): React.ReactElement {
     return (
         <View style={styles.centered}>
-            <AppText variant="title">Group info unavailable</AppText>
+            <AppText variant="title">
+                {props.title ?? 'Group info unavailable'}
+            </AppText>
             <AppText variant="caption" style={styles.centeredCaption}>
                 {props.reason}
             </AppText>
@@ -754,7 +777,7 @@ const styles = StyleSheet.create({
         borderBottomWidth: StyleSheet.hairlineWidth,
         borderBottomColor: palette.border.subtle,
         backgroundColor: palette.surface,
-        paddingTop: 22
+        paddingTop: 22,
     },
     backButton: {
         width: 44,
@@ -822,9 +845,28 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.md,
     },
     sectionHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
         paddingHorizontal: spacing.md,
         paddingTop: spacing.lg,
         paddingBottom: spacing.xs,
+    },
+    addMembersButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        minHeight: 34,
+        paddingHorizontal: spacing.sm,
+        borderRadius: radii.full,
+        backgroundColor: palette.primary[100],
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: palette.border.accent,
+    },
+    addMembersText: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: palette.primary[300],
     },
     sectionTitle: {
         fontSize: 17,

@@ -8,10 +8,14 @@ import {
     sortChatsByActivity,
 } from './chats-mapper';
 import type { ChatPreview } from './chats-model';
+
 import { getActiveChat } from './active-chat';
+import { applyChatBlockedEvent, removeChatFromList } from './chat-list-events';
+import type { ChatBlockedEvent } from './chat-list-events';
 import { onSocketReconnect, useSocketEvent } from '../../core/socket';
 import type { ChatListUpdateDto } from '../../core/api/dto/message.dto';
 import { useCurrentUserId } from '../auth';
+import { deleteLocalChatMessages } from '../../shared/local-db';
 import { isOwnMessage } from '../messages/messages-model';
 
 /**
@@ -122,9 +126,54 @@ export function useChats(): ReturnType<typeof useQuery<ChatPreview[]>> {
     const onGroupAdded = (): void => {
         void invalidateChats(queryClient);
     };
+    // Block/unblock from another device of the SAME user: flip the row flags
+    // without a refetch (the payload carries both directions).
+    const onBlocked = (event: ChatBlockedEvent): void => {
+        const current =
+            queryClient.getQueryData<ChatPreview[]>(CHATS_QUERY_KEY);
+        if (current === undefined) {
+            return;
+        }
+        const next = applyChatBlockedEvent(current, event);
+        if (next !== current) {
+            queryClient.setQueryData<ChatPreview[]>(CHATS_QUERY_KEY, [...next]);
+        }
+    };
+    // One-sided or two-sided deletion: the row, its message page and its chat
+    // info leave this device immediately. No refetch is needed — the server no
+    // longer returns the chat (for me) or the chat no longer exists (for both),
+    // and a new message restores it through `chatlist:updated`.
+    const dropDeletedChat = (chatId: number): void => {
+        const current =
+            queryClient.getQueryData<ChatPreview[]>(CHATS_QUERY_KEY);
+        if (current !== undefined) {
+            const next = removeChatFromList(current, chatId);
+            if (next !== current) {
+                setChatsQueryData(queryClient, [...next]);
+            }
+        }
+        queryClient.removeQueries({ queryKey: ['messages', chatId] });
+        queryClient.removeQueries({ queryKey: ['chat-info', chatId] });
+        // Persisted SQLite rows must go too: a one-sided delete restores the
+        // chat on the next message WITHOUT the old history.
+        if (myId !== null) {
+            void deleteLocalChatMessages(myId, chatId).catch(
+                (): void => undefined,
+            );
+        }
+    };
+    const onChatRemoved = (payload: { chatId: number }): void => {
+        dropDeletedChat(Number(payload.chatId));
+    };
+    const onChatDeleted = (payload: { chatId: number }): void => {
+        dropDeletedChat(Number(payload.chatId));
+    };
     useSocketEvent('chatlist:updated', handler);
     useSocketEvent('chat:read', onRead);
     useSocketEvent('group:added', onGroupAdded);
+    useSocketEvent('chat:blocked', onBlocked);
+    useSocketEvent('chat:removed', onChatRemoved);
+    useSocketEvent('chat:deleted', onChatDeleted);
 
     // Reconnect/focus refetches keep the authoritative count (see the screen).
     useEffect(() => {

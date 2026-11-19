@@ -21,6 +21,7 @@ import { RoleGurd } from 'src/common/guards/restGuards/role.guard';
 import { SeedersModule } from 'src/modules/seeders/seeders.module';
 import { HealthModule } from '../health/health.module';
 import { MediaModule } from '../media/media.module';
+import { VisibilityModule } from '../visibility/visibility.module';
 import { AVATAR_THUMBNAIL_CACHE_CONTROL } from '../media/avatar-thumbnail.util';
 
 @Module({
@@ -63,6 +64,7 @@ import { AVATAR_THUMBNAIL_CACHE_CONTROL } from '../media/avatar-thumbnail.util';
         ReactionsModule,
         AttachmentsModule,
         MediaModule,
+        VisibilityModule,
     ],
     controllers: [AppController],
     providers: [

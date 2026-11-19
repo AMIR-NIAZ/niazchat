@@ -22,6 +22,7 @@ import { UserService } from '../services/user.service';
 import { RequestAuth } from 'src/common/types/RequestAuth.type';
 import { AvatarUploadInterceptor } from '../interceptors/avatar-upload.interceptor';
 import { AvatarLimitGuard } from '../guards/avatar-limit.guard';
+import { UserVisibilityGuard } from 'src/modules/visibility/guards/user-visibility.guard';
 
 @Controller('user')
 export class UserController {
@@ -111,8 +112,11 @@ export class UserController {
 
     @Get('pv/:userName')
     @Role([RoleEnum.ALL])
-    async getUserById(@Param('userName') userName: string) {
-        return await this.userService.getUserByUsername(userName);
+    async getUserById(
+        @Param('userName') userName: string,
+        @Req() req: RequestAuth,
+    ) {
+        return await this.userService.getUserByUsername(userName, req.user.sub);
     }
 
     /**
@@ -141,6 +145,7 @@ export class UserController {
      */
     @Get(':userId/profile')
     @Role([RoleEnum.ALL])
+    @UseGuards(UserVisibilityGuard)
     @Header('Cache-Control', 'private, max-age=30')
     @Header('Vary', 'Authorization')
     async getUserProfile(@Param('userId', ParseIntPipe) userId: number) {

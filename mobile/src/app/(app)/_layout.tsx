@@ -43,8 +43,12 @@ export default function ProtectedLayout(): React.ReactElement {
                 <Stack.Screen name="group/[chatId]" />
                 <Stack.Screen name="group-settings/[chatId]/index" />
                 <Stack.Screen name="group-settings/[chatId]/info" />
+                <Stack.Screen name="group-settings/[chatId]/add-members" />
                 <Stack.Screen name="group-settings/[chatId]/invite-links" />
                 <Stack.Screen name="group-settings/[chatId]/banned" />
+                <Stack.Screen name="group-settings/[chatId]/admin-permissions" />
+                <Stack.Screen name="group-settings/[chatId]/member-permissions" />
+                <Stack.Screen name="group-settings/[chatId]/member-overrides" />
             </Stack>
             {/* Visible only when the socket has been down for more than 3 s. */}
             <ReconnectingBanner />

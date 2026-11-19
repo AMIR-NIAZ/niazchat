@@ -16,10 +16,7 @@ import {
     ValidationPipe,
 } from '@nestjs/common';
 import { Server } from 'socket.io';
-import {
-    MessageReactionsQueryDto,
-    ReactMessageDto,
-} from '../dto/reaction.dto';
+import { MessageReactionsQueryDto, ReactMessageDto } from '../dto/reaction.dto';
 import { SocketAuth } from 'src/common/types/SocketAuth.type';
 import { JwtPayload } from 'src/common/types/jwt-payload.type';
 import { wsPayload } from 'src/common/guards/wsGuards/wsPayload.guard';
@@ -82,11 +79,13 @@ export class ReactionsGateway {
     /** Grouped reactor list for the message detail sheet (max 100 users). */
     @SubscribeMessage('getMessageReactions')
     async getMessageReactions(
+        @ConnectedSocket() client: SocketAuth,
         @MessageBody() dto: MessageReactionsQueryDto,
     ) {
         const reactions = await this.reactionsService.reactorsFor(
             Number(dto.chatId),
             Number(dto.messageId),
+            Number(client.data.user.sub),
         );
         return { ok: true, data: { reactions } };
     }

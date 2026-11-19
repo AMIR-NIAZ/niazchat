@@ -64,6 +64,10 @@ export interface ChatPreview {
     lastMessage: ChatLastMessage | null;
     /** Authoritative from `getAllChats`; live updates increment locally. */
     unreadCount: number;
+    /** Private chats only: the caller blocked the peer. */
+    blockedByMe?: boolean;
+    /** Private chats only: the peer blocked the caller. */
+    blockedMe?: boolean;
 }
 
 /** Full chat info from the WS `chatInfo` event (after `joinChat`). */

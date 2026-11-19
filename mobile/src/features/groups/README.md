@@ -35,11 +35,23 @@ answers 400).
 - `open-invite-link.ts` — tap routing shared by chat messages and the
   invite-links screen: a link carrying an invite code opens `/join/<code>` in
   the app (deduped per tap), any other absolute URL is opened by the OS.
+- `add-members-model.ts` — pure help for Add members: public User ID label,
+  saved-contact options (alias-first, existing members disabled), local search,
+  immutable multi-selection, 50-id batching and partial-success feedback.
+  `groups-api.ts` calls `POST /chats/:chatId/members`; `use-group.ts` patches
+  the member-id set/count and invalidates group/member/chat-list queries.
+- `../../app/(app)/group-settings/[chatId]/add-members.tsx` — Add members screen
+  fed only by saved contacts (multi-select, already-members disabled, batched
+  submit). Each row shows the contact's public User ID; tapping it opens that
+  user's profile, and a contact without one gets a short auto-dismissing hint.
+  The numeric User ID is the id shown on profile screens; contact row ids and
+  `memberId`s are never requested or displayed.
 - `member-actions-sheet.tsx` — bottom sheet that renders only the permitted
   actions (no disabled rows), in server order: Edit permissions, Remove admin,
   Remove from group.
-- `member-permissions-sheet.tsx` — owner-only admin permission editor with
-  local toggles, discard confirmation, save spinner and stale handling.
+- `../../app/(app)/group-settings/[chatId]/admin-permissions.tsx` — full-screen
+  admin permission editor (edit or promote mode) with local toggles, presets,
+  discard confirmation, save spinner and stale handling.
 - `../../app/(app)/group/[chatId].tsx` — the group info screen; shows the
   description when present and the gear for the owner/admin.
 - `../../app/(app)/group-settings/[chatId]/index.tsx` — settings hub: renders
@@ -81,7 +93,7 @@ answers 400).
   (`permissions_changed` / `role_changed` for them), the group info is refetched
   and the screen leaves with a short notice.
 - A 409/404 while saving means the admin was demoted or removed meanwhile: the
-  sheet closes and the list is refreshed with a short notice.
+  editor shows it in a dialog and refreshes the permission and member queries.
 - `group:removed` purges the chat from every cache and replaces the screen with
   the chat list plus “You were removed from this group”. Chat, group and
   settings screens listen, deduped per chat.

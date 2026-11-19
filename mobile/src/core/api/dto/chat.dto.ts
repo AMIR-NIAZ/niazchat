@@ -91,6 +91,19 @@ export interface ChatDto {
      * `manager` = group owner, `admin` = regular chat admin, `null` = banned.
      */
     myRole?: ChatRole | null;
+    /**
+     * Present on the `joinChat` ack: the caller's granted capability names
+     * (`pin_message`, `all`, …) for admins AND regular members. `null` for the
+     * owner (always allowed) and for chats without grants.
+     */
+    myPermissions?: string[] | null;
+    /**
+     * Private chats only (`getAllChats` and the `joinChat` ack): the caller
+     * blocked the peer, so no new messages flow in either direction.
+     */
+    blockedByMe?: boolean;
+    /** Private chats only: the peer blocked the caller (caller cannot send). */
+    blockedMe?: boolean;
     /** Null when the chat has no message yet; loaded in `getAllChats`. */
     lastMessage?: ChatLastMessageDto | null;
     /** Present but mostly unloaded in list payloads. */

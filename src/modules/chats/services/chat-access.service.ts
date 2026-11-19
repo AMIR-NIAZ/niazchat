@@ -14,6 +14,13 @@ import { Chat } from '../entities/chat.entity';
 import { ChatMember } from '../entities/chat_members.entity';
 import { PermissionAdmin } from '../entities/permission_admin.entity';
 import { PermissionChat } from '../entities/permission_chat.entity';
+import {
+    hasPermission,
+    normalizePermissionName,
+    normalizePermissions,
+} from '../utils/group-permissions.util';
+import type { MemberPermissionsConfig } from '../utils/member-permissions.util';
+import { MemberPermissionResolverService } from './member-permission-resolver.service';
 
 /**
  * Ranked power of a chat role. `ban` beats nothing, `user` is a plain member,
@@ -36,6 +43,8 @@ export interface ChatCallerContext {
     permissions: PermissionChatEnum[];
     isManager: boolean;
     isAdmin: boolean;
+    /** Group defaults + this member's overrides (the enforcement config). */
+    effectiveMemberPermissions: MemberPermissionsConfig;
 }
 
 /**
@@ -54,6 +63,7 @@ export class ChatAccessService {
         private readonly permissionAdminRepository: Repository<PermissionAdmin>,
         @InjectRepository(PermissionChat)
         private readonly permissionChatRepository: Repository<PermissionChat>,
+        private readonly memberPermissionResolver: MemberPermissionResolverService,
     ) {}
 
     /** Loads the caller's membership in `chatId` with role + granted permissions. */
@@ -72,14 +82,20 @@ export class ChatAccessService {
             throw new ForbiddenException('you are not a member of this group');
         }
 
-        const permissions = (
-            await this.permissionAdminRepository.find({
-                where: { member: { id: member.id } },
-                relations: { permission: true },
-            })
-        ).map((row) => row.permission.name as PermissionChatEnum);
+        // Legacy stored names are migrated on read so every caller sees the
+        // same contract keys (`change_info_chat` → `edit_group_info`, …).
+        const permissions = normalizePermissions(
+            (
+                await this.permissionAdminRepository.find({
+                    where: { member: { id: member.id } },
+                    relations: { permission: true },
+                })
+            ).map((row) => row.permission.name),
+        ) as PermissionChatEnum[];
 
         const roleName = (member.role?.name ?? '') as RoleChatEnum;
+        const effectiveMemberPermissions =
+            await this.memberPermissionResolver.resolve(member.chat, userId);
         return {
             chat: member.chat,
             member,
@@ -87,6 +103,7 @@ export class ChatAccessService {
             permissions,
             isManager: roleName === RoleChatEnum.MANAGER,
             isAdmin: roleName === RoleChatEnum.ADMIN,
+            effectiveMemberPermissions,
         };
     }
 
@@ -119,17 +136,36 @@ export class ChatAccessService {
         }
     }
 
-    /** Admin callers need every `required` permission (`all` satisfies any). */
+    /**
+     * Callers need every `required` permission, resolved by the shared
+     * `hasPermission` helper: owners pass implicitly, `all` satisfies any list
+     * and implications (`manage_messages` ⇒ `delete_other_messages`) apply.
+     */
     assertPermissions(
         caller: ChatCallerContext,
         required: PermissionChatEnum[],
     ): void {
-        if (!caller.isAdmin) return; // manager passes implicitly
-        if (required.length === 0) return; // admin-only route, no permission gate
-        if (caller.permissions.includes(PermissionChatEnum.ALL)) return;
-        const missing = required.filter(
-            (permission) => !caller.permissions.includes(permission),
-        );
+        if (required.length === 0) return; // no permission gate on this route
+        const role = caller.isManager
+            ? 'owner'
+            : caller.isAdmin
+              ? 'admin'
+              : 'member';
+        const missing = required.filter((permission) => {
+            const key = normalizePermissionName(permission);
+            // Unknown/stale gate value: never silently allow it.
+            if (key === null) return true;
+            if (key === 'all') {
+                return (
+                    role !== 'owner' &&
+                    (role !== 'admin' ||
+                        !normalizePermissions(caller.permissions).includes(
+                            'all',
+                        ))
+                );
+            }
+            return !hasPermission(role, caller.permissions, key);
+        });
         if (missing.length > 0) {
             throw new ForbiddenException(
                 `missing permission(s): ${missing.join(', ')}`,

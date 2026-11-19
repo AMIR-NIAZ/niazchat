@@ -16,17 +16,20 @@ import {
 import { Server } from 'socket.io';
 import { ChatService } from '../services/chat.service';
 import { GroupRealtimeService } from '../services/group-realtime.service';
+import { UserBlockService } from '../services/user-block.service';
+import { PrivateChatService } from '../services/private-chat.service';
 import { wsPayload } from 'src/common/guards/wsGuards/wsPayload.guard';
 import { wsIsMemberChat } from 'src/common/guards/wsGuards/wsIsmemberChat.guard';
 import { wsIsBanMember } from 'src/common/guards/wsGuards/wsIsBanMember.guard';
 import { SocketAuth } from 'src/common/types/SocketAuth.type';
 import { JwtPayload } from 'src/common/types/jwt-payload.type';
 import { chatRoom, userRoom } from 'src/common/utils/roomCreator.utils';
-import { ChatId } from 'src/common/types/brands.type';
+import { ChatId, UserId } from 'src/common/types/brands.type';
 import { Chat } from '../entities/chat.entity';
 import { WsExceptionFilter } from 'src/common/filters/ws-exception.filter';
 import { num, serializeChat } from 'src/common/utils/ws-serializer.utils';
 import { MarkSeenDto } from '../dtos/markSeen.dto';
+import { ChatActionDto } from '../dtos/chatAction.dto';
 import { TypeChatEnum } from 'src/common/enums/typeChat.enum';
 
 @WebSocketGateway()
@@ -36,6 +39,8 @@ export class ChatGateway implements OnGatewayDisconnect, OnGatewayInit {
     constructor(
         private readonly chatService: ChatService,
         private readonly groupRealtime: GroupRealtimeService,
+        private readonly userBlocks: UserBlockService,
+        private readonly privateChats: PrivateChatService,
     ) {}
 
     /** REST-side group mutations fire room events through this server too. */
@@ -64,11 +69,36 @@ export class ChatGateway implements OnGatewayDisconnect, OnGatewayInit {
 
     @SubscribeMessage('getAllChats')
     async getAllChats(@ConnectedSocket() client: SocketAuth) {
+        const userId = client.data.user.sub;
         const chats = await this.chatService.getUserChats(client.data.user);
+
+        // Private rows carry the caller's directional block state so the app
+        // can offer Block or Unblock without an extra request. ONE query.
+        const privateIds = chats
+            .filter((chat) => chat.type === TypeChatEnum.PRIVATE)
+            .map((chat) => chat.id);
+        const blockStates = await this.userBlocks.getBlockStates(
+            privateIds,
+            userId,
+        );
 
         // Serialized wire rows: numeric ids + lastMessage/preview in the exact
         // shape `chatlist:updated` emits.
-        return { ok: true, data: chats.map(serializeChat) };
+        return {
+            ok: true,
+            data: chats.map((chat) => {
+                const state = blockStates.get(String(chat.id));
+                return {
+                    ...serializeChat(chat),
+                    ...(state === undefined
+                        ? {}
+                        : {
+                              blockedByMe: state.blockedByMe,
+                              blockedMe: state.blockedMe,
+                          }),
+                };
+            }),
+        };
     }
 
     @SubscribeMessage('joinChat')
@@ -167,9 +197,25 @@ export class ChatGateway implements OnGatewayDisconnect, OnGatewayInit {
         );
         const summary = await this.chatService.getChatSummary(chatId, userId);
         const seen = await this.chatService.getChatSeenState(chatId, userId);
-        // Private chat info carries the other participant (presence included).
+        // Private chat info carries the other participant (presence included)
+        // and the caller's directional block state (drives the composer/UI).
         const peer = await this.chatService.getPeerForChat(chatId, userId);
-        return { ...info, peer, ...summary, ...seen };
+        const blockState =
+            peer === null
+                ? null
+                : await this.userBlocks.getBlockState(chatId, userId);
+        return {
+            ...info,
+            peer,
+            ...(blockState === null
+                ? {}
+                : {
+                      blockedByMe: blockState.blockedByMe,
+                      blockedMe: blockState.blockedMe,
+                  }),
+            ...summary,
+            ...seen,
+        };
     }
 
     /**
@@ -207,6 +253,104 @@ export class ChatGateway implements OnGatewayDisconnect, OnGatewayInit {
     }
 
     /**
+     * Directional block of the private chat's other participant. Blocking does
+     * not delete any history and is not symmetric; the ack carries the new
+     * state, and every device of the CALLER is told so its UI updates. The
+     * blocked user is never notified (no block/unblock events to their room).
+     */
+    @SubscribeMessage('blockUser')
+    @UseGuards(wsIsMemberChat)
+    @UsePipes(new ValidationPipe({ whitelist: true }))
+    async blockUser(
+        @ConnectedSocket() client: SocketAuth,
+        @MessageBody() dto: ChatActionDto,
+    ) {
+        const userId = client.data.user.sub;
+        const result = await this.userBlocks.block(dto.chatId, userId);
+
+        this.server.to(userRoom(userId)).emit('chat:blocked', {
+            chatId: result.chatId,
+            blockedByMe: true,
+            blockedMe: result.blockedMe,
+            blocked: true,
+        });
+        return { ok: true, data: result };
+    }
+
+    @SubscribeMessage('unblockUser')
+    @UseGuards(wsIsMemberChat)
+    @UsePipes(new ValidationPipe({ whitelist: true }))
+    async unblockUser(
+        @ConnectedSocket() client: SocketAuth,
+        @MessageBody() dto: ChatActionDto,
+    ) {
+        const userId = client.data.user.sub;
+        const result = await this.userBlocks.unblock(dto.chatId, userId);
+
+        this.server.to(userRoom(userId)).emit('chat:blocked', {
+            chatId: result.chatId,
+            blockedByMe: false,
+            blockedMe: result.blockedMe,
+            blocked: result.blocked,
+        });
+        return { ok: true, data: result };
+    }
+
+    /**
+     * "Delete chat for me": hides the conversation for the caller only. No
+     * event reaches the other participant; the caller's own devices get
+     * `chat:removed` so a second device drops the row too.
+     */
+    @SubscribeMessage('deleteChatForMe')
+    @UseGuards(wsIsMemberChat)
+    @UsePipes(new ValidationPipe({ whitelist: true }))
+    async deleteChatForMe(
+        @ConnectedSocket() client: SocketAuth,
+        @MessageBody() dto: ChatActionDto,
+    ) {
+        const userId = client.data.user.sub;
+        const result = await this.privateChats.deleteForMe(dto.chatId, userId);
+
+        this.server.to(userRoom(userId)).emit('chat:removed', {
+            chatId: result.chatId,
+            reason: 'deleted_for_me',
+        });
+        return { ok: true, data: result };
+    }
+
+    /**
+     * "Delete chat for both": the chat row is gone for everybody. Both
+     * participants are told through their personal rooms (offline users simply
+     * get the already-deleted state from `getAllChats` on reconnect), and any
+     * socket still in the chat room is kicked out of it.
+     */
+    @SubscribeMessage('deleteChatForBoth')
+    @UseGuards(wsIsMemberChat)
+    @UsePipes(new ValidationPipe({ whitelist: true }))
+    async deleteChatForBoth(
+        @ConnectedSocket() client: SocketAuth,
+        @MessageBody() dto: ChatActionDto,
+    ) {
+        const userId = client.data.user.sub;
+        const result = await this.privateChats.deleteForBoth(
+            dto.chatId,
+            userId,
+        );
+
+        this.server.to(chatRoom(dto.chatId)).emit('chat:deleted', {
+            chatId: result.chatId,
+        });
+        for (const memberId of result.memberIds) {
+            this.server.to(userRoom(memberId as UserId)).emit('chat:deleted', {
+                chatId: result.chatId,
+            });
+        }
+        this.server.in(chatRoom(dto.chatId)).socketsLeave(chatRoom(dto.chatId));
+
+        return { ok: true, data: result };
+    }
+
+    /**
      * Group AND private chats, current room only, active (non-banned) members
      * only. A start is throttled to one per second per socket; stop is always
      * sent. Never throws to the caller (handlers swallow rejections).
@@ -227,6 +371,13 @@ export class ChatGateway implements OnGatewayDisconnect, OnGatewayInit {
         const userId = client.data.user?.sub;
         if (userId === undefined) return;
         if (!(await this.chatService.isActiveMember(chatId, userId))) return;
+        // A blocked private conversation never shows typing either side.
+        if (
+            client.data.chatType === TypeChatEnum.PRIVATE &&
+            (await this.userBlocks.isChatBlocked(chatId))
+        ) {
+            return;
+        }
 
         if (event === 'typing:start') {
             const now = Date.now();

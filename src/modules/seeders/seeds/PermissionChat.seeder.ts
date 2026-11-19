@@ -2,20 +2,16 @@ import { DataSource, DeepPartial } from 'typeorm';
 import { Seeder } from '../seeder.base';
 import { PermissionChatEnum } from 'src/common/enums/permissionChat.enum';
 import { PermissionChat } from 'src/modules/chats/entities/permission_chat.entity';
+import { GROUP_PERMISSIONS } from 'src/modules/chats/utils/group-permissions.util';
 
+/**
+ * Every contract key plus the special `all` wildcard. The legacy aliases are
+ * not seeded again: existing rows keep working through the read-time
+ * normalization; new grants always use the current keys.
+ */
 const permissionChats: DeepPartial<PermissionChat[]> = [
-    {
-        name: PermissionChatEnum.ALL,
-    },
-    {
-        name: PermissionChatEnum.BAN_USER,
-    },
-    {
-        name: PermissionChatEnum.CHANGE_INFO_CHAT,
-    },
-    {
-        name: PermissionChatEnum.DELETE_MESSAGE,
-    },
+    { name: PermissionChatEnum.ALL },
+    ...GROUP_PERMISSIONS.map((name) => ({ name })),
 ];
 
 export class PermmisionChatSeeder extends Seeder {

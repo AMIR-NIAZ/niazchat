@@ -1,4 +1,5 @@
 export * from './group-model';
+export * from './add-members-model';
 export * from './groups-api';
 export * from './use-group';
 export * from './invite-links-model';
@@ -7,4 +8,3 @@ export * from './invite-links-api';
 export * from './use-invite-links';
 export * from './pending-invite';
 export * from './member-actions-sheet';
-export * from './member-permissions-sheet';

@@ -10,13 +10,23 @@ import { AttachmentStatus } from 'src/modules/attachments/enums/attachmentStatus
 import { AttachmentService } from 'src/modules/attachments/services/attachment.service';
 import { ChatMember } from 'src/modules/chats/entities/chat_members.entity';
 import { RoleChatEnum } from 'src/common/enums/roleChat.enum';
+import { TypeChatEnum } from 'src/common/enums/typeChat.enum';
 import { TypeMessageEnum } from 'src/common/enums/typeMessage.enum';
+import { attachmentKindOf } from 'src/common/utils/attachment-kind.util';
+import { MemberPermissionResolverService } from 'src/modules/chats/services/member-permission-resolver.service';
+import {
+    attachmentMemberPermission,
+    MEMBER_PERMISSION_FORBIDDEN,
+    messageContainsLink,
+    type MemberPermission,
+} from 'src/modules/chats/utils/member-permissions.util';
 import { ChatId, MessageId, UserId } from 'src/common/types/brands.type';
 import { JwtPayload } from 'src/common/types/jwt-payload.type';
 import { ForwardMessagesDto } from '../dtos/forwardMessages.dto';
 import { Message } from '../entities/message.entity';
 import { User } from 'src/modules/auth/entities/user.entity';
 import { ForwardRequestStore } from './forward-request.store';
+import { UserBlockService } from 'src/modules/chats/services/user-block.service';
 
 export type ForwardTargetResult =
     | { chatId: number; ok: true; messageIds: number[] }
@@ -48,6 +58,8 @@ export class MessageForwardService {
         private readonly dataSource: DataSource,
         private readonly attachments: AttachmentService,
         private readonly store: ForwardRequestStore,
+        private readonly userBlocks: UserBlockService,
+        private readonly memberPermissions: MemberPermissionResolverService,
     ) {}
 
     async forward(
@@ -86,11 +98,24 @@ export class MessageForwardService {
 
         for (const targetChatId of dto.toChatIds) {
             try {
-                await this.assertChatAccess(
+                const targetMember = await this.assertChatAccess(
                     targetChatId,
                     user.sub,
                     'target chat',
                     false,
+                );
+                // Forwarding IS a send: the target group's member policy must
+                // allow the same content a normal message would.
+                await this.assertMemberForwardPermissions(
+                    targetMember,
+                    sources,
+                    user.sub,
+                );
+                // Forwarding into a blocked private chat is a write: same
+                // server-side guard as a normal send.
+                await this.userBlocks.assertCanCommunicate(
+                    targetChatId,
+                    user.sub,
                 );
                 const messages = await this.forwardToChat(
                     targetChatId,
@@ -358,12 +383,62 @@ export class MessageForwardService {
         };
     }
 
+    /**
+     * Member-policy gate for a forward target. Owners/admins and private chats
+     * pass; a regular member needs every switch implied by the forwarded
+     * content (text, attachment kind, link).
+     */
+    private async assertMemberForwardPermissions(
+        member: ChatMember,
+        sources: Message[],
+        userId: UserId,
+    ): Promise<void> {
+        if (member.chat.type !== TypeChatEnum.GRUPE) return;
+        const role = (member.role?.name ?? null) as RoleChatEnum | null;
+        if (role === RoleChatEnum.MANAGER || role === RoleChatEnum.ADMIN) {
+            return;
+        }
+        const config = await this.memberPermissions.resolve(
+            member.chat,
+            userId,
+        );
+        const required = new Set<MemberPermission>();
+        for (const source of sources) {
+            const attachments = source.attachments ?? [];
+            if (attachments.length === 0) {
+                required.add('send_messages');
+            } else {
+                for (const attachment of attachments) {
+                    required.add(
+                        attachmentMemberPermission(
+                            attachmentKindOf(
+                                attachment.mimeType,
+                                attachment.voice,
+                            ),
+                        ),
+                    );
+                }
+                if (source.type?.name === (TypeMessageEnum.VOICE as string)) {
+                    required.add('send_voice');
+                }
+            }
+            if (messageContainsLink(source.content)) {
+                required.add('send_links');
+            }
+        }
+        for (const key of required) {
+            if (!config[key]) {
+                throw new ForbiddenException(MEMBER_PERMISSION_FORBIDDEN[key]);
+            }
+        }
+    }
+
     private async assertChatAccess(
         chatId: ChatId,
         userId: UserId,
         label: string,
         wholeRequest: boolean,
-    ): Promise<void> {
+    ): Promise<ChatMember> {
         const member = await this.memberRepository.findOne({
             where: { chat: { id: chatId }, user: { id: userId } },
             relations: { chat: true, role: true },
@@ -381,6 +456,7 @@ export class MessageForwardService {
         if (member.chat.isBan) {
             throw new ForbiddenException(`The ${label} has been banned`);
         }
+        return member;
     }
 
     private errorMessage(error: unknown): string {

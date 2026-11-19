@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Pressable,
@@ -23,15 +23,17 @@ import {
 import { AvatarViewer } from '../../../features/users/avatar-gallery';
 import { presenceLabel } from '../../../features/users/public-profile-model';
 import { useRegisterOpenUserProfile } from '../../../features/users/profile-navigation';
+import { hideUserProfileEverywhere } from '../../../features/users/visibility-cache';
 import { useUserProfile } from '../../../features/users/use-user-profile';
 import { describePublicProfileError } from '../../../features/users/users-service';
 import { useCurrentUserId } from '../../../features/auth';
 import { openPrivateChat } from '../../../features/chats';
-import { toast } from '../../../shared/dialog';
+import { dialog, toast } from '../../../shared/dialog';
 import { ApiError } from '../../../core/api';
 import {
     useAddContact,
     useContacts,
+    useRemoveContact,
 } from '../../../features/contacts/use-contacts';
 import { describeSavedContactError } from '../../../features/contacts/contacts-api';
 
@@ -109,21 +111,47 @@ function UserProfile({
     const [messageError, setMessageError] = useState<string | null>(null);
     const savedContacts = useContacts();
     const addContact = useAddContact();
+    const removeContact = useRemoveContact();
     const [contactPending, setContactPending] = useState(false);
     const [contactError, setContactError] = useState<string | null>(null);
+    /** Blocks a second add/remove while one (including its confirm) is open. */
+    const contactBusyRef = useRef(false);
 
     const profile = query.profile;
+    const unavailable =
+        query.error instanceof ApiError && query.error.statusCode === 404;
+    const hiddenHandled = useRef(false);
+
+    // The server hides this profile (its owner blocked the viewer). Overwrite
+    // every cached copy ONCE so a stale photo does not survive offline.
+    useEffect((): void => {
+        if (!unavailable || hiddenHandled.current) return;
+        hiddenHandled.current = true;
+        hideUserProfileEverywhere(
+            queryClient,
+            currentUserId,
+            userId,
+            initialName ?? 'Profile',
+        );
+    }, [unavailable, queryClient, currentUserId, userId, initialName]);
+
+    if (unavailable) {
+        return <UnavailableProfile userId={userId} />;
+    }
+
     const name = profile?.name ?? initialName ?? 'Profile';
     const avatars = profile?.avatars ?? [];
     const currentAvatarPath = avatars[0]?.storedPath ?? initialAvatar;
     const presence = profile === null ? null : presenceLabel(profile);
     const bio = profile?.biografy?.trim();
-    const isSavedContact = savedContacts.contacts.some(
+    const savedContact = savedContacts.contacts.find(
         (contact) => contact.userId === userId,
     );
+    const isSavedContact = savedContact !== undefined;
 
     const handleAddContact = async (): Promise<void> => {
-        if (contactPending) return;
+        if (contactBusyRef.current) return;
+        contactBusyRef.current = true;
         setContactPending(true);
         setContactError(null);
         try {
@@ -139,11 +167,49 @@ function UserProfile({
             toast.show('Added to contacts', { tone: 'success' });
         } catch (error) {
             if (error instanceof ApiError && error.statusCode === 409) {
+                // The contact already exists server-side: refresh so the hero
+                // switches to "Remove from contacts" instead of allowing a
+                // second create.
+                savedContacts.refetch();
                 toast.show('Already in your contacts');
             } else {
                 setContactError(describeSavedContactError(error));
             }
         } finally {
+            contactBusyRef.current = false;
+            setContactPending(false);
+        }
+    };
+
+    const handleRemoveContact = async (): Promise<void> => {
+        if (contactBusyRef.current || savedContact === undefined) return;
+        contactBusyRef.current = true;
+        try {
+            const confirmed = await dialog.confirm({
+                title: `Remove ${name} from contacts?`,
+                message:
+                    'They will be removed from your saved contacts. This does not affect your chat.',
+                confirmText: 'Remove',
+                destructive: true,
+            });
+            if (!confirmed) return;
+            setContactPending(true);
+            setContactError(null);
+            // A still-optimistic row has no server id yet; wait for the list
+            // instead of sending a delete for a local placeholder id.
+            if (savedContact.id <= 0) {
+                savedContacts.refetch();
+                return;
+            }
+            await removeContact.mutateAsync(savedContact.id);
+            toast.show('Removed from contacts', { tone: 'success' });
+        } catch (error) {
+            if (error instanceof ApiError && error.statusCode === 404) {
+                savedContacts.refetch();
+            }
+            setContactError(describeSavedContactError(error));
+        } finally {
+            contactBusyRef.current = false;
             setContactPending(false);
         }
     };
@@ -232,6 +298,9 @@ function UserProfile({
                     {presence !== null && (
                         <AppText variant="caption">{presence}</AppText>
                     )}
+                    <AppText variant="caption" style={styles.userId}>
+                        User ID: {userId}
+                    </AppText>
                     {!isSelf && (
                         <Pressable
                             accessibilityRole="button"
@@ -259,38 +328,66 @@ function UserProfile({
                             )}
                         </Pressable>
                     )}
-                    {isSavedContact ? (
-                        <AppText variant="caption">In your contacts</AppText>
-                    ) : (
-                        <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel={`Add ${name} to contacts`}
-                            accessibilityState={{
-                                disabled: contactPending,
-                                busy: contactPending,
-                            }}
-                            disabled={contactPending}
-                            onPress={(): void => {
-                                void handleAddContact();
-                            }}
-                            style={({ pressed }) => [
-                                styles.contactButton,
-                                pressed && styles.pressed,
-                                contactPending && styles.messageButtonBusy,
-                            ]}
-                        >
-                            {contactPending ? (
-                                <ActivityIndicator
-                                    size="small"
-                                    color={palette.primary[600]}
-                                />
-                            ) : (
-                                <Text style={styles.contactButtonText}>
-                                    ＋ Add to contacts
-                                </Text>
-                            )}
-                        </Pressable>
-                    )}
+                    {!isSelf &&
+                        (isSavedContact ? (
+                            <Pressable
+                                accessibilityRole="button"
+                                accessibilityLabel={`Remove ${name} from contacts`}
+                                accessibilityState={{
+                                    disabled: contactPending,
+                                    busy: contactPending,
+                                }}
+                                disabled={contactPending}
+                                onPress={(): void => {
+                                    void handleRemoveContact();
+                                }}
+                                style={({ pressed }) => [
+                                    styles.contactButton,
+                                    pressed && styles.pressed,
+                                    contactPending && styles.messageButtonBusy,
+                                ]}
+                            >
+                                {contactPending ? (
+                                    <ActivityIndicator
+                                        size="small"
+                                        color={palette.primary[600]}
+                                    />
+                                ) : (
+                                    <Text style={styles.contactButtonText}>
+                                        Remove from contacts
+                                    </Text>
+                                )}
+                            </Pressable>
+                        ) : (
+                            <Pressable
+                                accessibilityRole="button"
+                                accessibilityLabel={`Add ${name} to contacts`}
+                                accessibilityState={{
+                                    disabled: contactPending,
+                                    busy: contactPending,
+                                }}
+                                disabled={contactPending}
+                                onPress={(): void => {
+                                    void handleAddContact();
+                                }}
+                                style={({ pressed }) => [
+                                    styles.contactButton,
+                                    pressed && styles.pressed,
+                                    contactPending && styles.messageButtonBusy,
+                                ]}
+                            >
+                                {contactPending ? (
+                                    <ActivityIndicator
+                                        size="small"
+                                        color={palette.primary[600]}
+                                    />
+                                ) : (
+                                    <Text style={styles.contactButtonText}>
+                                        ＋ Add to contacts
+                                    </Text>
+                                )}
+                            </Pressable>
+                        ))}
                     {contactError !== null && (
                         <AppText style={styles.errorText}>
                             {contactError}
@@ -352,6 +449,74 @@ function UserProfile({
     );
 }
 
+function UnavailableProfile({
+    userId,
+}: {
+    userId: number;
+}): React.ReactElement {
+    return (
+        <Screen style={styles.screen} withTopInset={true}>
+            <GlassHeader
+                leading={
+                    <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Go back"
+                        style={styles.backButton}
+                        onPress={(): void => router.back()}
+                    >
+                        <Text style={styles.backText}>‹</Text>
+                    </Pressable>
+                }
+            >
+                <Text
+                    style={[typography.heading, styles.headerTitle]}
+                    numberOfLines={1}
+                >
+                    Profile
+                </Text>
+            </GlassHeader>
+            <View style={styles.center}>
+                <GlassCard
+                    padding={spacing.lg}
+                    contentStyle={styles.hero}
+                    floating={true}
+                >
+                    <Avatar
+                        userId={userId}
+                        name="؟"
+                        uri={null}
+                        size={96}
+                        ring={true}
+                    />
+                    <Text style={[typography.title, styles.name]}>
+                        Profile isn&apos;t available
+                    </Text>
+                    <AppText variant="caption" style={styles.errorText}>
+                        This profile can no longer be shown.
+                    </AppText>
+                    <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Back"
+                        onPress={(): void => {
+                            if (router.canGoBack()) {
+                                router.back();
+                                return;
+                            }
+                            router.replace('/(app)');
+                        }}
+                        style={({ pressed }) => [
+                            styles.retryButton,
+                            pressed && styles.pressed,
+                        ]}
+                    >
+                        <Text style={styles.retryText}>Back</Text>
+                    </Pressable>
+                </GlassCard>
+            </View>
+        </Screen>
+    );
+}
+
 function InvalidUser(): React.ReactElement {
     return (
         <Screen style={styles.center} withTopInset={true}>
@@ -390,6 +555,7 @@ const styles = StyleSheet.create({
     scroll: { paddingVertical: spacing.sm, gap: spacing.md },
     hero: { alignItems: 'center', gap: spacing.xxs },
     name: { marginTop: spacing.xs },
+    userId: { color: palette.text.muted },
     center: { alignItems: 'center', justifyContent: 'center', flex: 1 },
     pressed: { opacity: 0.6 },
     errorBlock: { alignItems: 'center', gap: spacing.xs },

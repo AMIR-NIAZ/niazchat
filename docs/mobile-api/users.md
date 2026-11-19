@@ -8,7 +8,7 @@ Sources: `src/modules/auth/controllers/user.controller.ts`, `src/modules/auth/se
 
 ```ts
 {
-  id: number,              // users.id (bigint)
+  id: number,              // users.id (bigint) — the public numeric "User ID" shown in profiles
   createdAt: string,       // ISO timestamp (users)
   updatedAt: string,
   phone: string,

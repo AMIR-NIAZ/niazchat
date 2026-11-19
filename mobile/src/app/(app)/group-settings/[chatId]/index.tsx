@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import {
     ActivityIndicator,
     FlatList,
@@ -20,6 +20,8 @@ import {
 import { ApiError } from '../../../../core/api';
 import { toast } from '../../../../shared/dialog';
 import { purgeChatFromCaches } from '../../../../features/chats';
+import { useCurrentUserId } from '../../../../features/auth';
+import { deleteLocalChatMessages } from '../../../../shared/local-db';
 import {
     canOpenGroupSettings,
     visibleGroupSettingsFeatures,
@@ -67,6 +69,7 @@ export default function GroupSettingsScreen(): React.ReactElement {
 
 function GroupSettings({ chatId }: { chatId: number }): React.ReactElement {
     const queryClient = useQueryClient();
+    const currentUserId = useCurrentUserId();
     const infoQuery = useGroupInfo(chatId);
 
     useGroupChangedEvents(chatId);
@@ -79,7 +82,40 @@ function GroupSettings({ chatId }: { chatId: number }): React.ReactElement {
     }, [queryClient, chatId]);
     useGroupRemovedEvent(chatId, handleRemoved);
 
+    const bannedFromGroup =
+        infoQuery.error instanceof ApiError &&
+        infoQuery.error.statusCode === 403;
+    const bannedHandled = useRef(false);
+    useEffect((): void => {
+        if (!bannedFromGroup || bannedHandled.current) return;
+        bannedHandled.current = true;
+        purgeChatFromCaches(queryClient, chatId);
+        if (currentUserId !== null) {
+            void deleteLocalChatMessages(currentUserId, chatId).catch(
+                (): void => undefined,
+            );
+        }
+    }, [bannedFromGroup, queryClient, chatId, currentUserId]);
+
     const info = infoQuery.data;
+    const featureCount =
+        info === undefined
+            ? 0
+            : visibleGroupSettingsFeatures(info.capabilities).length;
+    const previousFeatureCount = useRef<number | null>(null);
+
+    // `group:changed` refetches the info; if the caller LOST their last group
+    // capability while this screen was open, leave instead of showing a stale
+    // settings list.
+    useEffect((): void => {
+        if (info === undefined) return;
+        const previous = previousFeatureCount.current;
+        previousFeatureCount.current = featureCount;
+        if (previous !== null && previous > 0 && featureCount === 0) {
+            toast.show('You no longer have access to group settings');
+            router.back();
+        }
+    }, [info, featureCount]);
 
     if (infoQuery.isPending) {
         return (
@@ -100,26 +136,30 @@ function GroupSettings({ chatId }: { chatId: number }): React.ReactElement {
         const error = infoQuery.error;
         const privateChat =
             error instanceof ApiError && error.statusCode === 400;
+        const banned = error instanceof ApiError && error.statusCode === 403;
         return (
             <View style={styles.root}>
                 <TopBar />
                 <SettingsState
-                    title="Group settings unavailable"
+                    title={
+                        banned
+                            ? "You can't access this group"
+                            : 'Group settings unavailable'
+                    }
                     detail={
                         privateChat
                             ? 'This screen is only available for groups.'
-                            : error instanceof ApiError &&
-                                error.statusCode === 403
-                                ? "You don't have access to this group."
-                                : 'Could not load this group.'
+                            : banned
+                              ? 'This group is no longer available to you.'
+                              : 'Could not load this group.'
                     }
-                    {...(privateChat
+                    {...(privateChat || banned
                         ? {}
                         : {
-                            onRetry: (): void => {
-                                void infoQuery.refetch();
-                            },
-                        })}
+                              onRetry: (): void => {
+                                  void infoQuery.refetch();
+                              },
+                          })}
                 />
             </View>
         );

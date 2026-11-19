@@ -3,6 +3,8 @@ import { ChatGateway } from './chats.gateway';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ChatService } from '../services/chat.service';
 import { GroupRealtimeService } from '../services/group-realtime.service';
+import { UserBlockService } from '../services/user-block.service';
+import { PrivateChatService } from '../services/private-chat.service';
 import { JwtAppService } from 'src/modules/auth/services/jwt.service';
 import { ChatMember } from '../entities/chat_members.entity';
 import { RoleChat } from '../entities/role_chat.entity';
@@ -17,6 +19,8 @@ describe('ChatGateway', () => {
                 ChatGateway,
                 { provide: ChatService, useValue: {} },
                 { provide: GroupRealtimeService, useValue: {} },
+                { provide: UserBlockService, useValue: {} },
+                { provide: PrivateChatService, useValue: {} },
                 { provide: JwtAppService, useValue: {} },
                 { provide: getRepositoryToken(ChatMember), useValue: {} },
                 { provide: getRepositoryToken(RoleChat), useValue: {} },
@@ -65,7 +69,18 @@ describe('ChatGateway.joinChat / room switching', () => {
             to: jest.fn(() => ({ emit })),
             in: jest.fn(() => ({ fetchSockets })),
         };
-        const gateway = new ChatGateway(chatService as never, {} as never);
+        // Private chat info asks for the caller's directional block state.
+        const userBlocks = {
+            getBlockState: jest
+                .fn()
+                .mockResolvedValue({ blockedByMe: false, blockedMe: false }),
+        };
+        const gateway = new ChatGateway(
+            chatService as never,
+            {} as never,
+            userBlocks as never,
+            {} as never,
+        );
         (gateway as unknown as { server: typeof server }).server = server;
         const client = {
             data: { user: { sub: 7 } } as {
@@ -172,7 +187,17 @@ describe('ChatGateway.joinChat consistency', () => {
             to: jest.fn(() => ({ emit })),
             in: jest.fn(() => ({ fetchSockets })),
         };
-        const gateway = new ChatGateway(chatService as never, {} as never);
+        const userBlocks = {
+            getBlockState: jest
+                .fn()
+                .mockResolvedValue({ blockedByMe: false, blockedMe: false }),
+        };
+        const gateway = new ChatGateway(
+            chatService as never,
+            {} as never,
+            userBlocks as never,
+            {} as never,
+        );
         (gateway as unknown as { server: typeof server }).server = server;
         const client = {
             data: {
@@ -271,6 +296,125 @@ describe('ChatGateway.joinChat consistency', () => {
     });
 });
 
+describe('ChatGateway private-chat actions', () => {
+    function setup() {
+        const emit = jest.fn();
+        const socketsLeave = jest.fn();
+        const server = {
+            to: jest.fn(() => ({ emit })),
+            in: jest.fn(() => ({ socketsLeave })),
+        };
+        const userBlocks = {
+            block: jest.fn().mockResolvedValue({
+                chatId: 5,
+                peerId: 9,
+                blockedByMe: true,
+                blockedMe: false,
+                blocked: true,
+            }),
+            unblock: jest.fn().mockResolvedValue({
+                chatId: 5,
+                peerId: 9,
+                blockedByMe: false,
+                blockedMe: false,
+                blocked: false,
+            }),
+        };
+        const privateChats = {
+            deleteForMe: jest
+                .fn()
+                .mockResolvedValue({ chatId: 5, clearedBeforeId: 42 }),
+            deleteForBoth: jest.fn().mockResolvedValue({
+                chatId: 5,
+                memberIds: [7, 9],
+                alreadyDeleted: false,
+            }),
+        };
+        const gateway = new ChatGateway(
+            {} as never,
+            {} as never,
+            userBlocks as never,
+            privateChats as never,
+        );
+        (gateway as unknown as { server: typeof server }).server = server;
+        return {
+            gateway,
+            server,
+            emit,
+            socketsLeave,
+            userBlocks,
+            privateChats,
+        };
+    }
+
+    const client = { data: { user: { sub: 7 } } } as never;
+
+    it('blockUser notifies only the caller (the blocked user is never told)', async () => {
+        const { gateway, server, emit, userBlocks } = setup();
+
+        const ack = await gateway.blockUser(client, { chatId: 5 } as never);
+
+        expect(userBlocks.block).toHaveBeenCalledWith(5, 7);
+        expect(server.to).toHaveBeenCalledWith(userRoom(7 as never));
+        expect(server.to).not.toHaveBeenCalledWith(userRoom(9 as never));
+        expect(emit).toHaveBeenCalledWith('chat:blocked', {
+            chatId: 5,
+            blockedByMe: true,
+            blockedMe: false,
+            blocked: true,
+        });
+        expect(ack).toMatchObject({ ok: true });
+    });
+
+    it('unblockUser reports the restored state to the caller devices', async () => {
+        const { gateway, server, emit } = setup();
+
+        await gateway.unblockUser(client, { chatId: 5 } as never);
+
+        expect(server.to).toHaveBeenCalledWith(userRoom(7 as never));
+        expect(emit).toHaveBeenCalledWith('chat:blocked', {
+            chatId: 5,
+            blockedByMe: false,
+            blockedMe: false,
+            blocked: false,
+        });
+    });
+
+    it('deleteChatForMe emits chat:removed only to the caller room', async () => {
+        const { gateway, server, emit, privateChats } = setup();
+
+        const ack = await gateway.deleteChatForMe(client, {
+            chatId: 5,
+        } as never);
+
+        expect(privateChats.deleteForMe).toHaveBeenCalledWith(5, 7);
+        expect(server.to).toHaveBeenCalledWith(userRoom(7 as never));
+        expect(server.to).not.toHaveBeenCalledWith(userRoom(9 as never));
+        expect(server.to).not.toHaveBeenCalledWith(chatRoom(5 as never));
+        expect(emit).toHaveBeenCalledWith('chat:removed', {
+            chatId: 5,
+            reason: 'deleted_for_me',
+        });
+        expect(ack).toMatchObject({ ok: true });
+    });
+
+    it('deleteChatForBoth notifies both participants and clears the room', async () => {
+        const { gateway, server, emit, socketsLeave, privateChats } = setup();
+
+        const ack = await gateway.deleteChatForBoth(client, {
+            chatId: 5,
+        } as never);
+
+        expect(privateChats.deleteForBoth).toHaveBeenCalledWith(5, 7);
+        expect(server.to).toHaveBeenCalledWith(chatRoom(5 as never));
+        expect(server.to).toHaveBeenCalledWith(userRoom(7 as never));
+        expect(server.to).toHaveBeenCalledWith(userRoom(9 as never));
+        expect(emit).toHaveBeenCalledWith('chat:deleted', { chatId: 5 });
+        expect(socketsLeave).toHaveBeenCalledWith(chatRoom(5 as never));
+        expect(ack).toMatchObject({ ok: true });
+    });
+});
+
 describe('ChatGateway.markSeen', () => {
     function setup(result: { lastSeenId: number; changed: boolean }) {
         const emit = jest.fn();
@@ -278,7 +422,12 @@ describe('ChatGateway.markSeen', () => {
         const chatService = {
             markSeen: jest.fn().mockResolvedValue(result),
         };
-        const gateway = new ChatGateway(chatService as never, {} as never);
+        const gateway = new ChatGateway(
+            chatService as never,
+            {} as never,
+            {} as never,
+            {} as never,
+        );
         (gateway as unknown as { server: { to: typeof to } }).server = { to };
         return { gateway, chatService, emit, to };
     }

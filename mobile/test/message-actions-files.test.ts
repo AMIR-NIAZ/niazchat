@@ -74,6 +74,8 @@ function message(over: Partial<ChatMessage> = {}): ChatMessage {
         createdAtIso: '2026-01-01T00:00:00.000Z',
         isEdited: false,
         isDeleted: false,
+        isPinned: false,
+        pinnedAtIso: null,
         senderId: 1,
         senderName: 'Ali',
         senderAvatarUrls: [],
@@ -108,6 +110,8 @@ test('own text offers reply/forward/copy/select/edit/delete', () => {
         delete: true,
         deleteOthers: false,
         share: false,
+        pin: false,
+        unpin: false,
     });
 });
 
@@ -312,6 +316,49 @@ test('row labels and MIME fallback derive from extension', () => {
         mimeForFileName('a.docx', ''),
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     );
+});
+
+test('pin action follows the server capability and current state', () => {
+    const member = message();
+    assertEqual(
+        getMessageActions(member, { currentUserId: 1, canPinMessages: false })
+            .pin,
+        false,
+    );
+    assertEqual(
+        getMessageActions(member, { currentUserId: 1, canPinMessages: true })
+            .pin,
+        true,
+    );
+    assertEqual(
+        getMessageActions(member, { currentUserId: 1, canPinMessages: true })
+            .unpin,
+        false,
+    );
+
+    const pinned = message({ isPinned: true, pinnedAtIso: '2026-01-01' });
+    const actions = getMessageActions(pinned, {
+        currentUserId: 1,
+        canPinMessages: true,
+    });
+    assertEqual(actions.pin, false);
+    assertEqual(actions.unpin, true);
+});
+
+test('pending, failed and system messages offer no pin action', () => {
+    const contexts = [
+        message({ id: null, status: 'pending' }),
+        message({ id: null, status: 'failed' }),
+        message({ type: 'system' }),
+    ];
+    for (const target of contexts) {
+        const actions = getMessageActions(target, {
+            currentUserId: 1,
+            canPinMessages: true,
+        });
+        assertEqual(actions.pin, false);
+        assertEqual(actions.unpin, false);
+    }
 });
 
 if (failures > 0) {

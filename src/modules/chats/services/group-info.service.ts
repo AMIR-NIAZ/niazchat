@@ -580,7 +580,11 @@ export class GroupInfoService {
             const rows = await this.memberRepository.query<
                 Array<{ userId: string | number }>
             >(
-                `SELECT DISTINCT "userId" FROM "chat_members" WHERE "chatId" = $1`,
+                // Banned members never receive the group's title/photos.
+                `SELECT DISTINCT m."userId" AS "userId"
+                   FROM "chat_members" m
+                   JOIN "role_chat" r ON r.id = m."roleId"
+                  WHERE m."chatId" = $1 AND r.name <> 'ban'`,
                 [chatId],
             );
             this.realtime.groupUpdated(

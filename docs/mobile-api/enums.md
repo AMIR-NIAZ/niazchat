@@ -12,7 +12,7 @@ All enums live in `src/common/enums/`.
 | `TypeMessageEnum` | `typeMessage.enum.ts` | `text`, `image`, `video`, `file`, `voice`, `ice` |
 | `UserStatusEnum` | `UserStatus.enum.ts` | `active`, `deleted`, `baned` (sic) |
 | `PermissionEnum` (platform) | `permission.enum.ts` | `ban_user`, `ban_chat`, `manage_react` |
-| `PermissionChatEnum` (chat) | `permissionChat.enum.ts` | `all`, `delete_message`, `change_info_chat`, `ban_user` |
+| `PermissionChatEnum` (chat) | `permissionChat.enum.ts` | `edit_group_info`, `manage_members`, `remove_members`, `ban_users`, `manage_invites`, `pin_messages`, `delete_other_messages`, `manage_messages`, `restrict_members`, `manage_voice_chats`, `manage_admins`, `manage_permissions`, `all` (wildcard) + legacy aliases `change_info_chat`, `ban_user`, `delete_message`, `pin_message` (migrated on read) |
 | `AttachmentStatus` | `src/modules/attachments/enums/attachmentStatus.enum.ts` | `pending`, `attached` |
 
 > Watch the typos: enum members keep code-level spellings (`groupe`, `baned`) and the seeded DB rows use the same strings — the client must match them exactly.
@@ -32,7 +32,7 @@ All enums live in `src/common/enums/`.
 | `roles` | `owner`, `admin`, `user` (`role.seeder.ts`) |
 | `role_chat` | `manager`, `admin`, `user`, `ban` (`roleChat.seeder.ts`) |
 | `permissions` | `ban_user`, `ban_chat`, `manage_react` (`permission.seeder.ts`) |
-| `permission_chats` | `all`, `ban_user`, `change_info_chat`, `delete_message` (`PermissionChat.seeder.ts`) |
+| `permission_chats` | `all` plus the 12 contract keys (`PermissionChat.seeder.ts`) |
 | `type_messages` | `file`, `ice`, `image`, `text`, `video`, `voice`, `music`, `system` (`TypeMessage.seeder.ts`) |
 | `reacts` | six defaults seeded idempotently: `thumbs_up` 👍, `heart` ❤️, `joy` 😂, `open_mouth` 😮, `cry` 😢, `pray` 🙏 (`react.seeder.ts`); admins manage the catalog via `/react` |
 

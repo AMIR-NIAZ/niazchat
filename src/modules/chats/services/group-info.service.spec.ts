@@ -14,6 +14,7 @@ import { TypeChatEnum } from 'src/common/enums/typeChat.enum';
 import { Chat } from '../entities/chat.entity';
 import { ChatPermissionService } from './chat-permission.service';
 import type { ChatCallerContext } from './chat-permission.service';
+import { DEFAULT_MEMBER_PERMISSIONS } from '../utils/member-permissions.util';
 import {
     GROUP_AVATAR_LIMIT_MESSAGE,
     GroupInfoService,
@@ -48,6 +49,7 @@ function callerContext(
         permissions: [],
         isOwner: true,
         isAdmin: false,
+        effectiveMemberPermissions: { ...DEFAULT_MEMBER_PERMISSIONS },
         ...overrides,
     };
 }
@@ -112,6 +114,7 @@ function buildHarness(options: {
     };
 
     const permissionService = new ChatPermissionService(
+        {} as never,
         {} as never,
         {} as never,
     );

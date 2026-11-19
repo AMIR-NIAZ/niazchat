@@ -22,11 +22,18 @@ import { Link } from './entities/link.entity';
 import { ChatAccessService } from './services/chat-access.service';
 import { GroupRealtimeService } from './services/group-realtime.service';
 import { PrivateChatService } from './services/private-chat.service';
+import { UserBlockService } from './services/user-block.service';
+import { UserBlock } from './entities/user_block.entity';
 import { RateLimitService } from 'src/common/services/rate-limit.service';
 import { ChatPermissionService } from './services/chat-permission.service';
 import { GroupMembersService } from './services/group-members.service';
+import { GroupAddMembersService } from './services/group-add-members.service';
 import { GroupController } from './controllers/group.controller';
 import { GroupInfoService } from './services/group-info.service';
+import { GroupMemberPermissionsService } from './services/group-member-permissions.service';
+import { MemberPermissionOverride } from './entities/member_permission_override.entity';
+import { MemberPermissionResolverService } from './services/member-permission-resolver.service';
+import { MemberPermissionOverridesService } from './services/member-permission-overrides.service';
 import { GroupAvatarUploadInterceptor } from './interceptors/group-avatar-upload.interceptor';
 import { GroupAvatarLimitGuard } from './guards/group-avatar-limit.guard';
 import { GroupInviteLinksService } from './services/group-invite-links.service';
@@ -46,6 +53,8 @@ import { InviteController } from './controllers/invite.controller';
             PermissionChat,
             PermissionAdmin,
             Link,
+            UserBlock,
+            MemberPermissionOverride,
         ]),
     ],
     providers: [
@@ -55,9 +64,14 @@ import { InviteController } from './controllers/invite.controller';
         ChatAccessService,
         GroupRealtimeService,
         PrivateChatService,
+        UserBlockService,
         ChatPermissionService,
         GroupMembersService,
+        GroupAddMembersService,
         GroupInfoService,
+        GroupMemberPermissionsService,
+        MemberPermissionResolverService,
+        MemberPermissionOverridesService,
         GroupInviteLinksService,
         GroupAvatarUploadInterceptor,
         GroupAvatarLimitGuard,
@@ -79,6 +93,8 @@ import { InviteController } from './controllers/invite.controller';
         GroupRealtimeService,
         ChatAccessService,
         PrivateChatService,
+        UserBlockService,
+        MemberPermissionResolverService,
     ],
 })
 export class ChatsModule {}

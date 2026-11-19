@@ -13,9 +13,7 @@ describe('CreateInviteLinkDto', () => {
     it('accepts empty, null and every allowed expiry', async () => {
         expect(await validateBody({})).toHaveLength(0);
         expect(await validateBody({ expiresInSeconds: null })).toHaveLength(0);
-        for (const expiresInSeconds of [
-            3600, 86_400, 604_800, 2_592_000,
-        ]) {
+        for (const expiresInSeconds of [3600, 86_400, 604_800, 2_592_000]) {
             expect(await validateBody({ expiresInSeconds })).toHaveLength(0);
         }
     });
@@ -37,9 +35,7 @@ describe('CreateInviteLinkDto', () => {
 
     it('rejects any other usage limit', async () => {
         for (const maxUses of [0, 2, 11, 1000, '5']) {
-            expect(
-                (await validateBody({ maxUses })).length,
-            ).toBeGreaterThan(0);
+            expect((await validateBody({ maxUses })).length).toBeGreaterThan(0);
         }
     });
 });

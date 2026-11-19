@@ -13,9 +13,9 @@ would reject.
 
 | Role | Panel role | Meaning |
 |---|---|---|
-| `manager` | `owner` | Group creator. Only the owner promotes/demotes/removes admins. |
-| `admin` | `admin` | Can remove/ban regular members only with `ban_user` or `all`. |
-| `user` | `member` | Read-only panel. |
+| `manager` | `owner` | Group creator. Implicitly holds every permission and cannot be restricted. |
+| `admin` | `admin` | Acts according to its permission set (see the matrix below). |
+| `user` | `member` | Read-only panel; may still hold explicit grants (e.g. `pin_messages`). |
 | `ban` | — | Banned; never listed, never counted, cannot use the panel. |
 
 `createGroup` assigns the creator `manager` and every invited user `user`.
@@ -25,12 +25,41 @@ runtime.
 
 ## Permission matrix (server-enforced)
 
-| Caller | Target owner | Target admin | Target member | Self |
-|---|---|---|---|---|
-| Owner | — | edit permissions, demote, remove, **ban** | promote, remove, **ban** | — |
-| Admin with `ban_user`/`all` | — | — | remove, **ban** | — |
-| Admin without `ban_user` | — | — | — | — |
-| Member / banned / outsider | — | — | — | — |
+| Caller | Target owner | Target admin | Target member |
+|---|---|---|---|
+| Owner | — | edit permissions, demote, remove, **ban** | promote, remove, **ban** |
+| Admin with `manage_admins` | — | demote **only own promotees** (`promotedById`) | promote |
+| Admin with `manage_permissions` | — | edit permissions **only own promotees** | — |
+| Admin with `remove_members` | — | — | remove |
+| Admin with `ban_users` | — | — | **ban** |
+| Admin without the matching permission | — | — | — |
+| Member / banned / outsider | — | — | — |
+
+`hasPermission(role, permissions, key)` is the only resolver: the owner passes
+everything, `all` is a wildcard, and `manage_messages` implies
+`delete_other_messages` + `pin_messages`. Nobody may act on themselves, and no
+route ever targets the owner.
+
+### The 12 permissions (contract)
+
+| Key | English | Persian | Active |
+|---|---|---|---|
+| `edit_group_info` | Edit Group Info | ویرایش اطلاعات گروه | yes |
+| `manage_members` | Manage Members | مدیریت اعضا | yes |
+| `remove_members` | Remove Members | حذف اعضا | yes |
+| `ban_users` | Ban Users | مسدود کردن کاربران | yes |
+| `manage_invites` | Manage Invites | مدیریت دعوت‌ها | yes |
+| `pin_messages` | Pin Messages | سنجاق کردن پیام‌ها | yes |
+| `delete_other_messages` | Delete Other Messages | حذف پیام دیگران | yes |
+| `manage_messages` | Manage Messages | مدیریت پیام‌ها | yes (implies delete + pin) |
+| `restrict_members` | Restrict Members | محدود کردن دسترسی اعضا | **no** — stored/editable only |
+| `manage_voice_chats` | Manage Voice Chats | مدیریت چت صوتی | **no** — stored/editable only |
+| `manage_admins` | Manage Admins | مدیریت ادمین‌ها | yes |
+| `manage_permissions` | Manage Permissions | مدیریت پرمیژن‌ها | yes |
+
+Legacy stored values are migrated on read: `change_info_chat → edit_group_info`,
+`ban_user → ban_users`, `delete_message → delete_other_messages`,
+`pin_message → pin_messages`; `all` stays the wildcard ("Full admin").
 
 A ban sets the target's `role_chat` to `ban` (the same representation the
 banned list reads) and deletes their permission grants. The row is NOT
@@ -44,10 +73,11 @@ outranks the target and the target's locked (`FOR UPDATE`) role still matches.
 Promoting an admin again / demoting a member again is an idempotent no-op with
 `changed: false`.
 
-`DEFAULT_ADMIN_PERMISSIONS` = `ban_user`, `delete_message`,
-`change_info_chat` (one constant in `group-members.service.ts`). Promotion
-replaces the target's grants with exactly these; demotion deletes ALL their
-`permission_admin` rows.
+`DEFAULT_ADMIN_PERMISSIONS` = `delete_other_messages`, `ban_users`,
+`remove_members`, `pin_messages` (only used by the legacy promote route with no
+body). The panel promote route accepts `{ "permissions": string[] }` and stores
+exactly that set. Demotion deletes ALL the target's `permission_admin` rows and
+clears `promotedById`.
 
 "Remove from group" deletes every `chat_members` row of that user in that chat
 (duplicates included) and their permission rows. It is NOT a ban: they can be
@@ -69,8 +99,20 @@ Any non-banned member. Bare object (project convention, no `data` wrapper):
   "owner": { "userId": 7, "name": "Sara", "username": "sara" },
   "capabilities": {
     "canEditInfo": true,
+    "canManageInvites": true,
     "canManageInviteLinks": true,
-    "canManageBans": true
+    "canManageBans": true,
+    "canRemoveMembers": true,
+    "canManageMembers": true,
+    "canDeleteOthersMessages": true,
+    "canPinMessages": true,
+    "canManageAdmins": true,
+    "canManagePermissions": true,
+    "canRestrictMembers": true,
+    "canManageVoiceChats": true,
+    "canManageMemberPermissions": true,
+    "canAddMembers": true,
+    "canInviteViaLink": true
   }
 }
 ```
@@ -82,13 +124,95 @@ Any non-banned member. Bare object (project convention, no `data` wrapper):
 - `membersCount`: COUNT(DISTINCT user), banned excluded.
 - `owner`: `manager` holder, or `null` when no `manager` exists.
 - `myRole`: the caller's highest-ranking row (`owner`/`admin`/`member`).
-- `capabilities`: computed for the caller. `canEditInfo` is true for the owner
-  and for an admin holding `change_info_chat` or `all`; false for members,
-  banned users and outsiders. `canManageBans` is true for the owner and for an
-  admin holding `ban_user` or `all` — it gates the "Banned users" row, which is
-  hidden for everybody else. The app shows the group-settings gear when
-  `myRole` is `owner` or `admin` and lists only features whose capability is
-  true.
+- `capabilities`: computed for the caller with `hasPermission` (additive; every
+  new flag is derived from the 12-key contract). `canManageInviteLinks` is kept
+  as an alias of `canManageInvites`. Each flag gates exactly the feature named
+  after it; the settings hub lists only rows whose flag is true. The app shows
+  the gear when `myRole` is `owner` or `admin`.
+- `canManageMemberPermissions`: owner, or admin with `manage_permissions`.
+- `canAddMembers`: owner/admin with `manage_members`, or a regular member when
+  the group's `add_members` switch is on.
+- `canInviteViaLink`: owner/admin with `manage_invites`, or a regular member
+  when the group's `invite_via_link` switch is on.
+- `canPinMessages` for a regular member follows `memberPermissions.pin_messages`
+  (admins keep their own grant).
+
+## Add members (User ID or saved contacts)
+
+```
+GET  /chats/:chatId/add-members/lookup?userId=<numeric User ID>
+POST /chats/:chatId/members   { "userIds": [12, 34, 56] }
+```
+
+The **User ID** is the numeric `users.id` that the profile screens display
+(`docs/mobile-api/users.md`); it is never a `chat_members.id`, a contact row id
+or any other internal join-table key. Mobile sends only that public numeric id
+and the backend resolves it to the user record. The saved contacts path uses the
+existing `GET /contacts` list and sends the same `contact.userId` values, so both
+methods reach one server operation.
+
+Authorization is enforced by `canAddMembersCapability`: the owner or an admin
+holding `manage_members`, or a regular member whose **effective** `add_members`
+state is on (group default resolved with that member's individual
+`inherit`/`allow`/`deny` override). `lookup` and `add` use the same check, so a
+screen can never offer an action the server would reject.
+
+`GET .../add-members/lookup` returns a narrow projection only:
+
+```json
+{
+  "userId": 42,
+  "name": "Sara",
+  "username": "sara",
+  "avatars": ["uploads/avatars/current.png"],
+  "isMember": false,
+  "isBanned": false
+}
+```
+
+Unknown/inactive ids answer `404 User not found`. A blocked pair answers the same
+generic `404`, so the endpoint cannot be used to probe accounts. No phone,
+status, timestamps or membership row ids are included.
+
+`POST /chats/:chatId/members` accepts 1–50 positive user ids per request
+(deduplicated server-side) and answers `200` with partial success:
+
+```json
+{
+  "added": [
+    {
+      "memberId": 88,
+      "userId": 42,
+      "name": "Sara",
+      "username": "sara",
+      "avatars": ["uploads/avatars/current.png"],
+      "role": "member"
+    }
+  ],
+  "failed": [
+    {
+      "userId": 99,
+      "code": "already_member",
+      "message": "This user is already a member"
+    }
+  ],
+  "membersCount": 6
+}
+```
+
+`failed[].code` is one of `not_found`, `already_member`, `banned`, `blocked`
+(blocked deliberately says only that the person "cannot be added", never why).
+The accepted users commit in ONE transaction; a per-chat advisory lock plus an
+in-transaction permission/membership re-check prevents duplicate rows under
+concurrent requests. Banned membership rows are never restored by this route.
+Rate limit: 30 additions/minute per caller (`429`).
+
+After commit the server emits `group:changed { chatId, reason: 'member_joined' }`
+to `chat:<chatId>`, `group:added { chatId }` to every added user's
+`user:<id>` room, one `system` `member_added` message per accepted user (live
+`sendMessage:list` + `chatlist:updated`), and the final
+`chat:members { chatId, membersCount }`. Offline clients resync from
+`GET /chats/:chatId/group` / `GET /chats/:chatId/members`.
 
 ## `GET /chats/:chatId/members?search=&cursor=&limit=`
 
@@ -115,6 +239,8 @@ Any non-banned member.
       "isOnline": true,
       "lastSeen": null,
       "role": "admin",
+      "permissions": ["delete_other_messages", "ban_users"],
+      "promotedById": 42,
       "actions": {
         "canPromote": false,
         "canDemote": true,
@@ -128,11 +254,12 @@ Any non-banned member.
 }
 ```
 
-`actions` is computed for the CALLER with the same pure functions the action
-endpoints use. `canEditPermissions` is true only when the caller is the owner
-and the target is an ADMIN of that chat. `canBan` mirrors `canRemove`: owner
-for members and admins, admin with `ban_user`/`all` for members only. No phone
-number is ever included.
+`permissions` is the normalized grant set for an ADMIN (empty for members and
+the owner); `promotedById` is who promoted that admin (`null` for legacy rows,
+the owner and plain members). `actions` is computed for the CALLER with the
+same pure functions the endpoints use, including the `promotedById` rules:
+`canDemote`/`canEditPermissions` are owner-always and admin-with-the-permission
+for their OWN promotees only. No phone number is ever included.
 
 ## `GET /chats/:chatId/banned?cursor=&limit=`
 
@@ -196,7 +323,7 @@ on their next `joinChat`. Everyone currently in the chat room receives
 ## Actions
 
 ```
-POST   /chats/:chatId/members/:memberId/promote
+POST   /chats/:chatId/members/:memberId/promote   { "permissions": string[] }
 POST   /chats/:chatId/members/:memberId/demote
 DELETE /chats/:chatId/members/:memberId
 POST   /chats/:chatId/members/:memberId/ban
@@ -230,13 +357,13 @@ Rules (the app's `canBan` row flag is the same pure function):
 | Caller | Owner | Admin | Member | Self |
 |---|---|---|---|---|
 | Owner | 403 | ban | ban | 403 |
-| Admin with `ban_user`/`all` | 403 | 403 | ban | 403 |
-| Admin without `ban_user` | 403 | 403 | 403 | 403 |
+| Admin with `ban_users`/`all` | 403 | 403 | ban | 403 |
+| Admin without `ban_users` | 403 | 403 | 403 | 403 |
 | Member / banned / outsider | 403 | 403 | 403 | 403 |
 
 One transaction locks the caller and every `chat_members` row of the target
 user, re-checks the live group (private chats answer 400), the caller's role
-and permissions, self/owner protection and the target's locked role. Every
+and `ban_users`, self/owner protection and the target's locked role. Every
 duplicate row of the target becomes `ban`; all their `permission_admin` grants
 are deleted. The membership rows are kept (that IS the ban); the user
 disappears from `GET /chats/:chatId/members` and `membersCount`, and appears
@@ -273,17 +400,19 @@ side), and the chat room receives
 `chat:members { chatId, membersCount }`. The legacy owner-only
 `POST /chats/manage/ban/:memberId` is unchanged.
 
-## Admin permissions (owner only)
+## Admin permissions (`manage_permissions`)
 
 ```
 GET /chats/:chatId/members/:memberId/permissions
 PUT /chats/:chatId/members/:memberId/permissions   { "permissions": string[] }
 ```
 
-Only the owner (`manager`) may call either endpoint. The target must be an
-ADMIN row of THAT chat; a plain member, the owner, the caller or a banned user
-answers 409 `Only admins have permissions`, and a member id from another chat
-answers 404. Saves use another per-user limit: 30 changes per minute (429).
+The owner may read/edit any admin. An admin holding `manage_permissions` may
+read/edit only admins whose `promotedById` is them, and may only grant keys it
+holds itself (`canGrantPermissions`). The target must be an ADMIN of THAT chat;
+a plain member, the owner, the caller or a banned user answers 409 `Only admins
+have permissions`, and a member id from another chat answers 404. Saves use a
+per-user limit of 30/minute (429).
 
 ```json
 {
@@ -291,51 +420,72 @@ answers 404. Saves use another per-user limit: 30 changes per minute (429).
   "userId": 7,
   "role": "admin",
   "available": [
-    { "key": "ban_user", "label": "Remove members" },
-    { "key": "delete_message", "label": "Delete messages" },
-    { "key": "change_info_chat", "label": "Edit group info" }
+    {
+      "key": "delete_other_messages",
+      "label": "Delete Other Messages",
+      "active": true,
+      "description": "Delete messages written by other members.",
+      "implies": []
+    },
+    {
+      "key": "manage_messages",
+      "label": "Manage Messages",
+      "active": true,
+      "description": "Moderate messages. Includes deleting others’ messages and pinning.",
+      "implies": ["delete_other_messages", "pin_messages"]
+    }
   ],
-  "granted": ["ban_user", "delete_message", "change_info_chat"],
-  "hasAll": false
+  "granted": ["delete_other_messages", "ban_users"],
+  "hasAll": false,
+  "grantable": ["delete_other_messages", "manage_messages"],
+  "promotedById": 42
 }
 ```
 
-`granted` is the effective set: a legacy `all` row reads as all three keys and
-sets `hasAll: true` (the UI shows a note). `PUT` replaces the set with EXACTLY
-the body's set. The body must be an array of at most three unique values from
-`delete_message`, `change_info_chat`, `ban_user`; `[]` is valid and removes all
-grants; `all`, duplicates and unknown names answer 400. Saving the same
-effective set answers `changed: false` and writes nothing. A legacy `all` row
-is converted to the explicit selected set (equivalent to today's bypass) and
-the `all` row is removed.
+- `available` always lists all 12 keys (with `active`, `description`, `implies`).
+- `grantable` is the subset the CALLER may grant (owner: all 12).
+- `granted` is the effective explicit set; a legacy `all` row reads as all 12
+  keys with `hasAll: true` ("Full admin").
+- `PUT` replaces the set with EXACTLY the body's set. Unknown keys → 400;
+  duplicates are removed; `[]` removes every grant; `all` is owner-only (403 for
+  anybody else). A non-owner editor may not grant a key they lack (403).
+- Saving the same effective set answers `changed: false` and writes nothing.
 
 ```json
-{ "memberId": 88, "granted": ["ban_user"], "changed": true }
+{ "memberId": 88, "granted": ["ban_users"], "hasAll": false, "changed": true }
 ```
 
 One transaction locks the caller and every `chat_members` row of the target
-user, re-checks owner/group/role, deletes all grants across duplicate rows and
-inserts the new set on the canonical row (highest role, then lowest id). Reads
-union grants across duplicate rows, so every duplicate stays consistent. A
-role change between the pre-check and the lock answers 409.
+user, re-checks `manage_permissions`, `promotedById`, the grant subset and the
+role, then deletes all grants across duplicate rows and inserts the new set on
+the canonical row. A role change between the pre-check and the lock answers 409.
 
-### Enforcement today (measured)
+### Enforcement matrix (measured)
 
-| Permission | Enforced where | Enforced? |
+| Permission | Endpoint / action it gates | Active |
 |---|---|---|
-| `ban_user` | New panel `DELETE /chats/:chatId/members/:memberId`, `POST /chats/:chatId/members/:memberId/ban` and `GET /chats/:chatId/banned`; legacy kick, ban-list and unban routes | Yes |
-| `change_info_chat` | New `PATCH /chats/:chatId/group` + group avatar routes (`GroupInfoService`); legacy `/chats/manage/*` | Yes |
-| `delete_message` | No route checks it; message deletion allows the sender or group owner only | **No** |
-| `all` | `ChatPermissionService.canEditInfo` / `ChatAccessService.assertPermissions` / legacy `ManagerChatGuard` bypass | Yes |
+| `edit_group_info` | `PATCH /chats/:chatId/group`, group avatar add/remove/set-main, legacy title/avatar routes | yes |
+| `manage_members` | `POST /chats/:chatId/members`, `GET /chats/:chatId/add-members/lookup`, legacy `POST /chats/manage/:groupId/add/:userPhone` | yes |
+| `remove_members` | `DELETE /chats/:chatId/members/:memberId`, legacy kick | yes |
+| `ban_users` | `POST /chats/:chatId/members/:memberId/ban`, `GET /chats/:chatId/banned`, unban + legacy ban routes | yes |
+| `manage_invites` | invite link create/list/revoke | yes |
+| `pin_messages` | message pin/unpin (WS) | yes |
+| `delete_other_messages` | deleting another member's message (WS); own messages always allowed | yes |
+| `manage_messages` | umbrella — implies `delete_other_messages` + `pin_messages` | yes |
+| `manage_admins` | promote and demote (demote only own promotees unless owner) | yes |
+| `manage_permissions` | read/save an admin's permission set (own promotees unless owner) | yes |
+| `restrict_members` | stored/editable only — no feature behind it | **no** |
+| `manage_voice_chats` | stored/editable only — no feature behind it | **no** |
 
-`change_info_chat` is now real for group info. `all` is never offered by the
-editor, but a legacy `all` grant bypasses the check.
+`all` is never offered as a normal key, but a legacy `all` grant bypasses every
+check. Inactive permissions are storable and editable, marked `active: false`
+and clearly labelled "Not available yet".
 
 ## Edit group info (title, description, photos)
 
 Every endpoint below requires a non-banned member of THAT chat, a live group
 (private chats answer 400) and `canEditInfo` (403 otherwise). The owner always
-qualifies; an admin needs `change_info_chat` or `all`.
+qualifies; an admin needs `edit_group_info` or `all`.
 
 ```
 PATCH  /chats/:chatId/group                     { title?: string, description?: string | null }
@@ -414,20 +564,193 @@ per upload, so the URL is immutable and cacheable forever.
 The global filter rewrites every 403 body to `user not access`; clients branch
 on the status code.
 
+## Member permissions (group-wide policy)
+
+Separate from the 12 per-admin grants: these ten switches define what the
+REGULAR MEMBER role may do in this group. Owners always pass; admins keep
+their `permission_admin` grants. Every default is centralized in
+`member-permissions.util.ts` and mirrored by the app.
+
+| Key | Default | Enforced at |
+|---|---|---|
+| `send_messages` | `true` | `sendMessage` for every message without attachments |
+| `send_media` | `true` | `sendMessage` when any attachment kind is `image`/`video` |
+| `send_files` | `true` | `sendMessage` for `file` (and `music`) attachments |
+| `send_voice` | `true` | `sendMessage` for a voice attachment / `type: voice` |
+| `send_links` | `true` | `sendMessage` when the text contains a link |
+| `add_members` | `false` | `POST /chats/:chatId/members` + `GET /chats/:chatId/add-members/lookup` (regular members, effective override applied); legacy `POST /chats/manage/:groupId/add/:userPhone` |
+| `invite_via_link` | `true` | invite-link list/create for regular members |
+| `pin_messages` | `false` | `pinMessage` **and** `unpinMessage` |
+| `edit_own_messages` | `true` | `editMessage` (own message only) |
+| `delete_own_messages` | `true` | `deleteMessage` (own message only) |
+
+Checks run server-side before the operation is accepted; a raw Socket.IO call
+cannot bypass them. Unknown/partial stored objects are normalized with these
+defaults on read.
+
+### `GET /chats/:chatId/member-permissions`
+
+Any non-banned member (clients need the policy to render their own controls):
+
+```json
+{
+  "chatId": 42,
+  "permissions": {
+    "send_messages": true,
+    "send_media": true,
+    "send_files": true,
+    "send_voice": true,
+    "send_links": true,
+    "add_members": false,
+    "invite_via_link": true,
+    "pin_messages": false,
+    "edit_own_messages": true,
+    "delete_own_messages": true
+  },
+  "canEdit": true
+}
+```
+
+### `PATCH /chats/:chatId/member-permissions`
+
+Owner, or an admin with `manage_permissions`. Partial body; every present key
+must be a boolean. Unknown keys are rejected by the global `ValidationPipe`
+(`forbidNonWhitelisted`), then re-validated in the service.
+
+```json
+{ "send_links": false, "add_members": true }
+```
+
+- Locks the chat row (`FOR UPDATE`), re-checks the caller's role/grants under
+the lock, merges field-wise and writes only when something changed.
+- Response: the complete updated object plus `changed`; an identical patch is
+  `changed: false` and writes/notifies nothing.
+- 400: empty/non-object body, unknown key, non-boolean value, private chat.
+- 403: not a member, banned, regular member, admin without `manage_permissions`.
+
+```json
+{
+  "chatId": 42,
+  "permissions": { "send_links": false, "add_members": true },
+  "canEdit": true,
+  "changed": true
+}
+```
+
+### Realtime
+
+On a committed change, to `chat:<chatId>`:
+
+| Event | Payload |
+|---|---|
+| `group:member-permissions` | `{ chatId, permissions }` (complete config) |
+| `group:changed` | `{ chatId, reason: 'member_permissions_changed' }` |
+
+Offline clients resync from the GET endpoint on their next join/reconnect; the
+config query is not persisted in the mobile cache, so a stale policy is never
+reused for authorization decisions.
+
+## Individual member overrides
+
+Every regular member can additionally have one optional row of tri-state
+overrides. The group policy stays the default; overrides only change that
+member:
+
+```
+effective(allow)   = true
+effective(deny)    = false
+effective(inherit) = groupDefault
+```
+
+Only `allow`/`deny` keys are stored (`chat_member_permission_overrides`);
+`inherit` keys are omitted and the row is deleted when no explicit key
+remains, so inheriting never creates records. Owners and admins cannot be
+targeted: their power comes from the role/admin-grant hierarchy, which this
+feature never bypasses. A regular member can never edit overrides (not even
+their own).
+
+### `GET /chats/:chatId/members/:memberId/permission-overrides`
+
+Any non-banned member (the target must be a regular member; 409 otherwise):
+
+```json
+{
+  "chatId": 42,
+  "memberId": 17,
+  "userId": 9,
+  "role": "member",
+  "groupPermissions": { "send_files": true, "add_members": false },
+  "overrides": {
+    "send_messages": "inherit",
+    "send_media": "inherit",
+    "send_files": "deny",
+    "send_voice": "inherit",
+    "send_links": "inherit",
+    "add_members": "allow",
+    "invite_via_link": "inherit",
+    "pin_messages": "inherit",
+    "edit_own_messages": "inherit",
+    "delete_own_messages": "inherit"
+  },
+  "effective": { "send_files": false, "add_members": true },
+  "canEdit": true
+}
+```
+
+`overrides` always contains every key (`inherit` when unset); `effective` is
+the resolved boolean config enforced by the backend.
+
+### `PATCH /chats/:chatId/members/:memberId/permission-overrides`
+
+Owner, or an admin with `manage_permissions`. Partial body; values are exactly
+`"inherit" | "allow" | "deny"`. `inherit` resets that single key.
+
+```json
+{ "send_files": "deny", "add_members": "allow" }
+```
+
+- Locks the chat row, then the caller and target membership rows, and
+  re-checks authorization/role inside the transaction.
+- Field-wise merge; only explicit keys are stored. Returns the full response
+  above plus `changed`; an identical patch writes/notifies nothing.
+- 400: empty/non-object body, unknown key, invalid state, private chat.
+- 403: not a member, banned, regular member, admin without `manage_permissions`.
+- 409: target is the owner, an admin, or banned.
+
+### `DELETE /chats/:chatId/members/:memberId/permission-overrides`
+
+Same authorization; removes the row and returns the response above with every
+override back to `inherit` (and `changed: false` when there was no row).
+
+### Realtime
+
+On a committed change, `chat:<chatId>` **and** the affected `user:<userId>`
+room receive:
+
+| Event | Payload |
+|---|---|
+| `group:member-permission-overrides` | `{ chatId, userId, overrides, effective }` |
+| `group:changed` | `{ chatId, reason: 'member_permission_overrides_changed', userId }` |
+
+Offline clients resync from the GET endpoint; enforcement always reads the
+current database state, so a stale client cannot act on an old permission.
+
 ## Realtime
 
 After commit (never blocking the response):
 
 | Event | Room | Payload |
 |---|---|---|
-| `group:changed` | `chat:<chatId>` | `{ chatId, reason: 'role_changed' \| 'member_removed' \| 'member_banned' \| 'permissions_changed' \| 'info_changed' \| 'avatars_changed', userId }` |
+| `group:changed` | `chat:<chatId>` | `{ chatId, reason: 'member_promoted' \| 'member_demoted' \| 'role_changed' \| 'member_removed' \| 'member_banned' \| 'permissions_changed' \| 'member_permissions_changed' \| 'member_permission_overrides_changed' \| 'info_changed' \| 'avatars_changed', userId }` |
 | `group:updated` | every member's `user:<userId>` | `{ chatId, title, avatars }` after a committed info/photo change (FULL photo array, current first) |
 | `group:removed` | `user:<userId>` | `{ chatId, reason: 'kicked' \| 'banned' }` |
 | `chat:members` | `chat:<chatId>` | `{ chatId, membersCount }` after removal or ban |
 
 A committed permission save emits `group:changed` with
-`reason: 'permissions_changed'` and the target `userId`; it is sent after commit
-and never blocks the HTTP response.
+`reason: 'permissions_changed'`; a promotion emits `member_promoted` and a
+demotion `member_demoted` (both with the target `userId`). They are sent after
+commit and never block the HTTP response; the affected admin's app refetches
+`GET /chats/:chatId/group` so its capabilities change live.
 
 For a removed user every socket of that user leaves `chat:<chatId>`, its
 `data.chatId` is cleared, `typing:stop` is emitted once and the room's online
@@ -443,9 +766,9 @@ executed by this change.
 ## Invite links (group settings)
 
 Owner/admin only management, plus an authenticated preview/join pair so links
-actually work. Capability: `GET /chats/:chatId/group` now also returns
-`capabilities.canManageInviteLinks` (true for `manager` and every `admin`,
-false for members, banned users and outsiders). Every manage call re-checks the
+actually work. Capability: `GET /chats/:chatId/group` returns `capabilities.canManageInvites`
+(and the kept alias `canManageInviteLinks`), true for the owner and an admin
+holding `manage_invites` or `all`. Every manage call re-checks the
 caller, group type and ban state inside the transaction.
 
 ### Manage endpoints (30 requests/minute per user)

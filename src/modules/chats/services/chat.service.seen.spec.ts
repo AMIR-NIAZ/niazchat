@@ -17,6 +17,8 @@ interface MockOptions {
     messageExists?: boolean;
     txRows?: SeenRow[];
     mySeenMax?: number | null;
+    /** Caller's one-sided "delete chat for me" boundary. */
+    clearedBeforeId?: number | null;
 }
 
 function queryBuilder(raw: { max: number | null }) {
@@ -67,6 +69,12 @@ function makeService(options: MockOptions = {}) {
                 { chatId: '2', count: '0' },
             ]),
         ),
+        findOne: jest.fn(() =>
+            Promise.resolve({
+                id: 1,
+                clearedBeforeId: options.clearedBeforeId ?? null,
+            }),
+        ),
     };
 
     const service = new ChatService(
@@ -78,6 +86,7 @@ function makeService(options: MockOptions = {}) {
         {} as never,
         {} as never,
         {} as never,
+        { blockersOfViewer: () => Promise.resolve(new Set<number>()) } as never,
     );
 
     return { service, seenRepo, txRepo, messageRepo, memberRepo };
@@ -134,6 +143,22 @@ describe('ChatService.markSeen', () => {
             service.markSeen(1 as never, 2 as never, 40),
         ).rejects.toBeInstanceOf(BadRequestException);
         expect(seenRepo.manager.transaction).not.toHaveBeenCalled();
+    });
+
+    it('refuses to advance a position behind a delete-for-me boundary', async () => {
+        const { service, txRepo, messageRepo } = makeService({
+            latestId: 80,
+            clearedBeforeId: 60,
+            txRows: [],
+        });
+
+        // A stale client still sees old message ids; they are no longer visible,
+        // so the receipt must neither resurrect them nor move backwards.
+        await expect(
+            service.markSeen(1 as never, 2 as never, 40),
+        ).resolves.toEqual({ lastSeenId: 60, changed: false });
+        expect(messageRepo.exists).not.toHaveBeenCalled();
+        expect(txRepo.save).not.toHaveBeenCalled();
     });
 
     it('treats an empty chat as a no-op (acks 0)', async () => {

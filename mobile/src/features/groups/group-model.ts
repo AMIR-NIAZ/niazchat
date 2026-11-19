@@ -9,8 +9,28 @@ import {
     Link,
     LucideIcon,
     PencilSparkles,
+    Shield,
+    ShieldCheck,
+    UserPlus,
     UserX,
-} from "lucide-react-native";
+} from 'lucide-react-native';
+import {
+    GROUP_PERMISSIONS,
+    PERMISSION_META,
+    hasPermission,
+    permissionSetEquals,
+    togglePermissionSelection,
+} from './permissions';
+import type {
+    GroupMemberPermissionKey,
+    GroupPermissionKey,
+    MemberPermissionOverrideMap,
+} from './permissions';
+
+export type {
+    MemberPermissionOverrideMap,
+    MemberPermissionOverrideState,
+} from './permissions';
 
 export type GroupRole = 'owner' | 'admin' | 'member';
 
@@ -22,23 +42,26 @@ export interface GroupMemberActions {
     canEditPermissions: boolean;
     /** Owner (members/admins) or admin with `ban_user`/`all` (members). */
     canBan: boolean;
+    /** Owner, or admin with `manage_permissions`, viewing a regular member. */
+    canManageMemberPermissions?: boolean;
 }
 
 export type GroupMemberAction =
     | 'permissions'
+    | 'member-permissions'
     | 'promote'
     | 'demote'
     | 'remove'
     | 'ban';
 
-export type MemberPermissionKey =
-    | 'ban_user'
-    | 'delete_message'
-    | 'change_info_chat';
+export type MemberPermissionKey = GroupPermissionKey;
 
 export interface MemberPermissionOption {
     key: MemberPermissionKey;
     label: string;
+    active?: boolean;
+    description?: string;
+    implies?: MemberPermissionKey[];
 }
 
 export interface MemberPermissions {
@@ -48,11 +71,15 @@ export interface MemberPermissions {
     available: MemberPermissionOption[];
     granted: MemberPermissionKey[];
     hasAll: boolean;
+    /** Keys the caller may itself grant (owner: all 12). */
+    grantable: MemberPermissionKey[];
+    promotedById: number | null;
 }
 
 export interface MemberPermissionsUpdate {
     memberId: number;
     granted: MemberPermissionKey[];
+    hasAll: boolean;
     changed: boolean;
 }
 
@@ -64,13 +91,74 @@ export interface GroupOwner {
 
 export interface GroupCapabilities {
     canEditInfo: boolean;
+    /** Alias kept for older payloads; mirrors `canManageInvites`. */
     canManageInviteLinks: boolean;
-    /** Owner, or an admin with `ban_user`/`all`: banned list + unban. */
+    canManageInvites?: boolean;
+    /** `ban_users`: banned list + unban + ban. */
     canManageBans?: boolean;
+    canRemoveMembers?: boolean;
+    canManageMembers?: boolean;
+    canDeleteOthersMessages?: boolean;
+    canPinMessages?: boolean;
+    canManageAdmins?: boolean;
+    canManagePermissions?: boolean;
+    canRestrictMembers?: boolean;
+    canManageVoiceChats?: boolean;
+    /** Owner, or admin with `manage_permissions`: edit member permissions. */
+    canManageMemberPermissions?: boolean;
+    /** Owner/admin with `manage_members`, or a member with `add_members`. */
+    canAddMembers?: boolean;
+    /** Owner/admin with `manage_invites`, or a member with `invite_via_link`. */
+    canInviteViaLink?: boolean;
+}
+
+// ── group-wide MEMBER permission policy ───────────────────────────────────
+
+export type GroupMemberPermissionsConfig = Record<
+    GroupMemberPermissionKey,
+    boolean
+>;
+
+export interface GroupMemberPermissionsResponse {
+    chatId: number;
+    permissions: GroupMemberPermissionsConfig;
+    /** The caller may edit the policy (owner / admin with `manage_permissions`). */
+    canEdit: boolean;
+}
+
+export interface GroupMemberPermissionsUpdateResponse extends GroupMemberPermissionsResponse {
+    changed: boolean;
+}
+
+// ── individual member overrides ───────────────────────────────────────────
+
+export interface MemberPermissionOverridesResponse {
+    chatId: number;
+    memberId: number;
+    userId: number;
+    role: 'member';
+    /** Group defaults the overrides inherit from. */
+    groupPermissions: GroupMemberPermissionsConfig;
+    /** Complete tri-state map; `inherit` fills unset keys. */
+    overrides: MemberPermissionOverrideMap;
+    /** `overrides ?? groupDefaults` resolved by the server. */
+    effective: GroupMemberPermissionsConfig;
+    canEdit: boolean;
+}
+
+export interface MemberPermissionOverridesUpdateResponse extends MemberPermissionOverridesResponse {
+    changed: boolean;
 }
 
 export function canManageBans(capabilities: GroupCapabilities): boolean {
     return capabilities.canManageBans === true;
+}
+
+export function canManageInvites(capabilities: GroupCapabilities): boolean {
+    return (
+        capabilities.canManageInvites === true ||
+        capabilities.canManageInviteLinks === true
+    );
 }
 
 export interface GroupInfo {
@@ -98,8 +186,14 @@ export interface GroupMember {
     isOnline: boolean;
     lastSeen: string | null;
     role: GroupRole;
+    /** Normalized grant set of an admin (empty for members/owner). */
+    permissions: MemberPermissionKey[];
+    /** Who promoted this admin (`null` for legacy/owner/member rows). */
+    promotedById: number | null;
     actions: GroupMemberActions;
-}export interface GroupMemberPage {
+}
+
+export interface GroupMemberPage {
     items: GroupMember[];
     nextCursor: string | null;
 }
@@ -121,7 +215,42 @@ export interface GroupBannedPage {
     nextCursor: string | null;
 }
 
- export interface MemberActionResponse {
+// ── add members ───────────────────────────────────────────────────────────
+
+export interface AddedGroupMember {
+    memberId: number;
+    userId: number;
+    name: string;
+    username: string | null;
+    avatars: string[];
+    role: 'member';
+}
+
+export type AddMemberFailureCode =
+    | 'not_found'
+    | 'already_member'
+    | 'banned'
+    | 'blocked';
+
+export interface AddMemberFailure {
+    userId: number;
+    code: AddMemberFailureCode;
+    message: string;
+}
+
+export interface AddMembersResult {
+    added: AddedGroupMember[];
+    failed: AddMemberFailure[];
+    membersCount: number;
+}
+
+export function groupMemberIdsQueryKey(
+    chatId: number,
+): readonly [string, number, string] {
+    return ['group', chatId, 'member-ids'] as const;
+}
+
+export interface MemberActionResponse {
     memberId: number;
     /** null after removal. */
     role: GroupRole | null;
@@ -212,11 +341,27 @@ export function memberPermissionsPrefix(
     return ['group', chatId, 'permissions'] as const;
 }
 
-const PERMISSION_KEYS: readonly MemberPermissionKey[] = [
-    'ban_user',
-    'delete_message',
-    'change_info_chat',
-];
+export function memberPermissionOverridesQueryKey(
+    chatId: number,
+    memberId: number,
+): readonly [string, number, string, number] {
+    return ['group', chatId, 'permission-overrides', memberId] as const;
+}
+
+export function memberPermissionOverridesPrefix(
+    chatId: number,
+): readonly [string, number, string] {
+    return ['group', chatId, 'permission-overrides'] as const;
+}
+
+/** The group-wide member policy (separate from per-admin grants). */
+export function groupMemberPermissionsQueryKey(
+    chatId: number,
+): readonly [string, number, string] {
+    return ['group', chatId, 'member-permissions'] as const;
+}
+
+const PERMISSION_KEYS: readonly MemberPermissionKey[] = GROUP_PERMISSIONS;
 
 export function isMemberPermissionKey(
     value: unknown,
@@ -228,36 +373,118 @@ export function isMemberPermissionKey(
 }
 
 export function permissionDescription(key: MemberPermissionKey): string {
-    switch (key) {
-        case 'ban_user':
-            return 'can remove regular members from the group';
-        case 'delete_message':
-            return "can delete other members' messages";
-        case 'change_info_chat':
-            return "can change the group's title and photo";
-    }
+    return PERMISSION_META[key].description;
 }
 
-export function permissionSetEquals(
-    left: readonly MemberPermissionKey[],
-    right: readonly MemberPermissionKey[],
+export { permissionSetEquals, togglePermissionSelection };
+export { permissionSummary } from './permissions';
+
+// ── pure member action helpers (mirror the backend contract) ──────────────
+
+export interface MemberActionCaller {
+    role: GroupRole;
+    permissions: readonly MemberPermissionKey[];
+    userId: number | null;
+}
+
+export interface MemberActionTarget {
+    role: GroupRole;
+    promotedById?: number | null;
+}
+
+function callerHas(
+    caller: MemberActionCaller,
+    key: GroupPermissionKey,
 ): boolean {
-    const a = new Set(left);
-    const b = new Set(right);
-    if (a.size !== b.size) return false;
-    for (const value of a) {
-        if (!b.has(value)) return false;
-    }
-    return true;
+    return hasPermission(caller.role, caller.permissions, key);
 }
 
-export function togglePermissionSelection(
-    current: readonly MemberPermissionKey[],
-    key: MemberPermissionKey,
-): MemberPermissionKey[] {
-    return current.includes(key)
-        ? current.filter((value) => value !== key)
-        : [...current, key];
+function promotedByCaller(
+    caller: MemberActionCaller,
+    target: MemberActionTarget,
+): boolean {
+    return (
+        caller.userId !== null &&
+        target.promotedById !== null &&
+        target.promotedById !== undefined &&
+        Number(target.promotedById) === Number(caller.userId)
+    );
+}
+
+export function canPromote(
+    caller: MemberActionCaller,
+    target: MemberActionTarget,
+): boolean {
+    if (target.role !== 'member') return false;
+    return caller.role === 'owner' || callerHas(caller, 'manage_admins');
+}
+
+export function canDemote(
+    caller: MemberActionCaller,
+    target: MemberActionTarget,
+): boolean {
+    if (target.role !== 'admin') return false;
+    if (caller.role === 'owner') return true;
+    return (
+        callerHas(caller, 'manage_admins') && promotedByCaller(caller, target)
+    );
+}
+
+export function canEditPermissions(
+    caller: MemberActionCaller,
+    target: MemberActionTarget,
+): boolean {
+    if (target.role !== 'admin') return false;
+    if (caller.role === 'owner') return true;
+    return (
+        callerHas(caller, 'manage_permissions') &&
+        promotedByCaller(caller, target)
+    );
+}
+
+export function canRemove(
+    caller: MemberActionCaller,
+    target: MemberActionTarget,
+): boolean {
+    if (target.role === 'owner') return false;
+    if (caller.role === 'owner') return true;
+    return target.role === 'member' && callerHas(caller, 'remove_members');
+}
+
+export function canBan(
+    caller: MemberActionCaller,
+    target: MemberActionTarget,
+): boolean {
+    if (target.role === 'owner') return false;
+    if (caller.role === 'owner') return true;
+    return target.role === 'member' && callerHas(caller, 'ban_users');
+}
+
+/** Individual overrides exist for regular members only (mirrors server). */
+export function canManageMemberPermissionsFor(
+    caller: MemberActionCaller,
+    target: MemberActionTarget,
+): boolean {
+    if (target.role !== 'member') return false;
+    if (caller.role === 'owner') return true;
+    return caller.role === 'admin' && callerHas(caller, 'manage_permissions');
+}
+
+export function memberActionsFor(
+    caller: MemberActionCaller,
+    target: MemberActionTarget,
+): GroupMemberActions {
+    return {
+        canPromote: canPromote(caller, target),
+        canDemote: canDemote(caller, target),
+        canRemove: canRemove(caller, target),
+        canEditPermissions: canEditPermissions(caller, target),
+        canBan: canBan(caller, target),
+        canManageMemberPermissions: canManageMemberPermissionsFor(
+            caller,
+            target,
+        ),
+    };
 }
 
 /** Only permitted actions, in menu order. */
@@ -266,6 +493,9 @@ export function visibleMemberActions(
 ): GroupMemberAction[] {
     const visible: GroupMemberAction[] = [];
     if (actions.canEditPermissions) visible.push('permissions');
+    if (actions.canManageMemberPermissions === true) {
+        visible.push('member-permissions');
+    }
     if (actions.canPromote) visible.push('promote');
     if (actions.canDemote) visible.push('demote');
     if (actions.canRemove) visible.push('remove');
@@ -281,6 +511,8 @@ export function memberActionLabel(action: GroupMemberAction): string {
     switch (action) {
         case 'permissions':
             return 'Edit permissions';
+        case 'member-permissions':
+            return 'Manage permissions';
         case 'promote':
             return 'Make admin';
         case 'demote':
@@ -356,7 +588,14 @@ export function canOpenGroupSettings(
 }
 
 export interface GroupSettingsFeature {
-    key: 'group_info' | 'invite_links' | 'banned-users';
+    key:
+        | 'group_info'
+        | 'invite_links'
+        | 'banned-users'
+        | 'members'
+        | 'admins'
+        | 'member_permissions'
+        | 'add_members';
     title: string;
     subtitle: string;
     icon: LucideIcon;
@@ -375,17 +614,24 @@ export const GROUP_SETTINGS_FEATURES: readonly GroupSettingsFeature[] = [
         title: 'Group info',
         subtitle: 'Name, photo and description',
         icon: PencilSparkles,
-        visible: (capabilities): boolean =>
-            capabilities.canEditInfo === true,
+        visible: (capabilities): boolean => capabilities.canEditInfo === true,
         route: (chatId: number): string => `/group-settings/${chatId}/info`,
+    },
+    {
+        key: 'add_members',
+        title: 'Add members',
+        subtitle: 'Add people from your contacts',
+        icon: UserPlus,
+        visible: (capabilities): boolean => capabilities.canAddMembers === true,
+        route: (chatId: number): string =>
+            `/group-settings/${chatId}/add-members`,
     },
     {
         key: 'invite_links',
         title: 'Invite links',
         subtitle: 'Create and manage links to join this group',
         icon: Link,
-        visible: (capabilities): boolean =>
-            capabilities.canManageInviteLinks === true,
+        visible: canManageInvites,
         route: (chatId: number): string =>
             `/group-settings/${chatId}/invite-links`,
     },
@@ -395,8 +641,36 @@ export const GROUP_SETTINGS_FEATURES: readonly GroupSettingsFeature[] = [
         subtitle: 'See who is banned and unban them',
         icon: UserX,
         visible: canManageBans,
+        route: (chatId: number): string => `/group-settings/${chatId}/banned`,
+    },
+    {
+        key: 'members',
+        title: 'Members',
+        subtitle: 'Add people and manage the member list',
+        icon: UserX,
+        visible: (capabilities): boolean =>
+            capabilities.canManageMembers === true,
+        route: (chatId: number): string => `/group/${chatId}`,
+    },
+    {
+        key: 'admins',
+        title: 'Admins & permissions',
+        subtitle: 'Promote admins and edit what they can do',
+        icon: Shield,
+        visible: (capabilities): boolean =>
+            capabilities.canManageAdmins === true ||
+            capabilities.canManagePermissions === true,
+        route: (chatId: number): string => `/group/${chatId}`,
+    },
+    {
+        key: 'member_permissions',
+        title: 'Member permissions',
+        subtitle: 'Choose what regular members can do in this group',
+        icon: ShieldCheck,
+        visible: (capabilities): boolean =>
+            capabilities.canManageMemberPermissions === true,
         route: (chatId: number): string =>
-            `/group-settings/${chatId}/banned`,
+            `/group-settings/${chatId}/member-permissions`,
     },
 ];
 

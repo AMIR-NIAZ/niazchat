@@ -66,6 +66,10 @@ export interface MessageDto {
     updatedAt: string;
     isEdited: boolean;
     isDeleted: boolean;
+    /** True while this message is pinned in its chat (multiple allowed). */
+    isPinned?: boolean;
+    /** ISO timestamp of the pin, newest first; null when unpinned. */
+    pinnedAt?: string | null;
     /** Raw FK, not the enum string. */
     typeId: number;
     type: {
@@ -167,6 +171,15 @@ export interface DeleteMessagePayloadDto {
     messageId: number;
     chatId: number;
 }
+
+/** `pinMessage` / `unpinMessage` client → server payload (`PinMessageDto`). */
+export interface PinMessagePayloadDto {
+    messageId: number;
+    chatId: number;
+}
+
+/** `getPinnedMessages` ack data: the chat's pinned messages, newest pin first. */
+export type PinnedMessagesDto = MessageDto[];
 
 /** `forwardMessages` client → server payload. */
 export interface ForwardMessagesPayloadDto {

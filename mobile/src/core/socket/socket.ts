@@ -41,6 +41,14 @@ export interface ServerToClientEvents {
     'sendMessage:list': (message: MessageDto) => void;
     'editMessage:list': (message: MessageDto) => void;
     'deleteMessage:list': (messageId: number) => void;
+    'pinMessage:list': (payload: {
+        chatId: number;
+        message: MessageDto;
+    }) => void;
+    'unpinMessage:list': (payload: {
+        chatId: number;
+        messageId: number;
+    }) => void;
     'reaction:updated': (snapshot: ReactionSnapshotDto) => void;
     'chatlist:updated': (update: ChatListUpdateDto) => void;
     seen: (payload: {
@@ -52,6 +60,23 @@ export interface ServerToClientEvents {
     'chat:read': (payload: { chatId: number; unreadCount: number }) => void;
     /** Live non-banned member count after a membership change. */
     'chat:members': (payload: { chatId: number; membersCount: number }) => void;
+    /**
+     * Directional block state of a private chat changed. Delivered only to the
+     * caller's own devices; the blocked user is never notified.
+     */
+    'chat:blocked': (payload: {
+        chatId: number;
+        blockedByMe: boolean;
+        blockedMe: boolean;
+        blocked: boolean;
+    }) => void;
+    /** "Delete for me" committed: caller's other devices drop the row. */
+    'chat:removed': (payload: {
+        chatId: number;
+        reason: 'deleted_for_me';
+    }) => void;
+    /** "Delete for both" committed: both participants' devices drop the row. */
+    'chat:deleted': (payload: { chatId: number }) => void;
     /** Role change / removal committed in a group the caller belongs to. */
     'group:changed': (payload: {
         chatId: number;
@@ -61,8 +86,22 @@ export interface ServerToClientEvents {
             | 'permissions_changed'
             | 'info_changed'
             | 'invite_links_changed'
-            | 'member_joined';
+            | 'member_joined'
+            | 'member_permissions_changed'
+            | 'member_permission_overrides_changed';
         userId?: number;
+    }) => void;
+    /** Group member policy changed (full validated config). */
+    'group:member-permissions': (payload: {
+        chatId: number;
+        permissions: Record<string, boolean>;
+    }) => void;
+    /** One member's tri-state overrides + resolved effective config changed. */
+    'group:member-permission-overrides': (payload: {
+        chatId: number;
+        userId: number;
+        overrides: Record<string, 'inherit' | 'allow' | 'deny'>;
+        effective: Record<string, boolean>;
     }) => void;
     /** The caller was added to a group (invite link join). */
     'group:added': (payload: { chatId: number }) => void;
@@ -137,6 +176,15 @@ export interface ClientToServerEvents {
         payload: DeleteMessageSocketPayload,
         ack: SocketAckHandler,
     ) => void;
+    pinMessage: (
+        payload: PinMessageSocketPayload,
+        ack: SocketAckHandler,
+    ) => void;
+    unpinMessage: (
+        payload: PinMessageSocketPayload,
+        ack: SocketAckHandler,
+    ) => void;
+    getPinnedMessages: (payload: ChatIdPayload, ack: SocketAckHandler) => void;
     getMessages: (
         payload: GetMessagesSocketPayload,
         ack: SocketAckHandler,
@@ -182,6 +230,11 @@ export interface EditMessageSocketPayload {
 }
 
 export interface DeleteMessageSocketPayload {
+    messageId: number;
+    chatId: number;
+}
+
+export interface PinMessageSocketPayload {
     messageId: number;
     chatId: number;
 }

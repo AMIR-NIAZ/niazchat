@@ -38,7 +38,9 @@ import {
     typography,
 } from '../../../shared/components';
 import { EdgeFadeView, FADE_EXTRA } from '../../../shared/edge-fade';
-import { useSocketConnectionState } from '../../../core/socket';
+import { useSocketConnectionState, useSocketEvent } from '../../../core/socket';
+import { ApiError } from '../../../core/api';
+import { deleteLocalChatMessages } from '../../../shared/local-db';
 import type { ReactionUserDto } from '../../../core/api';
 import {
     MUSIC_BAR_LIFT,
@@ -58,6 +60,8 @@ import {
     MessageBubblePreview,
     MessageComposer,
     MessageReactionsCard,
+    PinnedMessageBanner,
+    messagesQueryKey,
     ScrollToBottomButton,
     ServiceMessagePill,
     UnreadDivider,
@@ -85,8 +89,10 @@ import {
     toReplyPreview,
     toggleForwardSelection,
 } from '../../../features/messages';
+import { hasPermission } from '../../../features/groups/permissions';
 import type {
     ChatMessage,
+    ConversationDetail,
     MessageMenuActionId,
 } from '../../../features/messages';
 import type { LocalAttachment } from '../../../features/attachments';
@@ -100,19 +106,19 @@ import {
     shareLocalFile,
 } from '../../../features/attachments';
 import {
+    blockChatPeer,
     getChatDisplay,
     isGroupOwner,
     isPrivateChat,
     purgeChatFromCaches,
     setActiveChat,
+    unblockChatPeer,
     useLeaveChatRoomOnUnmount,
 } from '../../../features/chats';
 import type { ChatRole } from '../../../features/chats';
 import { useCurrentUserId } from '../../../features/auth';
 import {
-    canOpenGroupSettings,
     openMessageLink,
-    useGroupInfo,
     useGroupRemovedEvent,
     useGroupUpdatedEvents,
 } from '../../../features/groups';
@@ -267,16 +273,21 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     // Server `type` is the single source of truth; unknown/missing = group.
     const isPrivate = info !== null && isPrivateChat(info);
     const isGroup = !isPrivate;
-    // The gear is rendered only after the server says the caller is owner or
-    // admin (group info is fetched once per group chat, hidden while unknown).
-    const groupInfoQuery = useGroupInfo(isGroup && info !== null ? chatId : 0);
     useGroupUpdatedEvents();
-    const settingsVisible =
-        isGroup && canOpenGroupSettings(groupInfoQuery.data?.myRole ?? null);
     const typing = useTypingEmitter(chatId, info !== null);
     const typingUsers = useTypingUsers(chatId, info !== null, currentUserId);
-    /** Peer target for the header tap (private chats only). */
-    const peerUserId = isPrivate ? (info?.peer?.id ?? null) : null;
+    /**
+     * Peer target for the header tap and presence (private chats only). A
+     * legacy payload without `peer` still knows the participant from the
+     * messages, so the header stays tappable instead of silently dead.
+     */
+    const peerUserId = isPrivate
+        ? (info?.peer?.id ??
+          messages.find(
+              (message) => !isOwnMessage(currentUserId, message.senderId),
+          )?.senderId ??
+          null)
+        : null;
     // Presence refresh without new socket events: the public profile is
     // refetched every 30 s while this screen is focused and the app active,
     // plus once on every return to the foreground.
@@ -300,6 +311,36 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     const myRole: ChatRole | null = info?.myRole ?? null;
     /** `manager` only — chat `admin` is NOT the owner. */
     const isOwner = isGroupOwner(myRole);
+    /**
+     * Pin eligibility, mirroring the backend rule exactly: private chats →
+     * either participant; groups → owner always, admins/members only with the
+     * explicit `pin_message` grant (or `all`).
+     */
+    const canPinMessages =
+        isPrivate ||
+        isOwner ||
+        hasPermission(
+            myRole === 'admin' ? 'admin' : 'member',
+            info?.myPermissions ?? [],
+            'pin_messages',
+        );
+    /**
+     * Other people's messages are deletable only with
+     * `delete_other_messages` (directly or via `manage_messages`/`all`). Own
+     * messages are always deletable; the server re-checks every request.
+     */
+    const canDeleteOthersMessages =
+        isGroup &&
+        hasPermission(
+            isOwner ? 'owner' : myRole === 'admin' ? 'admin' : 'member',
+            info?.myPermissions ?? [],
+            'delete_other_messages',
+        );
+    const pinnedMessages = detail?.pinnedMessages ?? [];
+    // Directional block state of a private conversation (server-derived).
+    const blockedByMe = isPrivate && info?.blockedByMe === true;
+    const blockedMe = isPrivate && info?.blockedMe === true;
+    const blocked = blockedByMe || blockedMe;
 
     /**
      * Ascending list with day separators and a one-shot unread divider before
@@ -413,6 +454,8 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     const [highlightedKey, setHighlightedKey] = useState<string | null>(null);
     const [jumpLoadingId, setJumpLoadingId] = useState<number | null>(null);
     const [jumpNotice, setJumpNotice] = useState<string | null>(null);
+    const [pinnedCursor, setPinnedCursor] = useState(0);
+    const [pinnedBannerHidden, setPinnedBannerHidden] = useState(false);
 
     /** Visual (inverted) order: newest first, day separators included. */
     const reversedListData = useMemo<List[]>(() => {
@@ -465,6 +508,8 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         setSelecting(false);
         setSelectedIds(new Set());
         setForwardOpen(false);
+        setPinnedCursor(0);
+        setPinnedBannerHidden(false);
         setHighestVisibleId(null);
         setReadTrackingReady(false);
         readTrackingReadyRef.current = false;
@@ -476,6 +521,20 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         userScrollingRef.current = false;
         lastNewestIdRef.current = null;
     }, [chatId]);
+
+    // The banner cursor follows the pinned list: a pin/unpin resets it to the
+    // newest pin (and re-shows a banner the user hid for the previous state).
+    const pinnedKey = pinnedMessages
+        .map((message) => message.id ?? message.key)
+        .join(',');
+    const previousPinnedKeyRef = useRef(pinnedKey);
+    useEffect((): void => {
+        if (previousPinnedKeyRef.current !== pinnedKey) {
+            previousPinnedKeyRef.current = pinnedKey;
+            setPinnedCursor(0);
+            setPinnedBannerHidden(false);
+        }
+    }, [pinnedKey]);
 
     // Live arrival/deletion never invalidates the id-based selection: only ids
     // that were actually deleted disappear from it.
@@ -869,6 +928,60 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
             });
     };
 
+    /**
+     * Banner tap: jump to the shown pinned message, paging backwards when it is
+     * older than the loaded history. The cursor advances so a second tap opens
+     * the next pinned message (multiple pins are supported).
+     */
+    const handlePinnedPress = (pinned: ChatMessage): void => {
+        const messageId = pinned.id;
+        if (messageId === null) {
+            return;
+        }
+        setPinnedCursor((current) =>
+            pinnedMessages.length === 0
+                ? 0
+                : (current + 1) % pinnedMessages.length,
+        );
+
+        cancelJump();
+        if (messages.some((message) => message.id === messageId)) {
+            performJump(messageId);
+            return;
+        }
+        if (detail === null || !detail.hasMore) {
+            showJumpNotice('This pinned message is no longer available');
+            return;
+        }
+
+        const controller = new AbortController();
+        jumpAbortRef.current = controller;
+        jumpInProgressRef.current = true;
+        setJumpLoadingId(messageId);
+        void conversation
+            .ensureMessageLoaded(messageId, {
+                maxPages: JUMP_MAX_PAGES,
+                signal: controller.signal,
+            })
+            .then((outcome): void => {
+                if (controller.signal.aborted) {
+                    return;
+                }
+                jumpAbortRef.current = null;
+                if (outcome === 'found') {
+                    performJump(messageId);
+                    return;
+                }
+                jumpInProgressRef.current = false;
+                setJumpLoadingId(null);
+                if (outcome === 'not_found') {
+                    showJumpNotice(
+                        'This pinned message is no longer available',
+                    );
+                }
+            });
+    };
+
     const handleSend = (
         content: string,
         attachments: LocalAttachment[] = [],
@@ -1061,6 +1174,44 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
             });
     };
 
+    /** Pin/unpin confirmation + server request. The dialog owns the wait. */
+    const pinMessageAction = (target: ChatMessage): void => {
+        const messageId = target.id;
+        if (messageId === null || conversation.pinningIds.has(messageId)) {
+            return;
+        }
+        const pinned = target.isPinned;
+        void dialog
+            .confirm({
+                title: pinned ? 'Unpin message?' : 'Pin message?',
+                message: pinned
+                    ? 'This message will be removed from the pinned banner for everyone in this chat.'
+                    : 'This message will be pinned at the top of the chat for everyone.',
+                confirmText: pinned ? 'Unpin' : 'Pin',
+                tone: 'info',
+            })
+            .then((confirmed): void => {
+                if (!confirmed) {
+                    return;
+                }
+                const request = pinned
+                    ? conversation.unpin(messageId)
+                    : conversation.pin(messageId);
+                void request.catch((error: unknown) =>
+                    dialog.show({
+                        title: pinned
+                            ? 'Could not unpin message'
+                            : 'Could not pin message',
+                        message:
+                            error instanceof Error
+                                ? error.message
+                                : 'Try again in a moment.',
+                        tone: 'danger',
+                    }),
+                );
+            });
+    };
+
     const performMessageAction = (
         target: ChatMessage,
         action: MessageMenuActionId,
@@ -1090,6 +1241,10 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
             case 'delete':
                 deleteMessage(target);
                 return;
+            case 'pin':
+            case 'unpin':
+                pinMessageAction(target);
+                return;
         }
     };
 
@@ -1105,7 +1260,8 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         const mineMessage = isOwnMessage(currentUserId, message.senderId);
         const actions = getMessageActions(message, {
             currentUserId,
-            canDeleteOthers: isGroup && isOwner,
+            canDeleteOthers: canDeleteOthersMessages,
+            canPinMessages,
         });
         const items = buildMessageMenuItems(actions, {
             onReply: (): void => performMessageAction(message, 'reply'),
@@ -1115,6 +1271,8 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
             onShare: (): void => performMessageAction(message, 'share'),
             onEdit: (): void => performMessageAction(message, 'edit'),
             onDelete: (): void => performMessageAction(message, 'delete'),
+            onPin: (): void => performMessageAction(message, 'pin'),
+            onUnpin: (): void => performMessageAction(message, 'unpin'),
         });
         const messageId = message.id;
         const canReact =
@@ -1184,7 +1342,8 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
             canDelete: (message): boolean =>
                 getMessageActions(message, {
                     currentUserId,
-                    canDeleteOthers: isGroup && isOwner,
+                    canDeleteOthers: canDeleteOthersMessages,
+                    canPinMessages,
                 }).delete === true,
         });
     };
@@ -1237,7 +1396,8 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     ): { name: string; label: string }[] => {
         const actions = getMessageActions(message, {
             currentUserId,
-            canDeleteOthers: isGroup && isOwner,
+            canDeleteOthers: canDeleteOthersMessages,
+            canPinMessages,
         });
         return getBubbleAccessibilityActions(
             actions,
@@ -1271,7 +1431,9 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
             name === 'reply' ||
             name === 'forward' ||
             name === 'edit' ||
-            name === 'delete'
+            name === 'delete' ||
+            name === 'pin' ||
+            name === 'unpin'
         ) {
             performMessageAction(message, name);
         }
@@ -1357,15 +1519,151 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         }, 700);
     };
 
-    /** Pushing settings keeps the chat mounted (scroll position + draft). */
-    const settingsNavRef = useRef(false);
-    const openGroupSettings = (): void => {
-        if (settingsNavRef.current) return;
-        settingsNavRef.current = true;
-        router.push(`/(app)/group-settings/${chatId}`);
-        setTimeout((): void => {
-            settingsNavRef.current = false;
-        }, 700);
+    // ── Private-chat unblock (the block/delete actions live in the chat-list
+    // context menu). This is one acked WS request; while it is in flight the
+    // banner action is disabled, so a double tap cannot send a second request.
+    const [privateActionBusy, setPrivateActionBusy] = useState(false);
+    const privateActionBusyRef = useRef(false);
+    /** A deleted chat navigates away exactly once (local ack + socket event). */
+    const chatGoneRef = useRef(false);
+
+    const applyBlockState = useCallback(
+        (nextBlockedByMe: boolean, nextBlockedMe: boolean): void => {
+            queryClient.setQueryData<ConversationDetail>(
+                messagesQueryKey(chatId),
+                (current) =>
+                    current === undefined || current.info === null
+                        ? current
+                        : {
+                              ...current,
+                              info: {
+                                  ...current.info,
+                                  blockedByMe: nextBlockedByMe,
+                                  blockedMe: nextBlockedMe,
+                              },
+                          },
+            );
+        },
+        [chatId, queryClient],
+    );
+
+    const leaveDeletedChat = useCallback(
+        (message: string): void => {
+            if (chatGoneRef.current) {
+                return;
+            }
+            chatGoneRef.current = true;
+            purgeChatFromCaches(queryClient, chatId);
+            // The local SQLite mirror is best-effort (like every local-cache
+            // write); the server purge above is authoritative.
+            if (currentUserId !== null) {
+                void deleteLocalChatMessages(currentUserId, chatId).catch(
+                    (): void => undefined,
+                );
+            }
+            toast.show(message);
+            router.replace('/(app)');
+        },
+        [chatId, currentUserId, queryClient],
+    );
+
+    // A chat deleted for both while this screen was open (or reopened from a
+    // stale deep link) answers 403/404 to `joinChat`: leave it immediately.
+    useEffect((): void => {
+        if (conversation.gone) {
+            leaveDeletedChat('This chat is no longer available');
+            return;
+        }
+        const error = conversation.error;
+        if (
+            error instanceof ApiError &&
+            (error.statusCode === 403 || error.statusCode === 404)
+        ) {
+            leaveDeletedChat('This chat is no longer available');
+        }
+    }, [conversation.gone, conversation.error, leaveDeletedChat]);
+
+    // Block changes made on another device of this user, and deletions from
+    // either participant, arrive through the personal `user:<id>` room.
+    useSocketEvent('chat:blocked', (payload): void => {
+        if (Number(payload.chatId) !== chatId) {
+            return;
+        }
+        applyBlockState(
+            payload.blockedByMe === true,
+            payload.blockedMe === true,
+        );
+    });
+    useSocketEvent('chat:removed', (payload): void => {
+        if (Number(payload.chatId) !== chatId) {
+            return;
+        }
+        leaveDeletedChat('Chat deleted');
+    });
+    useSocketEvent('chat:deleted', (payload): void => {
+        if (Number(payload.chatId) !== chatId) {
+            return;
+        }
+        leaveDeletedChat('This chat was deleted');
+    });
+
+    const runPrivateAction = async (
+        run: () => Promise<void>,
+        errorTitle: string,
+    ): Promise<void> => {
+        if (privateActionBusyRef.current) {
+            return;
+        }
+        privateActionBusyRef.current = true;
+        setPrivateActionBusy(true);
+        try {
+            await run();
+        } catch (error: unknown) {
+            dialog.show({
+                title: errorTitle,
+                message:
+                    error instanceof Error
+                        ? error.message
+                        : 'Try again in a moment.',
+                tone: 'danger',
+            });
+        } finally {
+            privateActionBusyRef.current = false;
+            setPrivateActionBusy(false);
+        }
+    };
+
+    const requestToggleBlock = (): void => {
+        if (info === null || privateActionBusyRef.current) {
+            return;
+        }
+        const willBlock = !blockedByMe;
+        void (async (): Promise<void> => {
+            if (willBlock) {
+                const confirmed = await dialog.confirm({
+                    title: `Block ${name}?`,
+                    message:
+                        'They will no longer be able to send you messages. Existing messages stay, and you can unblock them at any time.',
+                    confirmText: 'Block',
+                    destructive: true,
+                });
+                if (!confirmed) {
+                    return;
+                }
+            }
+            await runPrivateAction(
+                async (): Promise<void> => {
+                    const result = willBlock
+                        ? await blockChatPeer(chatId)
+                        : await unblockChatPeer(chatId);
+                    if (result !== null) {
+                        applyBlockState(result.blockedByMe, result.blockedMe);
+                    }
+                    toast.show(willBlock ? 'User blocked' : 'User unblocked');
+                },
+                willBlock ? 'Could not block user' : 'Could not unblock user',
+            );
+        })();
     };
 
     // ── Stable FlatList identity ────────────────────────────────────────────
@@ -1768,6 +2066,14 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                         )}
                     </GlassHeader>
                 )}
+                {!selecting && !pinnedBannerHidden && (
+                    <PinnedMessageBanner
+                        pinned={pinnedMessages}
+                        index={pinnedCursor}
+                        onPress={handlePinnedPress}
+                        onClose={(): void => setPinnedBannerHidden(true)}
+                    />
+                )}
             </View>
 
             <View
@@ -1962,9 +2268,45 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                     </View>
                 )}
 
+                {blocked && (
+                    <View style={styles.blockedNotice}>
+                        <View style={styles.blockedTextWrap}>
+                            <Text style={styles.blockedTitle}>
+                                {blockedByMe
+                                    ? 'You blocked this user'
+                                    : "You can't send messages"}
+                            </Text>
+                            <Text style={styles.blockedDetail}>
+                                {blockedByMe
+                                    ? 'Unblock to send and receive messages again.'
+                                    : 'Messages can no longer be sent in this conversation.'}
+                            </Text>
+                        </View>
+                        {blockedByMe && (
+                            <Pressable
+                                accessibilityRole="button"
+                                accessibilityLabel="Unblock user"
+                                accessibilityState={{
+                                    disabled: privateActionBusy,
+                                }}
+                                disabled={privateActionBusy}
+                                style={({ pressed }) => [
+                                    styles.blockedActionButton,
+                                    pressed && styles.pressed,
+                                ]}
+                                onPress={requestToggleBlock}
+                            >
+                                <Text style={styles.blockedAction}>
+                                    Unblock
+                                </Text>
+                            </Pressable>
+                        )}
+                    </View>
+                )}
+
                 <MessageComposer
                     chatId={chatId}
-                    disabled={conversation.sending !== null}
+                    disabled={conversation.sending !== null || blocked}
                     onSend={handleSend}
                     replyTo={replyPreview}
                     currentUserId={currentUserId}
@@ -2270,17 +2612,36 @@ const styles = StyleSheet.create({
     },
     backButton: { paddingHorizontal: spacing.xxs, paddingVertical: spacing.xs },
     backText: { color: palette.primary[600], fontSize: 26, fontWeight: '700' },
-    iconButton: {
-        width: 44,
-        height: 44,
+    blockedNotice: {
+        flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
-        borderRadius: radii.full,
+        gap: spacing.sm,
+        marginHorizontal: spacing.xs,
+        marginBottom: spacing.xxs,
+        paddingHorizontal: spacing.sm,
+        paddingVertical: spacing.xs,
+        borderRadius: radii.lg,
+        borderWidth: 1,
+        borderColor: palette.border.subtle,
+        backgroundColor: palette.glass.elevated,
     },
-    gearGlyph: {
-        fontSize: 20,
-        lineHeight: 24,
-        color: palette.neutral[700],
+    blockedTextWrap: { flex: 1, gap: 2 },
+    blockedTitle: {
+        color: palette.text.primary,
+        fontSize: 13,
+        fontWeight: '700',
+    },
+    blockedDetail: { color: palette.text.muted, fontSize: 12 },
+    blockedActionButton: {
+        paddingHorizontal: spacing.sm,
+        paddingVertical: 6,
+        borderRadius: radii.full,
+        backgroundColor: palette.primary[500],
+    },
+    blockedAction: {
+        color: palette.text.onAccent,
+        fontSize: 13,
+        fontWeight: '700',
     },
     chatArea: { flex: 1 },
     list: { flex: 1 },

@@ -18,6 +18,8 @@ export * from './local-chat-prefs';
 export * from './chat-row-content';
 export * from './chat-row-preview';
 export * from './chat-list-actions';
+export * from './chat-list-events';
+export * from './leave-group-feedback';
 export * from './use-chats';
 export * from './use-groups';
 export * from './groups-service';

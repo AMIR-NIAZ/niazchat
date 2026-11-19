@@ -29,6 +29,7 @@ Backend-verified capabilities (each row cites the source modules analyzed). "Par
 
 | Feature                         | State      | Notes                                                                                                      |
 | ------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------- |
+| Add members by User ID/contacts | ✅         | `GET /chats/:chatId/add-members/lookup`, `POST /chats/:chatId/members` (batch, partial success, `add_members`) |
 | Add member by phone             | ✅         | `POST /chats/manage/:groupId/add/:userPhone`                                                               |
 | Member list                     | ❌         | No REST or WS event to list normal members; only banned list (`chats.service.getAllBanUser`)               |
 | Promote/demote chat admin       | ✅         | manage/admin/\* routes                                                                                     |

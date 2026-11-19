@@ -364,12 +364,12 @@ async function main() {
         'group:changed',
         (event) =>
             Number(event.chatId) === chatId &&
-            event.reason === 'role_changed' &&
+            event.reason === 'member_promoted' &&
             Number(event.userId) === userId('member'),
     ).catch(() => null);
     check(
         changed !== null,
-        'room receives group:changed role_changed for the promoted user',
+        'room receives group:changed member_promoted for the promoted user',
         changedEvents.length > 0 ? `${changedEvents.length} event(s)` : '',
     );
 
@@ -380,7 +380,7 @@ async function main() {
     );
     const granted = adminPerms.data?.granted ?? [];
     check(
-        ['ban_user', 'delete_message', 'change_info_chat'].every((name) =>
+        ['ban_users', 'delete_other_messages', 'remove_members', 'pin_messages'].every((name) =>
             granted.includes(name),
         ),
         'promoted admin receives the default permissions',
@@ -413,9 +413,9 @@ async function main() {
         'DELETE',
         `/chats/manage/admin/permissions/${memberMemberId}`,
         TOKEN.owner,
-        { permissions: ['ban_user'] },
+        { permissions: ['remove_members'] },
     );
-    check(removeBan.status < 300, 'owner revokes ban_user from the admin');
+    check(removeBan.status < 300, 'owner revokes remove_members from the admin');
     const adminWithoutBan = await http(
         'DELETE',
         `/chats/${chatId}/members/${outsiderMemberId}`,
@@ -423,7 +423,7 @@ async function main() {
     );
     check(
         adminWithoutBan.status === 403,
-        'admin without ban_user cannot remove a member',
+        'admin without remove_members cannot remove a member',
         String(adminWithoutBan.status),
     );
     check(
@@ -431,9 +431,9 @@ async function main() {
             'POST',
             `/chats/manage/admin/permissions/${memberMemberId}`,
             TOKEN.owner,
-            { permissions: ['ban_user'] },
+            { permissions: ['remove_members'] },
         )).status < 300,
-        'owner grants ban_user back',
+        'owner grants remove_members back',
     );
 
     const outsiderRemoved = [];
@@ -446,7 +446,7 @@ async function main() {
     check(
         (adminRemove.status === 200 || adminRemove.status === 201) &&
             adminRemove.data?.role === null,
-        'admin with ban_user removes the regular member',
+        'admin with remove_members removes the regular member',
     );
     const removedEvent = await waitFor(
         socket.outsider,

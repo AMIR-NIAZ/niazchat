@@ -159,6 +159,9 @@ function connectionOptions(database: string) {
                 usersRepository as never,
                 {} as never,
                 {} as never,
+                {
+                    blockersOfViewer: () => Promise.resolve(new Set<number>()),
+                } as never,
             );
         }, 120_000);
 

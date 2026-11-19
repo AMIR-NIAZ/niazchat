@@ -11,6 +11,8 @@ import { TypeMessageEnum } from 'src/common/enums/typeMessage.enum';
 import { JwtPayload } from 'src/common/types/jwt-payload.type';
 import { WsException } from '@nestjs/websockets';
 import { RateLimitService } from 'src/common/services/rate-limit.service';
+import { VisibilityService } from 'src/modules/visibility/visibility.service';
+import { sanitizeUserForViewer } from 'src/modules/visibility/visibility.util';
 import {
     MessageReactionSummary,
     ReactionEntry,
@@ -62,6 +64,7 @@ export class ReactionsService {
         @InjectRepository(Message)
         private readonly messageRepository: Repository<Message>,
         private readonly rateLimit: RateLimitService,
+        private readonly visibility: VisibilityService,
     ) {}
 
     async create(dto: CreateReactDto) {
@@ -266,6 +269,7 @@ export class ReactionsService {
     async reactorsFor(
         chatId: number,
         messageId: number,
+        viewerId?: number,
     ): Promise<ReactionGroup[]> {
         const message = await this.messageRepository.findOne({
             where: {
@@ -306,6 +310,16 @@ export class ReactionsService {
             { emoji: string; count: number; users: ReactionGroup['users'] }
         >();
         const seen = new Set<number>();
+        // A reactor who blocked the viewer is listed by name only.
+        const hidden =
+            viewerId === undefined
+                ? new Set<number>()
+                : await this.visibility.blockersOfViewer(
+                      Number(viewerId),
+                      rows
+                          .map((row) => Number(row.user?.id ?? 0))
+                          .filter((id) => id > 0),
+                  );
 
         for (const row of rows) {
             if (
@@ -332,12 +346,17 @@ export class ReactionsService {
                 users: [],
             };
             const current = row.user.profile?.avatars?.[0];
-            group.users.push({
-                userId: memberId,
-                name: row.user.profile?.name ?? '',
-                username: row.user.profile?.username ?? null,
-                avatars: current === undefined ? [] : [current],
-            });
+            group.users.push(
+                sanitizeUserForViewer(
+                    {
+                        userId: memberId,
+                        name: row.user.profile?.name ?? '',
+                        username: row.user.profile?.username ?? null,
+                        avatars: current === undefined ? [] : [current],
+                    },
+                    hidden.has(memberId),
+                ),
+            );
             group.count = group.users.length;
             groups.set(reactId, group);
         }

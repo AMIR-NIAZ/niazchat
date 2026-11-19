@@ -1,20 +1,16 @@
-import { ArrayMaxSize, ArrayUnique, IsArray, IsIn } from 'class-validator';
-import {
-    EDITABLE_ADMIN_PERMISSIONS,
-    EditableAdminPermission,
-} from '../utils/group-members.util';
+import { ArrayMaxSize, IsArray, IsString } from 'class-validator';
 
 /**
- * Body of `PUT /chats/:chatId/members/:memberId/permissions`.
+ * Body of `PUT /chats/:chatId/members/:memberId/permissions` (and the promote
+ * route's optional initial permission set).
  *
- * The global ValidationPipe rejects unknown properties, duplicates, more than
- * three entries, `all` (deliberately not editable) and unknown names. An empty
- * array is valid and removes every grant.
+ * Only the SHAPE is validated here: an array of strings. The service validates
+ * the names against the contract (`GroupPermission` + `all`), rejects unknown
+ * keys with 400 and removes duplicates. An empty array removes every grant.
  */
 export class UpdateMemberPermissionsDto {
     @IsArray()
-    @ArrayUnique()
-    @ArrayMaxSize(3)
-    @IsIn([...EDITABLE_ADMIN_PERMISSIONS], { each: true })
-    permissions: EditableAdminPermission[];
+    @ArrayMaxSize(64)
+    @IsString({ each: true })
+    permissions: string[];
 }

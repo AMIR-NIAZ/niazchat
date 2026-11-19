@@ -19,18 +19,30 @@ import { PermissionChat } from '../entities/permission_chat.entity';
 import { RoleChat } from '../entities/role_chat.entity';
 import {
     assertCanManageBans,
-    canEditInfo,
-    canManageBans,
-    canManageInviteLinks,
+    callerMemberPermissions,
     ChatCallerContext,
     ChatPermissionService,
+    groupCapabilities,
+    memberPermissionsConfigOf,
+    PERMISSION_FORBIDDEN_MESSAGE,
+    requirePermission,
 } from './chat-permission.service';
+import {
+    canGrantPermissions,
+    type GroupPermission,
+    hasPermission,
+    normalizePermissions,
+    parsePermissionsInput,
+    PERMISSION_META,
+} from '../utils/group-permissions.util';
 import { GroupRealtimeService } from './group-realtime.service';
+import { VisibilityService } from 'src/modules/visibility/visibility.service';
+import { sanitizeUserForViewer } from 'src/modules/visibility/visibility.util';
 import { createServiceMessage } from '../utils/service-message.util';
 import {
-    ADMIN_PERMISSION_OPTIONS,
     canBan,
     canDemote,
+    canEditPermissions,
     canPromote,
     canRemove,
     decodeMemberCursor,
@@ -41,17 +53,17 @@ import {
     GroupMemberActions,
     GroupRole,
     memberActions,
-    parseEditablePermissions,
     roleRank,
     samePermissionSet,
     toGroupRole,
 } from '../utils/group-members.util';
 
-/** Every newly promoted admin receives exactly these permissions. */
-export const DEFAULT_ADMIN_PERMISSIONS: readonly PermissionChatEnum[] = [
-    PermissionChatEnum.BAN_USER,
-    PermissionChatEnum.DELETE_MESSAGE,
-    PermissionChatEnum.CHANGE_INFO_CHAT,
+/** Legacy promote (no body) grants exactly these permissions. */
+export const DEFAULT_ADMIN_PERMISSIONS: readonly GroupPermission[] = [
+    'delete_other_messages',
+    'ban_users',
+    'remove_members',
+    'pin_messages',
 ];
 
 export const GROUP_ACTION_RATE_LIMIT = 30;
@@ -66,11 +78,7 @@ export interface GroupInfo {
     title: string;
     description: string | null;
     avatars: string[];
-    capabilities: {
-        canEditInfo: boolean;
-        canManageInviteLinks: boolean;
-        canManageBans: boolean;
-    };
+    capabilities: ReturnType<typeof groupCapabilities>;
     createdAt: Date;
     membersCount: number;
     myRole: GroupRole;
@@ -86,6 +94,10 @@ export interface GroupMemberItem {
     isOnline: boolean;
     lastSeen: string | null;
     role: GroupRole;
+    /** Normalized permission keys of an admin; empty for everyone else. */
+    permissions: EditableAdminPermission[];
+    /** Who promoted this admin (`null` for owner/legacy/member rows). */
+    promotedById: number | null;
     actions: GroupMemberActions;
 }
 
@@ -129,14 +141,24 @@ export interface MemberPermissionsResponse {
     memberId: number;
     userId: number;
     role: 'admin';
-    available: Array<{ key: EditableAdminPermission; label: string }>;
+    available: Array<{
+        key: EditableAdminPermission;
+        label: string;
+        active: boolean;
+        description: string;
+        implies: EditableAdminPermission[];
+    }>;
     granted: EditableAdminPermission[];
     hasAll: boolean;
+    /** Keys the CALLER may grant (subset of `available`). */
+    grantable: EditableAdminPermission[];
+    promotedById: number | null;
 }
 
 export interface MemberPermissionsUpdateResponse {
     memberId: number;
     granted: EditableAdminPermission[];
+    hasAll: boolean;
     changed: boolean;
 }
 
@@ -152,6 +174,7 @@ interface MemberQueryRow {
     avatars: string[] | null;
     isOnline: boolean;
     lastSeen: Date | string | null;
+    promotedById: string | number | null;
 }
 
 /**
@@ -176,6 +199,7 @@ export class GroupMembersService {
         private readonly rateLimit: RateLimitService,
         @InjectRepository(PermissionAdmin)
         private readonly permissionAdminRepository: Repository<PermissionAdmin>,
+        private readonly visibility: VisibilityService,
     ) {}
 
     async getGroupInfo(
@@ -217,27 +241,40 @@ export class GroupMembersService {
         ]);
 
         const owner = ownerRows[0];
+        const ownerHidden =
+            owner === undefined
+                ? new Set<number>()
+                : await this.visibility.blockersOfViewer(Number(callerUserId), [
+                      Number(owner.userId),
+                  ]);
         return {
             id: Number(caller.chat.id),
             title: caller.chat.title ?? '',
             description: caller.chat.description ?? null,
             avatars: [...(caller.chat.avatars ?? [])],
-            capabilities: {
-                canEditInfo: canEditInfo(caller),
-                canManageInviteLinks: canManageInviteLinks(caller),
-                canManageBans: canManageBans(caller),
-            },
+            capabilities: groupCapabilities(
+                {
+                    isOwner: caller.isOwner,
+                    isAdmin: caller.isAdmin,
+                    permissions: caller.permissions,
+                    userId: Number(callerUserId),
+                },
+                callerMemberPermissions(caller),
+            ),
             createdAt: caller.chat.createdAt,
             membersCount: Number(countRows[0]?.count ?? 0),
             myRole: caller.role,
             owner:
                 owner === undefined
                     ? null
-                    : {
-                          userId: Number(owner.userId),
-                          name: owner.name ?? '',
-                          username: owner.username ?? '',
-                      },
+                    : sanitizeUserForViewer(
+                          {
+                              userId: Number(owner.userId),
+                              name: owner.name ?? '',
+                              username: owner.username ?? '',
+                          },
+                          ownerHidden.has(Number(owner.userId)),
+                      ),
         };
     }
 
@@ -291,6 +328,7 @@ export class GroupMembersService {
                        p.avatars AS "avatars",
                        u."isOnline" AS "isOnline",
                        u."lastSeen" AS "lastSeen",
+                       m."promotedById" AS "promotedById",
                        ROW_NUMBER() OVER (
                            PARTITION BY m."userId"
                            ORDER BY ${RANK_SQL} DESC, m.id ASC
@@ -317,25 +355,62 @@ export class GroupMembersService {
             isOwner: caller.isOwner,
             isAdmin: caller.isAdmin,
             permissions: caller.permissions,
+            userId: Number(callerUserId),
         };
+        const adminUserIds = page
+            .filter((row) => row.role === 'admin')
+            .map((row) => Number(row.userId));
+        const grantsByUser =
+            adminUserIds.length === 0
+                ? new Map<number, string[]>()
+                : await this.permissionsByUser(chatId, adminUserIds);
+        // Members who blocked the caller keep their row/name but lose photo,
+        // username and presence (one query for the whole page).
+        const hidden = await this.visibility.blockersOfViewer(
+            Number(callerUserId),
+            page.map((row) => Number(row.userId)),
+        );
         const items: GroupMemberItem[] = page.map((row) => {
             const role = row.role;
             const avatars = Array.isArray(row.avatars) ? row.avatars : [];
-            return {
-                memberId: Number(row.memberId),
-                userId: Number(row.userId),
-                name: row.name ?? '',
-                username: row.username ?? '',
-                // Current photo only.
-                avatars: avatars.slice(0, 1),
-                isOnline: row.isOnline === true,
-                lastSeen:
-                    row.lastSeen === null || row.lastSeen === undefined
-                        ? null
-                        : new Date(row.lastSeen).toISOString(),
-                role,
-                actions: memberActions(callerRules, role),
-            };
+            const storedGrants = normalizePermissions(
+                grantsByUser.get(Number(row.userId)) ?? [],
+            );
+            const permissions =
+                role === 'admin'
+                    ? storedGrants.includes('all')
+                        ? [...EDITABLE_ADMIN_PERMISSIONS]
+                        : storedGrants.filter(
+                              (key): key is GroupPermission => key !== 'all',
+                          )
+                    : [];
+            const promotedById =
+                row.promotedById === null || row.promotedById === undefined
+                    ? null
+                    : Number(row.promotedById);
+            return sanitizeUserForViewer(
+                {
+                    memberId: Number(row.memberId),
+                    userId: Number(row.userId),
+                    name: row.name ?? '',
+                    username: row.username ?? '',
+                    // Current photo only.
+                    avatars: avatars.slice(0, 1),
+                    isOnline: row.isOnline === true,
+                    lastSeen:
+                        row.lastSeen === null || row.lastSeen === undefined
+                            ? null
+                            : new Date(row.lastSeen).toISOString(),
+                    role,
+                    permissions,
+                    promotedById,
+                    actions: memberActions(callerRules, role, {
+                        promotedById,
+                        callerUserId: Number(callerUserId),
+                    }),
+                },
+                hidden.has(Number(row.userId)),
+            );
         });
 
         const last = items[items.length - 1];
@@ -404,17 +479,28 @@ export class GroupMembersService {
 
         const hasMore = rows.length > limit;
         const page = hasMore ? rows.slice(0, limit) : rows;
-        const items: GroupBannedItem[] = page.map((row) => ({
-            memberId: Number(row.memberId),
-            userId: Number(row.userId),
-            name: row.name ?? '',
-            username: row.username ?? '',
-            avatars: Array.isArray(row.avatars) ? row.avatars.slice(0, 1) : [],
-            bannedAt:
-                row.bannedAt === null || row.bannedAt === undefined
-                    ? null
-                    : new Date(row.bannedAt).toISOString(),
-        }));
+        const hiddenBanned = await this.visibility.blockersOfViewer(
+            Number(callerUserId),
+            page.map((row) => Number(row.userId)),
+        );
+        const items: GroupBannedItem[] = page.map((row) =>
+            sanitizeUserForViewer(
+                {
+                    memberId: Number(row.memberId),
+                    userId: Number(row.userId),
+                    name: row.name ?? '',
+                    username: row.username ?? '',
+                    avatars: Array.isArray(row.avatars)
+                        ? row.avatars.slice(0, 1)
+                        : [],
+                    bannedAt:
+                        row.bannedAt === null || row.bannedAt === undefined
+                            ? null
+                            : new Date(row.bannedAt).toISOString(),
+                },
+                hiddenBanned.has(Number(row.userId)),
+            ),
+        );
 
         const last = items[items.length - 1];
         return {
@@ -434,11 +520,6 @@ export class GroupMembersService {
             callerUserId,
         );
         this.permissions.assertGroup(caller);
-        if (!caller.isOwner) {
-            throw new ForbiddenException(
-                "You don't have permission to do this",
-            );
-        }
 
         const target = await this.memberRepository.findOne({
             where: { id: memberId, chat: { id: chatId } },
@@ -454,37 +535,69 @@ export class GroupMembersService {
             throw new ConflictException('Only admins have permissions');
         }
 
+        const callerRules = {
+            isOwner: caller.isOwner,
+            isAdmin: caller.isAdmin,
+            permissions: caller.permissions,
+            userId: Number(callerUserId),
+        };
+        const promotedById =
+            best.promotedById === null || best.promotedById === undefined
+                ? null
+                : Number(best.promotedById);
+        if (
+            !canEditPermissions(callerRules, 'admin', {
+                promotedById,
+                callerUserId: Number(callerUserId),
+            })
+        ) {
+            throw new ForbiddenException(PERMISSION_FORBIDDEN_MESSAGE);
+        }
+
         const grants = await this.permissionAdminRepository.find({
             where: { member: { id: In(rows.map((row) => Number(row.id))) } },
             relations: { permission: true },
         });
         const names = grants.map((grant) => grant.permission.name);
         const hasAll = names.includes(PermissionChatEnum.ALL);
+        const normalized = normalizePermissions(names);
         const granted = hasAll
             ? [...EDITABLE_ADMIN_PERMISSIONS]
             : EDITABLE_ADMIN_PERMISSIONS.filter((permission) =>
-                  names.includes(permission),
+                  normalized.includes(permission),
               );
+
+        const grantable = EDITABLE_ADMIN_PERMISSIONS.filter(
+            (key) =>
+                caller.isOwner ||
+                hasPermission('admin', caller.permissions, key),
+        );
 
         return {
             memberId: Number(best.id),
             userId: targetUserId,
             role: 'admin',
-            available: ADMIN_PERMISSION_OPTIONS.map((option) => ({
-                ...option,
+            available: EDITABLE_ADMIN_PERMISSIONS.map((key) => ({
+                key,
+                label: PERMISSION_META[key].en,
+                active: PERMISSION_META[key].active,
+                description: PERMISSION_META[key].description,
+                implies: [...PERMISSION_META[key].implies],
             })),
             granted,
             hasAll,
+            grantable,
+            promotedById,
         };
     }
 
     /**
      * Replaces an admin's permission set with EXACTLY the body's set.
      *
-     * One transaction locks the caller and every row of the target user, checks
-     * the owner/role state again, then deletes all grants and inserts the new
-     * set on the canonical (highest-ranked, lowest-id) row. Reads union grants
-     * across duplicate rows, so keeping one canonical row is sufficient.
+     * Unknown keys → 400 (duplicates are removed); only the owner may grant
+     * `all`; a non-owner editor may only grant permissions they hold and may
+     * only edit admins they promoted. One transaction locks the caller and
+     * every row of the target user and re-checks those rules.
      */
     async updateMemberPermissions(
         chatId: ChatId,
@@ -492,20 +605,29 @@ export class GroupMembersService {
         callerUserId: UserId,
         rawPermissions: unknown,
     ): Promise<MemberPermissionsUpdateResponse> {
-        const desired = parseEditablePermissions(rawPermissions);
-        if (desired === null) {
+        const parsed = parsePermissionsInput(rawPermissions);
+        if (parsed === null) {
             throw new BadRequestException('invalid permissions');
         }
+        const desired: EditableAdminPermission[] = parsed.all
+            ? [...EDITABLE_ADMIN_PERMISSIONS]
+            : parsed.keys;
 
         const caller = await this.permissions.getCallerContext(
             chatId,
             callerUserId,
         );
         this.permissions.assertGroup(caller);
-        if (!caller.isOwner) {
-            throw new ForbiddenException(
-                "You don't have permission to do this",
-            );
+        requirePermission(
+            {
+                isOwner: caller.isOwner,
+                isAdmin: caller.isAdmin,
+                permissions: caller.permissions,
+            },
+            'manage_permissions',
+        );
+        if (parsed.all && !caller.isOwner) {
+            throw new ForbiddenException(PERMISSION_FORBIDDEN_MESSAGE);
         }
 
         const target = await this.memberRepository.findOne({
@@ -516,11 +638,45 @@ export class GroupMembersService {
             throw new NotFoundException('member not found in this group');
         }
         const targetUserId = Number(target.user.id);
-        if (toGroupRole(target.role?.name) !== 'admin') {
+        const targetRows = await this.rowsOfUser(chatId, targetUserId);
+        const bestTarget = this.bestRow(targetRows);
+        if (
+            bestTarget === null ||
+            toGroupRole(bestTarget.role?.name) !== 'admin'
+        ) {
             throw new ConflictException('Only admins have permissions');
         }
         if (Number(callerUserId) === targetUserId) {
             throw new ConflictException('Only admins have permissions');
+        }
+
+        const callerRules = {
+            isOwner: caller.isOwner,
+            isAdmin: caller.isAdmin,
+            permissions: caller.permissions,
+            userId: Number(callerUserId),
+        };
+        const promotedById =
+            bestTarget.promotedById === null ||
+            bestTarget.promotedById === undefined
+                ? null
+                : Number(bestTarget.promotedById);
+        if (
+            !canEditPermissions(callerRules, 'admin', {
+                promotedById,
+                callerUserId: Number(callerUserId),
+            })
+        ) {
+            throw new ForbiddenException(PERMISSION_FORBIDDEN_MESSAGE);
+        }
+        if (
+            !canGrantPermissions(
+                caller.isOwner ? 'owner' : 'admin',
+                caller.permissions,
+                desired,
+            )
+        ) {
+            throw new ForbiddenException(PERMISSION_FORBIDDEN_MESSAGE);
         }
 
         await this.rateLimit.consume(
@@ -542,13 +698,8 @@ export class GroupMembersService {
             if (callerCtx.chat.isBan) {
                 throw new ForbiddenException('this chat has been banned');
             }
-            if (!callerCtx.isOwner) {
-                throw new ForbiddenException(
-                    "You don't have permission to do this",
-                );
-            }
 
-            const targetRows = await manager
+            const lockedTargetRows = await manager
                 .getRepository(ChatMember)
                 .createQueryBuilder('m')
                 .innerJoinAndSelect('m.role', 'role')
@@ -556,36 +707,71 @@ export class GroupMembersService {
                 .andWhere('m."userId" = :userId', { userId: targetUserId })
                 .setLock('pessimistic_write')
                 .getMany();
-            if (targetRows.length === 0) {
+            if (lockedTargetRows.length === 0) {
                 throw new ConflictException(
                     'member is no longer in this group',
                 );
             }
-            const bestTarget = this.bestRow(targetRows);
+            const lockedBest = this.bestRow(lockedTargetRows);
             if (
-                bestTarget === null ||
-                toGroupRole(bestTarget.role?.name) !== 'admin'
+                lockedBest === null ||
+                toGroupRole(lockedBest.role?.name) !== 'admin'
             ) {
                 throw new ConflictException('Only admins have permissions');
             }
 
-            const targetIds = targetRows.map((row) => Number(row.id));
+            const lockedRules = {
+                isOwner: callerCtx.isOwner,
+                isAdmin: callerCtx.isAdmin,
+                permissions: callerCtx.permissions,
+                userId: Number(callerUserId),
+            };
+            const lockedPromotedBy =
+                lockedBest.promotedById === null ||
+                lockedBest.promotedById === undefined
+                    ? null
+                    : Number(lockedBest.promotedById);
+            if (
+                !canEditPermissions(lockedRules, 'admin', {
+                    promotedById: lockedPromotedBy,
+                    callerUserId: Number(callerUserId),
+                })
+            ) {
+                throw new ForbiddenException(PERMISSION_FORBIDDEN_MESSAGE);
+            }
+            if (
+                !canGrantPermissions(
+                    callerCtx.isOwner ? 'owner' : 'admin',
+                    callerCtx.permissions,
+                    desired,
+                )
+            ) {
+                throw new ForbiddenException(PERMISSION_FORBIDDEN_MESSAGE);
+            }
+
+            const targetIds = lockedTargetRows.map((row) => Number(row.id));
             const grantRepository = manager.getRepository(PermissionAdmin);
             const grants = await grantRepository.find({
                 where: { member: { id: In(targetIds) } },
                 relations: { permission: true },
             });
-            const names = grants.map((grant) => grant.permission.name);
-            const hasAll = names.includes(PermissionChatEnum.ALL);
+            const names = normalizePermissions(
+                grants.map((grant) => grant.permission.name),
+            );
+            const hasAll = names.includes('all');
             const current = EDITABLE_ADMIN_PERMISSIONS.filter((permission) =>
                 names.includes(permission),
             );
-            const changed = hasAll || !samePermissionSet(current, desired);
+            const desiredHasAll = parsed.all;
+            const changed =
+                hasAll !== desiredHasAll ||
+                (!desiredHasAll && !samePermissionSet(current, desired));
 
             if (!changed) {
                 return {
-                    memberId: Number(bestTarget.id),
+                    memberId: Number(lockedBest.id),
                     granted: desired,
+                    hasAll: parsed.all,
                     changed: false,
                 };
             }
@@ -593,26 +779,28 @@ export class GroupMembersService {
             await grantRepository.delete({
                 member: { id: In(targetIds) },
             });
-            if (desired.length > 0) {
+            const storedNames: string[] = parsed.all ? ['all'] : desired;
+            if (storedNames.length > 0) {
                 const permissionRows = await manager
                     .getRepository(PermissionChat)
-                    .find({ where: { name: In(desired) } });
-                if (permissionRows.length !== desired.length) {
+                    .find({ where: { name: In(storedNames) } });
+                if (permissionRows.length !== storedNames.length) {
                     throw new InternalServerErrorException(
                         'permissions are not seeded',
                     );
                 }
                 await grantRepository.insert(
                     permissionRows.map((permission) => ({
-                        member: { id: Number(bestTarget.id) },
+                        member: { id: Number(lockedBest.id) },
                         permission: { id: permission.id },
                     })),
                 );
             }
 
             return {
-                memberId: Number(bestTarget.id),
+                memberId: Number(lockedBest.id),
                 granted: desired,
+                hasAll: parsed.all,
                 changed: true,
             };
         });
@@ -627,8 +815,15 @@ export class GroupMembersService {
         chatId: ChatId,
         memberId: number,
         callerUserId: UserId,
+        initialPermissions?: unknown,
     ): Promise<MemberActionResponse> {
-        return this.changeRole(chatId, memberId, callerUserId, 'promote');
+        return this.changeRole(
+            chatId,
+            memberId,
+            callerUserId,
+            'promote',
+            initialPermissions,
+        );
     }
 
     demoteMember(
@@ -720,7 +915,7 @@ export class GroupMembersService {
                     ? candidate
                     : current,
             );
-            if (bestTarget.role?.name === RoleChatEnum.BAN) {
+            if (bestTarget.role?.name === (RoleChatEnum.BAN as string)) {
                 throw new ConflictException('user is already banned');
             }
             const lockedRole = toGroupRole(bestTarget.role?.name);
@@ -751,7 +946,7 @@ export class GroupMembersService {
             }
 
             const banRole = await this.roleOrFail(manager, RoleChatEnum.BAN);
-            await this.setRoleForRows(manager, targetIds, banRole.id);
+            await this.setRoleForRows(manager, targetIds, banRole.id, null);
             // A banned admin loses their permission grants.
             await manager
                 .getRepository(PermissionAdmin)
@@ -793,12 +988,35 @@ export class GroupMembersService {
         memberId: number,
         callerUserId: UserId,
         operation: RoleOperation,
+        rawPermissions?: unknown,
     ): Promise<MemberActionResponse> {
         const caller = await this.permissions.getCallerContext(
             chatId,
             callerUserId,
         );
         this.permissions.assertGroup(caller);
+
+        // Initial permission set for a promotion: omitted → legacy defaults.
+        const parsedInitial =
+            operation === 'promote' && rawPermissions !== undefined
+                ? parsePermissionsInput(rawPermissions)
+                : null;
+        if (
+            operation === 'promote' &&
+            rawPermissions !== undefined &&
+            parsedInitial === null
+        ) {
+            throw new BadRequestException('invalid permissions');
+        }
+        if (parsedInitial?.all === true && !caller.isOwner) {
+            throw new ForbiddenException(PERMISSION_FORBIDDEN_MESSAGE);
+        }
+        const initialPermissions: string[] =
+            parsedInitial === null
+                ? [...DEFAULT_ADMIN_PERMISSIONS]
+                : parsedInitial.all
+                  ? ['all']
+                  : parsedInitial.keys;
 
         const target = await this.memberRepository.findOne({
             where: { id: memberId, chat: { id: chatId } },
@@ -871,14 +1089,19 @@ export class GroupMembersService {
                 isOwner: callerCtx.isOwner,
                 isAdmin: callerCtx.isAdmin,
                 permissions: callerCtx.permissions,
+                userId: Number(callerUserId),
+            };
+            const promotedById =
+                bestTarget.promotedById === null ||
+                bestTarget.promotedById === undefined
+                    ? null
+                    : Number(bestTarget.promotedById);
+            const targetRules = {
+                promotedById,
+                callerUserId: Number(callerUserId),
             };
 
             if (operation === 'promote') {
-                if (!callerCtx.isOwner) {
-                    throw new ForbiddenException(
-                        "You don't have permission to do this",
-                    );
-                }
                 if (lockedRole === 'admin') {
                     return {
                         memberId: Number(bestTarget.id),
@@ -887,19 +1110,34 @@ export class GroupMembersService {
                     };
                 }
                 if (!canPromote(rules, lockedRole)) {
-                    throw new ForbiddenException(
-                        "You don't have permission to do this",
-                    );
+                    throw new ForbiddenException(PERMISSION_FORBIDDEN_MESSAGE);
+                }
+                if (
+                    !canGrantPermissions(
+                        callerCtx.isOwner ? 'owner' : 'admin',
+                        callerCtx.permissions,
+                        initialPermissions.filter(
+                            (key): key is GroupPermission => key !== 'all',
+                        ),
+                    )
+                ) {
+                    throw new ForbiddenException(PERMISSION_FORBIDDEN_MESSAGE);
                 }
                 const adminRole = await this.roleOrFail(
                     manager,
                     RoleChatEnum.ADMIN,
                 );
-                await this.setRoleForRows(manager, targetIds, adminRole.id);
-                await this.grantDefaultAdminPermissions(
+                await this.setRoleForRows(
+                    manager,
+                    targetIds,
+                    adminRole.id,
+                    Number(callerUserId),
+                );
+                await this.grantAdminPermissions(
                     manager,
                     Number(bestTarget.id),
                     targetIds,
+                    initialPermissions,
                 );
                 return {
                     memberId: Number(bestTarget.id),
@@ -909,11 +1147,6 @@ export class GroupMembersService {
             }
 
             if (operation === 'demote') {
-                if (!callerCtx.isOwner) {
-                    throw new ForbiddenException(
-                        "You don't have permission to do this",
-                    );
-                }
                 if (lockedRole === 'member') {
                     return {
                         memberId: Number(bestTarget.id),
@@ -921,16 +1154,19 @@ export class GroupMembersService {
                         changed: false,
                     };
                 }
-                if (!canDemote(rules, lockedRole)) {
-                    throw new ForbiddenException(
-                        "You don't have permission to do this",
-                    );
+                if (!canDemote(rules, lockedRole, targetRules)) {
+                    throw new ForbiddenException(PERMISSION_FORBIDDEN_MESSAGE);
                 }
                 const userRole = await this.roleOrFail(
                     manager,
                     RoleChatEnum.USER,
                 );
-                await this.setRoleForRows(manager, targetIds, userRole.id);
+                await this.setRoleForRows(
+                    manager,
+                    targetIds,
+                    userRole.id,
+                    null,
+                );
                 await manager
                     .getRepository(PermissionAdmin)
                     .delete({ member: { id: In(targetIds) } });
@@ -943,9 +1179,7 @@ export class GroupMembersService {
 
             // remove
             if (!canRemove(rules, lockedRole)) {
-                throw new ForbiddenException(
-                    "You don't have permission to do this",
-                );
+                throw new ForbiddenException(PERMISSION_FORBIDDEN_MESSAGE);
             }
             // A role changed between the pre-check and the lock: do not guess.
             if (expectedRole !== null && expectedRole !== lockedRole) {
@@ -982,7 +1216,13 @@ export class GroupMembersService {
             }
             void this.notifyMembersCount(chatId);
         } else if (result.changed) {
-            this.realtime.memberRoleChanged(chatId, targetUserId);
+            if (operation === 'promote') {
+                this.realtime.memberPromoted(chatId, targetUserId);
+            } else if (operation === 'demote') {
+                this.realtime.memberDemoted(chatId, targetUserId);
+            } else {
+                this.realtime.memberRoleChanged(chatId, targetUserId);
+            }
         }
 
         return result;
@@ -1044,6 +1284,7 @@ export class GroupMembersService {
             permissions,
             isOwner: role === 'owner',
             isAdmin: role === 'admin',
+            effectiveMemberPermissions: memberPermissionsConfigOf(best.chat),
         };
     }
 
@@ -1052,11 +1293,39 @@ export class GroupMembersService {
         manager: EntityManager,
         memberIds: number[],
         roleId: number,
+        promotedById: number | null,
     ): Promise<void> {
         await manager.query(
-            `UPDATE "chat_members" SET "roleId" = $1 WHERE id = ANY($2::bigint[])`,
-            [roleId, memberIds],
+            `UPDATE "chat_members"
+                SET "roleId" = $1, "promotedById" = $3
+              WHERE id = ANY($2::bigint[])`,
+            [roleId, memberIds, promotedById],
         );
+    }
+
+    /** Grants of the given users, unioned across duplicate membership rows. */
+    private async permissionsByUser(
+        chatId: ChatId,
+        userIds: number[],
+    ): Promise<Map<number, string[]>> {
+        const rows = await this.memberRepository.query<
+            Array<{ userId: string | number; name: string }>
+        >(
+            `SELECT m."userId" AS "userId", p.name AS name
+               FROM permission_admin pa
+               JOIN chat_members m ON m.id = pa."memberId"
+               JOIN permission_chats p ON p.id = pa."permissionId"
+              WHERE m."chatId" = $1 AND m."userId" = ANY($2::bigint[])`,
+            [chatId, userIds],
+        );
+        const byUser = new Map<number, string[]>();
+        for (const row of rows) {
+            const userId = Number(row.userId);
+            const current = byUser.get(userId) ?? [];
+            current.push(row.name);
+            byUser.set(userId, current);
+        }
+        return byUser;
     }
 
     private async rowsOfUser(
@@ -1079,18 +1348,25 @@ export class GroupMembersService {
         );
     }
 
-    private async grantDefaultAdminPermissions(
+    /** Replaces the new admin's grants with EXACTLY `names` (may be empty). */
+    private async grantAdminPermissions(
         manager: EntityManager,
         canonicalMemberId: number,
         targetMemberIds: number[],
+        names: string[],
     ): Promise<void> {
         const grantRepository = manager.getRepository(PermissionAdmin);
         await grantRepository.delete({ member: { id: In(targetMemberIds) } });
+        if (names.length === 0) return;
 
         const permissions = await manager
             .getRepository(PermissionChat)
-            .find({ where: { name: In([...DEFAULT_ADMIN_PERMISSIONS]) } });
-        if (permissions.length === 0) return;
+            .find({ where: { name: In(names) } });
+        if (permissions.length !== names.length) {
+            throw new InternalServerErrorException(
+                'permissions are not seeded',
+            );
+        }
         await grantRepository.insert(
             permissions.map((permission) => ({
                 member: { id: canonicalMemberId },

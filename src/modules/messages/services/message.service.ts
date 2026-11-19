@@ -4,7 +4,16 @@ import {
     NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, In, LessThan, Repository } from 'typeorm';
+import {
+    And,
+    DataSource,
+    EntityManager,
+    FindOptionsWhere,
+    In,
+    LessThan,
+    MoreThan,
+    Repository,
+} from 'typeorm';
 import { Message } from '../entities/message.entity';
 import { CreateMessageDto } from '../dtos/createMessage.dto';
 import { ChatMember } from 'src/modules/chats/entities/chat_members.entity';
@@ -27,8 +36,25 @@ import { AttachmentService } from 'src/modules/attachments/services/attachment.s
 import { Attachment } from 'src/modules/attachments/entities/attachment.entity';
 import { ChatAccessService } from 'src/modules/chats/services/chat-access.service';
 import { PrivateChatService } from 'src/modules/chats/services/private-chat.service';
+import { UserBlockService } from 'src/modules/chats/services/user-block.service';
+import { ChatService } from 'src/modules/chats/services/chat.service';
 import { ReactionsService } from 'src/modules/reactions/services/reactions.service';
 import { attachmentKindOf } from 'src/common/utils/attachment-kind.util';
+import { canPinMessages } from 'src/modules/chats/utils/message-pin.util';
+import { hasPermission } from 'src/modules/chats/utils/group-permissions.util';
+import {
+    callerMemberPermissions,
+    memberPermissionAllowed,
+} from 'src/modules/chats/services/chat-permission.service';
+import type { ChatCallerContext } from 'src/modules/chats/services/chat-access.service';
+import {
+    attachmentMemberPermission,
+    MEMBER_PERMISSION_FORBIDDEN,
+    messageContainsLink,
+    type MemberPermission,
+} from 'src/modules/chats/utils/member-permissions.util';
+import { RoleChatEnum } from 'src/common/enums/roleChat.enum';
+import { PinMessageDto } from '../dtos/pinMessage.dto';
 
 @Injectable()
 export class MessageService {
@@ -48,6 +74,8 @@ export class MessageService {
         private readonly access: ChatAccessService,
         private readonly privateChats: PrivateChatService,
         private readonly reactions: ReactionsService,
+        private readonly userBlocks: UserBlockService,
+        private readonly chats: ChatService,
     ) {}
 
     async create(user: JwtPayload, dto: CreateMessageDto): Promise<Message> {
@@ -111,13 +139,14 @@ export class MessageService {
         type: TypeMessageEnum,
         attachmentIds?: AttachmentId[],
     ) {
-        const isMember = await this.memberRepository.findOne({
-            where: {
-                chat: { id: chatId },
-                user: { id: user.sub },
-            },
-        });
-        if (!isMember) throw new BadRequestException('user not exit in chat');
+        // The full caller context (membership + role + admin grants + chat) is
+        // the authorization base for the member-permission policy below.
+        const caller = await this.access.getCallerContext(chatId, user.sub);
+        this.access.assertRole(caller, RoleChatEnum.USER);
+
+        // Server-side blocking: the chat id route is guarded exactly like the
+        // user-id route, so the raw socket event cannot bypass a block.
+        await this.userBlocks.assertCanCommunicate(chatId, user.sub);
 
         const typeData = await this.typeMessageRepository.findOneOrFail({
             where: { name: type },
@@ -131,6 +160,7 @@ export class MessageService {
             typeData.id,
             type,
             attachmentIds,
+            caller,
         );
     }
 
@@ -147,6 +177,10 @@ export class MessageService {
         });
 
         if (!hasUserReceiver) throw new NotFoundException('receiver not Found');
+
+        // Directional block check BEFORE the chat lookup: a blocked pair can
+        // never create (or reuse) a conversation just to try again.
+        await this.userBlocks.assertCanMessageUser(user.sub, userId);
 
         // Same pair-key path as `POST /chats/private`: one chat per unordered
         // pair, both members on the normal `user` role, race-safe.
@@ -183,19 +217,32 @@ export class MessageService {
         typeMessageId: number,
         typeName: TypeMessageEnum,
         attachmentIds?: AttachmentId[],
+        caller: ChatCallerContext | null = null,
     ): Promise<Message> {
         // The replied-to message must exist in THIS chat and not be deleted.
         const replyId = await this.validateReply(reply, chatId);
 
         // Authorization for attachments happens before the transaction; the
         // status transition inside it is still guarded against races.
+        let attachmentRows: Attachment[] = [];
         if (attachmentIds?.length) {
-            await this.attachmentService.findUsable(
+            attachmentRows = await this.attachmentService.findUsable(
                 attachmentIds,
                 user.sub,
                 chatId,
             );
         }
+
+        // Member policy is enforced at the operation boundary, before the row
+        // is written: a member cannot bypass the mobile UI with a raw socket
+        // event, and the check uses the server-side attachment metadata (never
+        // the declared MIME or a client-supplied permission).
+        this.assertMemberSendPermissions(
+            caller,
+            content,
+            typeName,
+            attachmentRows,
+        );
 
         const message = await this.dataSource.transaction(async (manager) => {
             // Voice composition is a server rule, checked inside the same
@@ -238,6 +285,52 @@ export class MessageService {
         return attachmentIds?.length
             ? this.orderAttachments(loaded, attachmentIds)
             : loaded;
+    }
+
+    /**
+     * Member-policy gate for CREATE. Owners/admins and private chats are
+     * unaffected; a regular member must hold every switch implied by what is
+     * actually being sent (text, attachment kind, link in the text).
+     */
+    private assertMemberSendPermissions(
+        caller: ChatCallerContext | null,
+        content: string,
+        typeName: TypeMessageEnum,
+        attachments: Attachment[],
+    ): void {
+        if (caller === null) return;
+        if (caller.chat.type !== TypeChatEnum.GRUPE) return;
+        if (caller.isManager || caller.isAdmin) return;
+        const config = callerMemberPermissions(caller);
+
+        const required = new Set<MemberPermission>();
+        if (attachments.length === 0) {
+            required.add('send_messages');
+        } else {
+            for (const attachment of attachments) {
+                required.add(
+                    attachmentMemberPermission(
+                        attachmentKindOf(attachment.mimeType, attachment.voice),
+                    ),
+                );
+            }
+            if (typeName === TypeMessageEnum.VOICE) {
+                required.add('send_voice');
+            }
+        }
+        if (messageContainsLink(content)) {
+            required.add('send_links');
+        }
+
+        const rules = {
+            isOwner: caller.isManager,
+            isAdmin: caller.isAdmin,
+        };
+        for (const key of required) {
+            if (!memberPermissionAllowed(rules, config, key)) {
+                throw new WsException(MEMBER_PERMISSION_FORBIDDEN[key]);
+            }
+        }
     }
 
     /**
@@ -383,6 +476,8 @@ export class MessageService {
                 updatedAt: true,
                 isEdited: true,
                 isDeleted: true,
+                isPinned: true,
+                pinnedAt: true,
                 forwardedFromUserId: true,
                 forwardedFromName: true,
                 meta: true,
@@ -475,7 +570,7 @@ export class MessageService {
                 forwardedFromUserId: true,
                 forwardedFromName: true,
                 meta: true,
-                chat: { id: true },
+                chat: { id: true, type: true },
                 sender: {
                     id: true,
                     profile: {
@@ -524,6 +619,25 @@ export class MessageService {
 
         if (message.type?.name === (TypeMessageEnum.SYSTEM as string)) {
             throw new WsException('system messages cannot be edited');
+        }
+        // Editing is a MEMBER capability in groups: the switch is checked
+        // server-side, so a raw `editMessage` event cannot bypass it.
+        if (message.chat?.type === TypeChatEnum.GRUPE) {
+            const caller = await this.access.getCallerContext(chatId, user.sub);
+            if (caller.roleName === RoleChatEnum.BAN) {
+                throw new WsException('you have been banned from this group');
+            }
+            if (
+                !memberPermissionAllowed(
+                    { isOwner: caller.isManager, isAdmin: caller.isAdmin },
+                    callerMemberPermissions(caller),
+                    'edit_own_messages',
+                )
+            ) {
+                throw new WsException(
+                    MEMBER_PERMISSION_FORBIDDEN.edit_own_messages,
+                );
+            }
         }
         if (Number(message.sender?.id) !== Number(user.sub)) {
             throw new WsException('you can only edit your own messages');
@@ -575,7 +689,7 @@ export class MessageService {
                 chat: { id: chatId },
                 isDeleted: false,
             },
-            relations: { sender: true, type: true },
+            relations: { sender: true, type: true, chat: true },
         });
         if (!message) throw new WsException('message not found');
         if (message.type?.name === (TypeMessageEnum.SYSTEM as string)) {
@@ -583,18 +697,242 @@ export class MessageService {
         }
 
         const isOwnMessage = Number(message.sender?.id) === Number(user.sub);
-        if (!isOwnMessage) {
+        if (message.chat?.type === TypeChatEnum.GRUPE) {
             const caller = await this.access.getCallerContext(chatId, user.sub);
-            if (!caller.isManager || caller.chat.type !== TypeChatEnum.GRUPE) {
-                throw new WsException(
-                    "only the group owner can delete other members' messages",
-                );
+            if (caller.roleName === RoleChatEnum.BAN) {
+                throw new WsException('you have been banned from this group');
             }
+            if (isOwnMessage) {
+                // The group's member policy governs deleting one's own message;
+                // owners and admins always pass.
+                if (
+                    !memberPermissionAllowed(
+                        { isOwner: caller.isManager, isAdmin: caller.isAdmin },
+                        callerMemberPermissions(caller),
+                        'delete_own_messages',
+                    )
+                ) {
+                    throw new WsException(
+                        MEMBER_PERMISSION_FORBIDDEN.delete_own_messages,
+                    );
+                }
+            } else {
+                const role = caller.isManager
+                    ? 'owner'
+                    : caller.isAdmin
+                      ? 'admin'
+                      : 'member';
+                if (
+                    !hasPermission(
+                        role,
+                        caller.permissions,
+                        'delete_other_messages',
+                    )
+                ) {
+                    throw new WsException(
+                        "You don't have permission to do this",
+                    );
+                }
+            }
+        } else if (!isOwnMessage) {
+            throw new WsException("You don't have permission to do this");
         }
 
-        await this.messageRepository.update(messageId, { isDeleted: true });
+        const wasPinned = message.isPinned === true;
+        // A deleted message can never stay pinned: clear both pin fields with
+        // the soft delete so history, `getPinnedMessages` and the banner can
+        // never show tombstoned content. The broadcast for the unpin is emitted
+        // by the gateway only when the message really was pinned.
+        await this.messageRepository.update(messageId, {
+            isDeleted: true,
+            isPinned: false,
+            pinnedAt: null,
+        });
         // Soft delete keeps the row, so its reactions would otherwise linger.
         await this.reactions.clearForMessage(Number(messageId));
+
+        return { wasPinned };
+    }
+
+    /**
+     * Pin a message. Idempotent: a repeated request (or a second client racing
+     * the first) never duplicates state or emits a second broadcast — the ack
+     * reports `alreadyPinned`. The row is locked inside the transaction, so
+     * concurrent pin/unpin calls serialize and the final state is the last one.
+     * The message itself (and its attachments) is never copied.
+     */
+    async pin(
+        dto: PinMessageDto,
+        user: JwtPayload,
+    ): Promise<{ message: Message; changed: boolean }> {
+        await this.assertCanPinMessages(dto.chatId, user.sub);
+        const { messageId, changed } = await this.setPinned(
+            dto.chatId,
+            dto.messageId,
+            true,
+        );
+        return {
+            message: await this.loadMessage(messageId),
+            changed,
+        };
+    }
+
+    /** Unpin a message. Idempotent, exactly like `pin`. */
+    async unpin(
+        dto: PinMessageDto,
+        user: JwtPayload,
+    ): Promise<{ messageId: MessageId; changed: boolean }> {
+        await this.assertCanPinMessages(dto.chatId, user.sub);
+        const { messageId, changed } = await this.setPinned(
+            dto.chatId,
+            dto.messageId,
+            false,
+        );
+        return { messageId, changed };
+    }
+
+    /**
+     * Every currently pinned message of a chat, newest pin first. Backs both
+     * `getPinnedMessages` (offline/reconnect sync) and the banner preview; the
+     * message records are the originals, never duplicates.
+     */
+    async getPinned(chatId: ChatId): Promise<Message[]> {
+        return this.messageRepository.find({
+            where: {
+                chat: { id: chatId },
+                isPinned: true,
+                isDeleted: false,
+            },
+            relations: {
+                sender: { profile: true },
+                attachments: true,
+                type: true,
+                replyTo: {
+                    sender: { profile: true },
+                    type: true,
+                    attachments: true,
+                },
+            },
+            order: { pinnedAt: 'DESC', id: 'DESC' },
+        });
+    }
+
+    /**
+     * The one authorization gate for pin AND unpin: the caller must be a
+     * member, and `canPinMessages` decides the role/permission layer (private
+     * → either participant, group → owner always, admin/member only with the
+     * explicit `pin_message` grant or `all`).
+     */
+    private async assertCanPinMessages(
+        chatId: ChatId,
+        userId: JwtPayload['sub'],
+    ): Promise<void> {
+        const caller = await this.access.getCallerContext(chatId, userId);
+
+        // Groups: a regular member follows the group's member policy, which
+        // protects BOTH pin and unpin. Owners/admins keep the admin grant
+        // rules below (owner always, admin with `pin_messages`/`all`).
+        if (
+            caller.chat.type === TypeChatEnum.GRUPE &&
+            !caller.isManager &&
+            !caller.isAdmin
+        ) {
+            if (caller.roleName === RoleChatEnum.BAN) {
+                throw new WsException('you have been banned from this group');
+            }
+            if (
+                !memberPermissionAllowed(
+                    { isOwner: caller.isManager, isAdmin: caller.isAdmin },
+                    callerMemberPermissions(caller),
+                    'pin_messages',
+                )
+            ) {
+                throw new WsException(MEMBER_PERMISSION_FORBIDDEN.pin_messages);
+            }
+            return;
+        }
+
+        if (
+            !canPinMessages({
+                chatType: caller.chat.type,
+                isChatBanned: caller.chat.isBan === true,
+                roleName: caller.roleName,
+                isManager: caller.isManager,
+                isAdmin: caller.isAdmin,
+                permissions: caller.permissions,
+            })
+        ) {
+            throw new WsException(
+                "you don't have permission to pin or unpin messages",
+            );
+        }
+    }
+
+    /**
+     * Locks the message row inside one transaction and flips the pin state.
+     * The lookup is scoped to the supplied chat, so a message from another
+     * conversation answers the same neutral "message not found" as a missing
+     * id (no cross-chat information leak).
+     *
+     * PostgreSQL rejects `FOR UPDATE` when the statement's outer joins are
+     * nullable ("FOR UPDATE cannot be applied to the nullable side of an outer
+     * join"), and TypeORM emits LEFT JOINs for relation filters and `relations`.
+     * The lock query therefore touches the `messages` table only; the chat and
+     * type relations are read afterwards, still inside the transaction, and the
+     * chat ownership is validated explicitly. The row lock is kept until commit,
+     * so a concurrent pin/unpin waits and then observes the committed state.
+     */
+    private async setPinned(
+        chatId: ChatId,
+        messageId: MessageId,
+        pinned: boolean,
+    ): Promise<{ messageId: MessageId; changed: boolean }> {
+        return this.dataSource.transaction(async (manager) => {
+            const repository = manager.getRepository(Message);
+
+            // Step 1: lock the message row by primary key. No relations and no
+            // relation-based filter, so the statement is a plain
+            // `SELECT ... FROM messages WHERE id = $1 FOR UPDATE`.
+            const locked = await repository.findOne({
+                where: { id: messageId, isDeleted: false },
+                select: { id: true, isPinned: true, pinnedAt: true },
+                lock: { mode: 'pessimistic_write' },
+            });
+            if (!locked) throw new WsException('message not found');
+
+            // Step 2: load the relations without a lock, inside the same
+            // transaction, and enforce chat ownership here. A message from
+            // another chat (or a deleted one) is indistinguishable from a
+            // missing id to the caller.
+            const message = await repository.findOne({
+                where: { id: messageId },
+                relations: { type: true, chat: true },
+            });
+            if (
+                !message ||
+                message.isDeleted ||
+                Number(message.chat?.id) !== Number(chatId)
+            ) {
+                throw new WsException('message not found');
+            }
+            if (message.type?.name === (TypeMessageEnum.SYSTEM as string)) {
+                throw new WsException('system messages cannot be pinned');
+            }
+
+            // Idempotency is decided from the locked row; a second request that
+            // waited for the lock sees the committed state and writes nothing.
+            if (locked.isPinned === pinned) {
+                return { messageId, changed: false };
+            }
+
+            await repository.update(
+                messageId,
+                pinned
+                    ? { isPinned: true, pinnedAt: new Date() }
+                    : { isPinned: false, pinnedAt: null },
+            );
+            return { messageId, changed: true };
+        });
     }
 
     /**
@@ -626,17 +964,34 @@ export class MessageService {
         chatId: ChatId,
         beforeId?: number,
         limit: number = 30,
+        viewerId?: UserId,
     ): Promise<{
         messages: Message[];
         hasMore: boolean;
         nextCursor: number | null;
     }> {
+        // "Delete chat for me": the viewer's own history starts after their
+        // deletion marker; everybody else's history is untouched.
+        const clearedBefore =
+            viewerId === undefined
+                ? null
+                : await this.chats.getClearedBeforeId(chatId, viewerId);
+
+        const where: FindOptionsWhere<Message> = {
+            chat: { id: chatId },
+            isDeleted: false,
+        };
+        if (clearedBefore !== null) {
+            where.id =
+                beforeId === undefined
+                    ? MoreThan(clearedBefore)
+                    : And(MoreThan(clearedBefore), LessThan(beforeId));
+        } else if (beforeId !== undefined) {
+            where.id = LessThan(beforeId);
+        }
+
         const messages = await this.messageRepository.find({
-            where: {
-                chat: { id: chatId },
-                isDeleted: false,
-                ...(beforeId !== undefined ? { id: LessThan(beforeId) } : {}),
-            },
+            where,
             relations: {
                 sender: { profile: true },
                 attachments: true,
@@ -656,6 +1011,8 @@ export class MessageService {
                 content: true,
                 isEdited: true,
                 isDeleted: true,
+                isPinned: true,
+                pinnedAt: true,
                 forwardedFromUserId: true,
                 forwardedFromName: true,
                 meta: true,

@@ -10,3 +10,4 @@ export * from './use-user-profile';
 export * from './public-profile-model';
 export * from './profile-navigation';
 export * from './avatar-gallery';
+export * from './visibility-cache';

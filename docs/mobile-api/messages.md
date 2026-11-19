@@ -103,6 +103,8 @@ download route serves the detected audio MIME inline.
   createdAt, updatedAt,     // ISO strings
   isEdited: boolean,
   isDeleted: boolean,
+  isPinned: boolean,        // pinned in its chat (multiple allowed)
+  pinnedAt: string | null,  // ISO pin time; orders the pinned banner
   typeId: number,           // raw FK (`type` ids, NOT the enum name string)
   type: { id, name: 'text', createdAt, updatedAt },
   chatId: number,
@@ -260,6 +262,15 @@ chat has been banned`, and `An attachment is no longer available`.
 - Attachments and their files are cleaned up by the existing delayed cleanup job, while downloads of a soft-deleted message immediately return 404.
 - **Deleted messages are filtered from `getPage`** and do not appear in `getMessages`; peers learn of deletion only via the `deleteMessage:list` event.
 - Service messages are never deletable: `WsException('system messages cannot be deleted')`.
+- Deleting a pinned message also clears `isPinned`/`pinnedAt` and broadcasts `unpinMessage:list` (the message id leaves every banner).
+
+## Pinning (`pinMessage` / `unpinMessage` / `getPinnedMessages`)
+
+- Pin state lives on the original message row (`isPinned`, `pinnedAt`); pinning never copies the message or its attachments. A chat may pin several messages.
+- Authorization: private chats → both participants; groups → owner always, admins and regular members only with the `pin_message` grant (or `all`); banned members/groups never.
+- The message must belong to the supplied chat and not be deleted; system messages are rejected. A cross-chat id answers the same `message not found`.
+- Pin/unpin are idempotent and run in one transaction with a pessimistic row lock; a repeat returns `alreadyPinned` / `alreadyUnpinned` and emits no second event.
+- `getPinnedMessages { chatId }` returns the full pinned list (newest pin first) for open/reconnect sync; live changes arrive as `pinMessage:list` / `unpinMessage:list` in `chat:<chatId>`.
 
 ## Reactions
 

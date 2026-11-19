@@ -171,10 +171,7 @@ export function splitLinkifiedText(text: string): LinkifiedSegment[] {
 export function inviteCodeFromUrl(raw: string): string | null {
     const text = raw.trim();
     if (text === '') return null;
-    const withoutScheme = text.replace(
-        /^[A-Za-z][A-Za-z0-9+.-]*:\/\//,
-        '',
-    );
+    const withoutScheme = text.replace(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//, '');
     const path = withoutScheme.split(/[?#]/)[0] ?? '';
     const parts = path.split('/').filter((part) => part !== '');
     const marker = parts.findIndex((part) => {

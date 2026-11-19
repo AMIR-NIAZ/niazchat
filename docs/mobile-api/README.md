@@ -20,6 +20,7 @@ Backend analysis for the **NiazChat** messaging backend (NestJS + PostgreSQL + R
 | [enums.md](./enums.md) | All enums and seeded catalog tables |
 | [error-handling.md](./error-handling.md) | Error envelope, validation, statuses |
 | [feature-matrix.md](./feature-matrix.md) | Supported / partial / unsupported features |
+| [visibility.md](./visibility.md) | Server-enforced visibility: blocked users and banned groups |
 
 ## How the backend is composed
 

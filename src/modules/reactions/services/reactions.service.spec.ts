@@ -58,6 +58,9 @@ function build(
         messageReactRepository as never,
         messageRepository as never,
         rateLimit as never,
+        {
+            blockersOfViewer: () => Promise.resolve(new Set<number>()),
+        } as never,
     );
 
     return {
@@ -292,6 +295,9 @@ describe('ReactionsService page queries', () => {
             messageReactRepository as never,
             messageRepository as never,
             { consume: jest.fn() } as never,
+            {
+                blockersOfViewer: () => Promise.resolve(new Set<number>()),
+            } as never,
         );
         return {
             service,

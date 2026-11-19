@@ -45,8 +45,13 @@ API output: raw rows in `getAllChats` (relations unloaded); `chatInfo` = `getInf
 ## chat_members
 
 ```ts
-{ id, chatId, userId, roleId }
+{ id, chatId, userId, roleId, clearedBeforeId: number|null,
+  promotedById: UserId|null /* who made this member admin */ }
 ```
+
+Admin grants live in `permission_admin` (`memberId` → `permission_chats.name`).
+The 12 keys + legacy aliases are documented in
+[groups.md](./groups.md#the-12-permissions-contract).
 
 ## chat_seen
 

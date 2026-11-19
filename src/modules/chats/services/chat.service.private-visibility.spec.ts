@@ -8,7 +8,11 @@ import { JwtPayload } from 'src/common/types/jwt-payload.type';
  * grouped query each rather than per-chat lookups.
  */
 
-function build(anyMessageIds: string[]) {
+function build(
+    anyMessageIds: string[],
+    latestMessages: Array<{ chatId: string; maxId: string | null }> = [],
+    clearedBeforeId?: number,
+) {
     const chatWithMessage = {
         id: 10,
         type: TypeChatEnum.PRIVATE,
@@ -30,12 +34,13 @@ function build(anyMessageIds: string[]) {
         leftJoinAndMapOne: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
-        getMany: jest
-            .fn()
-            .mockResolvedValue([
-                { chat: chatWithMessage },
-                { chat: emptyChat },
-            ]),
+        getMany: jest.fn().mockResolvedValue([
+            {
+                chat: chatWithMessage,
+                ...(clearedBeforeId === undefined ? {} : { clearedBeforeId }),
+            },
+            { chat: emptyChat },
+        ]),
     };
     const memberRepository = {
         createQueryBuilder: jest.fn().mockReturnValue(membershipBuilder),
@@ -57,12 +62,20 @@ function build(anyMessageIds: string[]) {
         ]),
     };
 
+    let rawCall = 0;
     const messageBuilder = {
         select: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
-        getRawMany: jest
-            .fn()
-            .mockResolvedValue(anyMessageIds.map((chatId) => ({ chatId }))),
+        addSelect: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        // 1st query: chat ids with any message; 2nd: newest id per chat.
+        getRawMany: jest.fn(() =>
+            Promise.resolve(
+                rawCall++ === 0
+                    ? anyMessageIds.map((chatId) => ({ chatId }))
+                    : latestMessages,
+            ),
+        ),
     };
     const messageRepository = {
         createQueryBuilder: jest.fn().mockReturnValue(messageBuilder),
@@ -77,6 +90,10 @@ function build(anyMessageIds: string[]) {
         {} as never,
         {} as never,
         {} as never,
+        {
+            blockersOfViewer: (): Promise<Set<number>> =>
+                Promise.resolve(new Set<number>()),
+        } as never,
     );
 
     return { service, memberRepository, messageRepository, messageBuilder };
@@ -115,6 +132,31 @@ describe('ChatService.getUserChats — private visibility', () => {
             .map((call: unknown[]) => String(call[0]))
             .join(' ');
         expect(whereClauses).not.toContain('isDeleted');
+    });
+
+    it('hides a chat deleted for the caller until a message newer than the boundary exists', async () => {
+        // The caller deleted chat 10 when message 150 was the newest. The
+        // stored latest is still 150 → hidden. Chat 11 was never deleted.
+        const hidden = build(
+            ['10', '11'],
+            [{ chatId: '10', maxId: '150' }],
+            150,
+        );
+        const hiddenChats = await hidden.service.getUserChats({
+            sub: 1,
+        } as unknown as JwtPayload);
+        expect(hiddenChats.map((chat) => Number(chat.id))).toEqual([11]);
+
+        // A new message (id 151) restores the conversation for the caller.
+        const restored = build(
+            ['10', '11'],
+            [{ chatId: '10', maxId: '151' }],
+            150,
+        );
+        const restoredChats = await restored.service.getUserChats({
+            sub: 1,
+        } as unknown as JwtPayload);
+        expect(restoredChats.map((chat) => Number(chat.id))).toEqual([10, 11]);
     });
 
     it('serializes the peer on a private chat row', async () => {
