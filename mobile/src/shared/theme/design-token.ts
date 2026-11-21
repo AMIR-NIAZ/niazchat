@@ -25,6 +25,12 @@ export const palette = {
     },
     accent: '#A970F5',
     highlight: '#DCC5FF',
+    link: {
+        /** Classic link blue; 5.35:1 on the dark elevated bubble. */
+        base: '#1E90FF',
+        /** Lighter blue for the purple own-bubble surface; 4.87:1. */
+        onAccent: '#CFE3FF',
+    },
     neutral: {
         0: '#09070F',
         50: '#120D1C',
@@ -90,39 +96,57 @@ export const radii = {
 export const typography = {
     display: {
         fontSize: 30,
+        lineHeight: 38,
         fontWeight: '700' as const,
         letterSpacing: -0.6,
         color: palette.text.primary,
     },
     title: {
         fontSize: 22,
+        lineHeight: 28,
         fontWeight: '700' as const,
         letterSpacing: -0.3,
         color: palette.text.primary,
     },
     heading: {
         fontSize: 18,
+        lineHeight: 24,
         fontWeight: '700' as const,
         letterSpacing: -0.2,
         color: palette.text.primary,
     },
     body: {
         fontSize: 15,
-        fontWeight: '400' as const,
         lineHeight: 21,
+        fontWeight: '400' as const,
         color: palette.text.primary,
     },
     label: {
         fontSize: 13,
+        lineHeight: 18,
         fontWeight: '600' as const,
         color: palette.text.primary,
     },
     caption: {
         fontSize: 12,
+        lineHeight: 16,
         fontWeight: '500' as const,
         color: palette.text.secondary,
     },
+    /** Badges, pin glyphs and other tiny chrome inside dense rows. */
+    micro: {
+        fontSize: 10,
+        lineHeight: 14,
+        fontWeight: '700' as const,
+    },
 } as const;
+
+/**
+ * Cap for system font scaling inside dense chrome (chat rows, headers).
+ * Text still honors accessibility scaling, but a 2× system size can no longer
+ * squeeze a one-line label into an ellipsis or push header actions off screen.
+ */
+export const MAX_FONT_SCALE = 1.2;
 
 /** BlurView intensity presets (0–100). */
 export const blur = {

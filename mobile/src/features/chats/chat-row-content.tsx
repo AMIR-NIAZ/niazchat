@@ -1,8 +1,14 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
 import { EllipsisVertical } from 'lucide-react-native';
-import { UserAvatar } from '../../shared/components';
-import { palette, radii, spacing, typography } from '../../shared/theme';
+import { SafeText, UserAvatar } from '../../shared/components';
+import {
+    MAX_FONT_SCALE,
+    palette,
+    radii,
+    spacing,
+    typography,
+} from '../../shared/theme';
 import { getChatDisplay } from './chats-model';
 import type { ChatPreview } from './chats-model';
 
@@ -39,39 +45,45 @@ export function ChatRowContent({
 
     return (
         <View style={[styles.row, style]}>
-            <UserAvatar
-                userId={display.userId ?? Number(chat.id)}
-                name={display.title}
-                uri={display.avatarUri}
-                size={44}
-            />
+            <View style={styles.avatarSlot}>
+                <UserAvatar
+                    userId={display.userId ?? Number(chat.id)}
+                    name={display.title}
+                    uri={display.avatarUri}
+                    size={44}
+                />
+            </View>
             <View style={styles.body}>
                 <View style={styles.titleRow}>
-                    <Text
+                    <SafeText
                         style={[typography.heading, styles.titleText]}
-                        numberOfLines={1}
+                        lines={1}
+                        maxFontSizeMultiplier={MAX_FONT_SCALE}
                     >
                         {display.title}
-                    </Text>
+                    </SafeText>
                     {pinned && (
                         <Text
                             style={styles.pinGlyph}
+                            numberOfLines={1}
+                            maxFontSizeMultiplier={MAX_FONT_SCALE}
                             accessibilityLabel="Pinned chat"
                         >
                             📌
                         </Text>
                     )}
                 </View>
-                <Text
+                <SafeText
                     style={[
                         typography.caption,
                         styles.preview,
                         unread > 0 && styles.unreadPreview,
                     ]}
-                    numberOfLines={1}
+                    lines={1}
+                    maxFontSizeMultiplier={MAX_FONT_SCALE}
                 >
                     {previewText}
-                </Text>
+                </SafeText>
             </View>
             <View style={styles.meta}>
                 {unread > 0 && (
@@ -79,13 +91,31 @@ export function ChatRowContent({
                         style={styles.unreadBadge}
                         accessibilityLabel={`${unread} unread messages`}
                     >
-                        <Text style={styles.unreadBadgeText}>
+                        <Text
+                            style={styles.unreadBadgeText}
+                            numberOfLines={1}
+                            maxFontSizeMultiplier={MAX_FONT_SCALE}
+                        >
                             {unreadLabel}
                         </Text>
                     </View>
                 )}
-                <Text style={typography.caption}>{time.slice(11, 16)}</Text>
-                {chat.isBan && <Text style={styles.banBadge}>banned</Text>}
+                <SafeText
+                    style={[typography.caption, styles.time]}
+                    lines={1}
+                    maxFontSizeMultiplier={MAX_FONT_SCALE}
+                >
+                    {time.slice(11, 16)}
+                </SafeText>
+                {chat.isBan && (
+                    <SafeText
+                        style={styles.banBadge}
+                        lines={1}
+                        maxFontSizeMultiplier={MAX_FONT_SCALE}
+                    >
+                        banned
+                    </SafeText>
+                )}
             </View>
             {onMenuPress === undefined ? (
                 // The lifted popup copy keeps the same trailing width and the
@@ -119,17 +149,40 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.xxs,
         borderRadius: radii.sm,
     },
-    body: { flex: 1, gap: 2 },
+    // The one flex child of the row: it owns every pixel the fixed avatar,
+    // trailing column and menu button leave over.
+    avatarSlot: { width: 44, height: 44, flexShrink: 0 },
+    body: { flex: 1, minWidth: 0, gap: 2 },
     titleRow: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: spacing.xxs,
+        flexShrink: 1,
+        minWidth: 0,
     },
-    titleText: { flexShrink: 1 },
-    pinGlyph: { fontSize: 11 },
-    preview: { color: palette.text.secondary },
+    // `flex: 1` (not only flexShrink) is what makes the name use the WHOLE
+    // remaining title width; the pin glyph keeps its intrinsic size.
+    titleText: {
+        flex: 1,
+        minWidth: 0,
+        includeFontPadding: false,
+    },
+    pinGlyph: { ...typography.micro, flexShrink: 0 },
+    preview: {
+        color: palette.text.secondary,
+        minWidth: 0,
+        includeFontPadding: false,
+    },
     unreadPreview: { color: palette.text.primary, fontWeight: '700' },
-    meta: { alignItems: 'flex-end', gap: 2 },
+    // Fixed trailing column: its width never shrinks because of a long name,
+    // and a localised/oversized time string can never steal the text's width.
+    meta: {
+        alignItems: 'flex-end',
+        flexShrink: 0,
+        gap: 2,
+        maxWidth: 72,
+    },
+    time: { flexShrink: 0 },
     unreadBadge: {
         minWidth: 18,
         paddingHorizontal: 5,
@@ -140,11 +193,10 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     unreadBadgeText: {
+        ...typography.micro,
         color: palette.text.onAccent,
-        fontSize: 10,
-        fontWeight: '700',
     },
-    banBadge: { color: palette.semantic.danger, fontSize: 10 },
+    banBadge: { ...typography.micro, color: palette.semantic.danger },
     // 32 px visual with an 8 px hitSlop: a comfortable iOS target inside the
     // row without widening the trailing column too much.
     menuSlot: {

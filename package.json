@@ -24,7 +24,10 @@
         "seed:run-all": "npm run cli -- run-all",
         "seed:list": "npm run cli -- list",
         "seed:run:user": "npm run cli -- run UserSeeder -- --opts '{\"onlyIfEmpty\": true}'",
-        "seed:demo": "ts-node --require tsconfig-paths/register --project tsconfig.json src/modules/seeders/demo-seed.ts"
+        "seed:demo": "ts-node --require tsconfig-paths/register --project tsconfig.json src/modules/seeders/demo-seed.ts",
+        "seed:messages": "ts-node --require tsconfig-paths/register --project tsconfig.json src/modules/seeders/seed-messages.ts",
+        "backfill:links": "ts-node --require tsconfig-paths/register --project tsconfig.json src/modules/seeders/backfill-message-links.ts",
+        "seed:shared-content": "ts-node --require tsconfig-paths/register --project tsconfig.json src/modules/seeders/seed-shared-content.ts"
     },
     "dependencies": {
         "@nestjs/bullmq": "^11.0.4",

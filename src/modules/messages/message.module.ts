@@ -4,6 +4,9 @@ import { Message } from './entities/message.entity';
 import { MessageGateway } from './gateways/message.gateway';
 import { MessageService } from './services/message.service';
 import { MessageForwardService } from './services/message-forward.service';
+import { MessageLinkService } from './services/message-link.service';
+import { MessageMediaService } from './services/message-media.service';
+import { MessageLink } from './entities/message-link.entity';
 import { ForwardRequestStore } from './services/forward-request.store';
 import { ChatMember } from '../chats/entities/chat_members.entity';
 import { Chat } from '../chats/entities/chat.entity';
@@ -35,12 +38,15 @@ import { ReactionsModule } from '../reactions/reaction.module';
             RoleChat,
             TypeMessage,
             Attachment,
+            MessageLink,
         ]),
     ],
     providers: [
         MessageGateway,
         MessageService,
         MessageForwardService,
+        MessageLinkService,
+        MessageMediaService,
         ForwardRequestStore,
         JwtAppService,
         JwtService,

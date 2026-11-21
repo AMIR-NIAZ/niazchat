@@ -32,6 +32,7 @@ import {
     AttachmentId,
 } from 'src/common/types/brands.type';
 import { ContentResolverService } from './content-resolver.service';
+import { MessageLinkService } from './message-link.service';
 import { AttachmentService } from 'src/modules/attachments/services/attachment.service';
 import { Attachment } from 'src/modules/attachments/entities/attachment.entity';
 import { ChatAccessService } from 'src/modules/chats/services/chat-access.service';
@@ -76,6 +77,7 @@ export class MessageService {
         private readonly reactions: ReactionsService,
         private readonly userBlocks: UserBlockService,
         private readonly chats: ChatService,
+        private readonly messageLinks: MessageLinkService,
     ) {}
 
     async create(user: JwtPayload, dto: CreateMessageDto): Promise<Message> {
@@ -274,6 +276,17 @@ export class MessageService {
                     saved.id,
                 );
             }
+
+            // Links are extracted once, at write time, so the Links tab is an
+            // indexed lookup. Same transaction: a message and its links are
+            // either both stored or neither is.
+            await this.messageLinks.syncForMessage(
+                Number(saved.id),
+                Number(chatId),
+                content,
+                saved.createdAt,
+                manager,
+            );
 
             return saved;
         });
@@ -663,6 +676,13 @@ export class MessageService {
         message.content = newContent;
         message.isEdited = true;
         await this.messageRepository.save(message);
+        // An edit can add, change or remove URLs: replace this message's rows.
+        await this.messageLinks.syncForMessage(
+            Number(messageId),
+            Number(chatId),
+            newContent,
+            message.createdAt,
+        );
 
         // The edit echo must carry the full attachment metadata, reply preview
         // and forward origin, not a light row with no relations.
@@ -750,6 +770,8 @@ export class MessageService {
         });
         // Soft delete keeps the row, so its reactions would otherwise linger.
         await this.reactions.clearForMessage(Number(messageId));
+        // Deleted-for-everyone messages must disappear from the Links tab too.
+        await this.messageLinks.clearForMessage(Number(messageId));
 
         return { wasPinned };
     }

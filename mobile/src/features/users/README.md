@@ -12,7 +12,7 @@ Profile, multi-avatar gallery & user lookup (docs/mobile-api/users.md).
 - Legacy `DELETE /user/delete-avatar` — body `{ avatar: "<exact stored path>" }`; kept for old clients.
 
 ## Notes
-- The profile screens display `User ID: <users.id>` (own profile and public profile). That numeric id is a public identifier (e.g. the group Add members rows link to it); internal membership/contact row ids are never shown or requested.
+- The own profile screen does NOT display `User ID`; the id stays internal (route param, API path, cache keys). The public profile of another user keeps it internal too, and the group Add members rows still show it as a public identifier. Internal membership/contact row ids are never shown or requested.
 - `avatars[0]` is the current photo everywhere; a user keeps up to 10. All writes happen server-side in a single SQL update under a row lock.
 - `avatars` are server-relative paths that already include the `uploads/` mount (`uploads/avatars/…`) → resolve via `absoluteUploadUrl()`, which strips that segment before joining `uploadsBaseUrl` (never `/uploads/uploads/...`). Keep the basename next to each URL (`ProfileAvatar.fileName`) for mutate actions.
 - Mutations MERGE their response into `['me']` (never replace it: `id` and fields the response omits survive) and invalidate `['me']`, `['chats']` and `['chat-info']`. `['messages']` is intentionally NOT invalidated. Already-open chats pick up a new avatar on their next fetch (no avatar socket event exists).

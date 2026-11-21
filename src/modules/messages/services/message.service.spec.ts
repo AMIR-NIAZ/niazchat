@@ -6,6 +6,7 @@ import {
     NotFoundException,
 } from '@nestjs/common';
 import { MessageService } from './message.service';
+import { MessageLinkService } from './message-link.service';
 import { Message } from '../entities/message.entity';
 import { ChatMember } from 'src/modules/chats/entities/chat_members.entity';
 import { Chat } from 'src/modules/chats/entities/chat.entity';
@@ -93,6 +94,13 @@ describe('MessageService (attachment integration)', () => {
         const module: TestingModule = await Test.createTestingModule({
             providers: [
                 MessageService,
+                {
+                    provide: MessageLinkService,
+                    useValue: {
+                        syncForMessage: jest.fn(),
+                        clearForMessage: jest.fn(),
+                    },
+                },
                 {
                     provide: getRepositoryToken(Message),
                     useValue: messageRepository,
@@ -735,6 +743,13 @@ describe('MessageService edit/delete rules (ownership, chat match, state)', () =
             providers: [
                 MessageService,
                 {
+                    provide: MessageLinkService,
+                    useValue: {
+                        syncForMessage: jest.fn(),
+                        clearForMessage: jest.fn(),
+                    },
+                },
+                {
                     provide: getRepositoryToken(Message),
                     useValue: messageRepository,
                 },
@@ -1136,6 +1151,13 @@ describe('MessageService.getPage (cursor pagination)', () => {
         const module: TestingModule = await Test.createTestingModule({
             providers: [
                 MessageService,
+                {
+                    provide: MessageLinkService,
+                    useValue: {
+                        syncForMessage: jest.fn(),
+                        clearForMessage: jest.fn(),
+                    },
+                },
                 {
                     provide: getRepositoryToken(Message),
                     useValue: messageRepository,

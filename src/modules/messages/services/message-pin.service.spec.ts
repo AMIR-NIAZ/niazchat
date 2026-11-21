@@ -93,6 +93,7 @@ describe('MessageService pinning', () => {
             reactions as never,
             {} as never,
             {} as never,
+            { syncForMessage: jest.fn(), clearForMessage: jest.fn() } as never,
         );
     });
 

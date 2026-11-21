@@ -15,6 +15,7 @@ import {
     AppText,
     GlassHeader,
     GlassInput,
+    SafeText,
     Screen,
     UserAvatar,
     palette,
@@ -265,9 +266,9 @@ export default function NewChatScreen(): React.ReactElement {
                                 size={44}
                             />
                             <View style={styles.rowBody}>
-                                <Text style={typography.body} numberOfLines={1}>
+                                <SafeText style={typography.body} lines={1}>
                                     {item.name}
-                                </Text>
+                                </SafeText>
                                 <Text
                                     style={typography.caption}
                                     numberOfLines={1}
@@ -459,6 +460,6 @@ const styles = StyleSheet.create({
         borderRadius: radii.sm,
     },
     rowPressed: { backgroundColor: palette.neutral[50] },
-    rowBody: { flex: 1, gap: 2 },
+    rowBody: { flex: 1, minWidth: 0, gap: 2 },
     error: { color: palette.semantic.danger, textAlign: 'center' },
 });

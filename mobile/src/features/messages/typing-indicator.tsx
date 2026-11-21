@@ -6,7 +6,13 @@ import {
     Text,
     View,
 } from 'react-native';
-import { palette, spacing, typography } from '../../shared/theme';
+import {
+    MAX_FONT_SCALE,
+    palette,
+    spacing,
+    typography,
+} from '../../shared/theme';
+import { getLayoutDirection } from '../../shared/text-direction';
 
 /**
  * Group-chat header subtitle: "N members" normally, an animated "… is typing"
@@ -140,7 +146,15 @@ export function GroupChatSubtitle(props: {
     typingLabel?: string;
     /** Private chats: base line when there is no member count (presence). */
     fallbackText?: string;
+    /**
+     * `layout` (default) follows the app's layout direction, so the subtitle
+     * stays on the same edge as the names in the header. `center` centers it
+     * for the chat header's centered title block.
+     */
+    align?: 'layout' | 'center';
 }): React.ReactElement {
+    const centered = (props.align ?? 'layout') === 'center';
+    const layoutDirection = getLayoutDirection();
     const typingActive = props.typing === true || props.names.length > 0;
     const typingText = typingActive
         ? (props.typingLabel ?? formatTypingText(props.names) ?? null)
@@ -235,13 +249,30 @@ export function GroupChatSubtitle(props: {
 
     return (
         <View
-            style={styles.row}
+            style={[
+                styles.row,
+                centered && styles.rowCenter,
+                !centered && layoutDirection === 'rtl' && styles.rowRtl,
+            ]}
             accessible={visibleText !== ''}
             accessibilityLabel={visibleText !== '' ? visibleText : undefined}
         >
             <Animated.Text
-                style={[styles.text, { opacity: fade }]}
+                style={[
+                    styles.text,
+                    {
+                        writingDirection: layoutDirection,
+                        textAlign: centered
+                            ? 'center'
+                            : layoutDirection === 'rtl'
+                              ? 'right'
+                              : 'left',
+                    },
+                    { opacity: fade },
+                ]}
                 numberOfLines={1}
+                ellipsizeMode="tail"
+                maxFontSizeMultiplier={MAX_FONT_SCALE}
             >
                 {displayed.text}
             </Animated.Text>
@@ -254,13 +285,21 @@ const styles = StyleSheet.create({
     row: {
         flexDirection: 'row',
         alignItems: 'center',
+        alignSelf: 'stretch',
+        minWidth: 0,
         minHeight: 16,
         overflow: 'hidden',
     },
+    rowRtl: { justifyContent: 'flex-end' },
+    rowCenter: { justifyContent: 'center' },
     text: {
         flexShrink: 1,
+        minWidth: 0,
         ...typography.caption,
         color: palette.neutral[500],
+        // Android adds font padding that differs between Persian and Latin
+        // glyphs; the explicit line height above owns the row's height.
+        includeFontPadding: false,
     },
     dotsRow: {
         flexDirection: 'row',

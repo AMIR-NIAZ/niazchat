@@ -1,8 +1,29 @@
 /** Wire kind of an attachment: media renders inline, everything else as a row. */
 export type AttachmentKind = 'image' | 'video' | 'voice' | 'music' | 'file';
 
+/** Image containers the upload service accepts and renders inline. */
+export const IMAGE_MIME_TYPES: readonly string[] = [
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'image/gif',
+];
+
+/** Video containers probed and accepted at upload time. */
+export const VIDEO_MIME_TYPES: readonly string[] = [
+    'video/mp4',
+    'video/quicktime',
+    'video/webm',
+];
+
+/** Everything the Media tab shows (images + videos). */
+export const MEDIA_MIME_TYPES: readonly string[] = [
+    ...IMAGE_MIME_TYPES,
+    ...VIDEO_MIME_TYPES,
+];
+
 /** Audio containers uploaded as music tracks (never as generic files). */
-const MUSIC_MIME_TYPES: readonly string[] = [
+export const MUSIC_MIME_TYPES: readonly string[] = [
     'audio/mpeg',
     'audio/mp4',
     'audio/x-m4a',

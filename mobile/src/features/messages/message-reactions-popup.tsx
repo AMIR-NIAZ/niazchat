@@ -7,7 +7,7 @@ import {
     Text,
     View,
 } from 'react-native';
-import { UserAvatar } from '../../shared/components';
+import { SafeText, UserAvatar } from '../../shared/components';
 import { palette, radii, spacing, typography } from '../../shared/theme';
 import type { ReactionGroupDto, ReactionUserDto } from '../../core/api';
 import { fetchMessageReactions } from './messages-socket-api';
@@ -139,13 +139,13 @@ export function MessageReactionsCard({
                                             size={36}
                                         />
                                         <View style={styles.userText}>
-                                            <Text
+                                            <SafeText
                                                 style={styles.userName}
-                                                numberOfLines={1}
+                                                lines={1}
                                             >
                                                 {user.name}
                                                 {self ? ' (you)' : ''}
-                                            </Text>
+                                            </SafeText>
                                             {user.username !== null &&
                                                 user.username !== '' && (
                                                     <Text
@@ -211,7 +211,7 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.xs,
     },
     pressed: { opacity: 0.6 },
-    userText: { flexShrink: 1 },
+    userText: { flexShrink: 1, minWidth: 0 },
     userName: {
         color: palette.text.primary,
         fontSize: 14,

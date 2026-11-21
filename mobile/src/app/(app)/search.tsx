@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Search, X } from 'lucide-react-native';
 import {
     AppText,
+    SafeText,
     Screen,
     UserAvatar,
     palette,
@@ -607,9 +608,9 @@ function RecentRow(props: {
                 size={44}
             />
             <View style={styles.rowBody}>
-                <Text style={typography.body} numberOfLines={1}>
+                <SafeText style={typography.body} lines={1}>
                     {entry.name}
-                </Text>
+                </SafeText>
                 {entry.kind === 'user' && (
                     <Text style={typography.caption} numberOfLines={1}>
                         @{entry.username}
@@ -638,9 +639,9 @@ function ChatResultRow(props: {
                 size={44}
             />
             <View style={styles.rowBody}>
-                <Text style={typography.body} numberOfLines={1}>
+                <SafeText style={typography.body} lines={1}>
                     {displayTitle(chat)}
-                </Text>
+                </SafeText>
                 <Text style={typography.caption} numberOfLines={1}>
                     {chatPreviewText(chat.lastMessage, currentUserId)}
                 </Text>
@@ -676,9 +677,9 @@ function PersonRow(props: {
                 size={44}
             />
             <View style={styles.rowBody}>
-                <Text style={typography.body} numberOfLines={1}>
+                <SafeText style={typography.body} lines={1}>
                     {props.item.name}
-                </Text>
+                </SafeText>
                 <Text style={typography.caption} numberOfLines={1}>
                     @{props.item.username}
                 </Text>
@@ -776,7 +777,7 @@ const styles = StyleSheet.create({
         borderRadius: radii.sm,
     },
     rowPressed: { backgroundColor: palette.glass.highlight },
-    rowBody: { flex: 1, gap: 2 },
+    rowBody: { flex: 1, minWidth: 0, gap: 2 },
     rowTrailing: {
         flexDirection: 'row',
         alignItems: 'center',

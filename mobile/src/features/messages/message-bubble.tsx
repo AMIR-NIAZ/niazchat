@@ -9,7 +9,7 @@ import {
     View,
 } from 'react-native';
 import Reanimated from 'react-native-reanimated';
-import { UserAvatar } from '../../shared/components';
+import { SafeText, UserAvatar } from '../../shared/components';
 import { palette, radii, spacing } from '../../shared/theme';
 import { LONG_PRESS_DELAY_MS } from '../../shared/long-press';
 import { measureInWindow, usePopupHidden } from '../../shared/context-popup';
@@ -33,6 +33,9 @@ import { VoiceBubble } from '../voice/voice-bubble';
 import { MusicBubble } from '../music/music-bubble';
 import type { MusicTrack } from '../../shared/music-player';
 import { splitLinkifiedText } from '../groups/invite-links-model';
+import type { LinkifiedSegment } from '../groups/invite-links-model';
+import { parseMentions } from './mentions';
+import type { MentionSegment } from './mentions';
 import { childPressBlocksMenu, resolveBubblePress } from './bubble-press';
 import { Check, CheckCheck, Clock3 } from 'lucide-react-native';
 import { MessageHighlight } from './message-highlight';
@@ -73,6 +76,8 @@ interface MessageBubbleProps {
     onOpenProfile?: ((message: ChatMessage) => void) | undefined;
     /** Opens a tappable link inside the message body (invite links, URLs). */
     onOpenLink?: ((url: string) => void) | undefined;
+    /** Opens the profile of a user mentioned as `@username` in the body. */
+    onMentionPress?: ((username: string) => void) | undefined;
     /**
      * Opens the full-screen viewer at an image/video of this message. `origin`
      * is the tapped tile's window rect (the viewer's hero animation start).
@@ -106,6 +111,9 @@ interface MessageBubbleProps {
     /** This chat's music tracks, ascending: the player's next/previous queue. */
     musicQueue?: MusicTrack[] | undefined;
 }
+
+/** One inline piece of message text after link + mention parsing. */
+type MessageBodySegment = LinkifiedSegment | MentionSegment;
 
 /** Bubble avatar edge length (the spacer keeps the other rows aligned). */
 const AVATAR_SIZE = 45;
@@ -147,6 +155,7 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
         showAvatar = false,
         onOpenProfile,
         onOpenLink,
+        onMentionPress,
         onOpenMedia,
         onCancelPending,
         onRetryPending,
@@ -165,6 +174,13 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
     // A child control that saw this touch start keeps its own behaviour; the
     // bubble menu is suppressed for the remainder of that gesture.
     const childPressAtRef = useRef(0);
+    // A long press on a mention opens the bubble menu; the matching onPress
+    // (fired on release by some platforms) must not also open the profile.
+    const mentionLongPressedRef = useRef(false);
+    /** Inline mention currently held down, for its opacity feedback. */
+    const [pressedMentionIndex, setPressedMentionIndex] = useState<
+        number | null
+    >(null);
     const markChildPress = useCallback((): void => {
         childPressAtRef.current = Date.now();
     }, []);
@@ -228,12 +244,22 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
         othersLastSeenId !== null &&
         message.id <= othersLastSeenId;
 
-    // Split once per content change; plain text is the single-segment case.
-    const contentSegments = useMemo(
-        () =>
-            message.content === null ? [] : splitLinkifiedText(message.content),
-        [message.content],
-    );
+    // Split once per content change: links first, then mentions inside each
+    // plain-text piece so both stay tappable. Plain text is the untapped case.
+    const contentSegments = useMemo<MessageBodySegment[]>(() => {
+        if (message.content === null) {
+            return [];
+        }
+        const segments: MessageBodySegment[] = [];
+        for (const segment of splitLinkifiedText(message.content)) {
+            if (segment.type === 'text') {
+                segments.push(...parseMentions(segment.text));
+            } else {
+                segments.push(segment);
+            }
+        }
+        return segments;
+    }, [message.content]);
     const reply = message.replyTo;
     const replyId = reply?.id ?? message.replyToId;
     const hasReply = reply !== null || replyId !== null;
@@ -315,15 +341,16 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                     }
                     style={styles.forwardHeader}
                 >
-                    <Text
+                    <SafeText
                         style={[
                             styles.forwardText,
                             mine && styles.forwardTextMine,
                         ]}
-                        numberOfLines={1}
+                        lines={1}
+                        align="content"
                     >
                         ↗ Forwarded from {forwarded.name || 'unknown'}
-                    </Text>
+                    </SafeText>
                 </Pressable>
             )}
             {hasReply && (
@@ -354,15 +381,16 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                     />
                     <View style={styles.quoteBody}>
                         {!replyDeleted && (
-                            <Text
+                            <SafeText
                                 style={[
                                     styles.quoteName,
                                     mine && styles.quoteNameMine,
                                 ]}
-                                numberOfLines={1}
+                                lines={1}
+                                align="content"
                             >
                                 {replyName}
-                            </Text>
+                            </SafeText>
                         )}
                         <Text
                             style={[
@@ -383,7 +411,13 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
             )}
             {showSender &&
                 (onOpenProfile === undefined ? (
-                    <Text style={styles.senderName}>{message.senderName}</Text>
+                    <SafeText
+                        lines={1}
+                        style={styles.senderName}
+                        align="content"
+                    >
+                        {message.senderName}
+                    </SafeText>
                 ) : (
                     // Separate tappable target from the bubble: long-press,
                     // retry, selection and swipe-to-reply stay untouched.
@@ -397,9 +431,13 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                         delayLongPress={LONG_PRESS_DELAY_MS}
                         style={({ pressed }) => pressed && styles.pressed}
                     >
-                        <Text style={styles.senderName}>
+                        <SafeText
+                            lines={1}
+                            style={styles.senderName}
+                            align="content"
+                        >
                             {message.senderName}
-                        </Text>
+                        </SafeText>
                     </Pressable>
                 ))}
             {message.attachments.length > 0 && (
@@ -493,28 +531,94 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                         message.attachments.length > 0 && styles.caption,
                     ]}
                 >
-                    {contentSegments.map((segment, index) =>
-                        segment.type === 'text' ? (
-                            <Text key={index}>{segment.text}</Text>
-                        ) : (
+                    {contentSegments.map((segment, index) => {
+                        if (segment.type === 'text') {
+                            return <Text key={index}>{segment.text}</Text>;
+                        }
+                        if (segment.type === 'link') {
+                            return (
+                                <Text
+                                    key={index}
+                                    accessibilityRole="link"
+                                    accessibilityLabel={segment.url}
+                                    style={[
+                                        styles.link,
+                                        mine && styles.linkMine,
+                                    ]}
+                                    onPress={
+                                        onOpenLink === undefined
+                                            ? undefined
+                                            : (): void => {
+                                                  markChildPress();
+                                                  onOpenLink(segment.url);
+                                              }
+                                    }
+                                >
+                                    {segment.text}
+                                </Text>
+                            );
+                        }
+                        return (
                             <Text
                                 key={index}
                                 accessibilityRole="link"
-                                accessibilityLabel={segment.url}
-                                style={[styles.link, mine && styles.linkMine]}
-                                onPress={
-                                    onOpenLink === undefined
+                                accessibilityLabel={`Open ${segment.username}'s profile`}
+                                accessibilityHint="Opens the user profile"
+                                style={[
+                                    styles.mention,
+                                    mine && styles.mentionMine,
+                                    onMentionPress !== undefined &&
+                                        pressedMentionIndex === index &&
+                                        styles.mentionPressed,
+                                ]}
+                                suppressHighlighting={true}
+                                onPressIn={
+                                    onMentionPress === undefined
                                         ? undefined
                                         : (): void => {
+                                              mentionLongPressedRef.current = false;
+                                              setPressedMentionIndex(index);
                                               markChildPress();
-                                              onOpenLink(segment.url);
+                                          }
+                                }
+                                onPressOut={
+                                    onMentionPress === undefined
+                                        ? undefined
+                                        : (): void => {
+                                              setPressedMentionIndex(
+                                                  (current) =>
+                                                      current === index
+                                                          ? null
+                                                          : current,
+                                              );
+                                          }
+                                }
+                                onLongPress={
+                                    onMentionPress === undefined
+                                        ? undefined
+                                        : (): void => {
+                                              mentionLongPressedRef.current = true;
+                                              childLongPress?.();
+                                          }
+                                }
+                                onPress={
+                                    onMentionPress === undefined
+                                        ? undefined
+                                        : (): void => {
+                                              if (
+                                                  mentionLongPressedRef.current
+                                              ) {
+                                                  mentionLongPressedRef.current = false;
+                                                  return;
+                                              }
+                                              onMentionPress(segment.username);
                                           }
                                 }
                             >
                                 {segment.text}
                             </Text>
-                        ),
-                    )}
+                        );
+                    })}
                 </Text>
             )}
             {message.reactions.length > 0 && (
@@ -1047,7 +1151,7 @@ const styles = StyleSheet.create({
         gap: spacing.xs,
     },
     avatarSlot: { width: AVATAR_SIZE },
-    bubbleSlot: { flexShrink: 1 },
+    bubbleSlot: { flexShrink: 1, minWidth: 0 },
     bubble: {
         borderRadius: radii.lg,
         paddingHorizontal: spacing.sm,
@@ -1122,6 +1226,7 @@ const styles = StyleSheet.create({
     quoteBarMine: { backgroundColor: palette.primary[100] },
     quoteBody: {
         flexShrink: 1,
+        minWidth: 0,
         paddingHorizontal: spacing.xs,
         paddingVertical: spacing.xxs,
     },
@@ -1143,6 +1248,20 @@ const styles = StyleSheet.create({
     linkMine: {
         color: palette.text.onAccent,
         textDecorationLine: 'underline',
+    },
+    // Mentions use the standard link blue on neutral bubbles and a lighter
+    // blue on the purple own-bubble surface (both pass 4.5:1). The app is
+    // dark-only; underline matches the existing message-link style.
+    mention: {
+        color: palette.link.base,
+        fontWeight: '600',
+        textDecorationLine: 'underline',
+    },
+    mentionMine: {
+        color: palette.link.onAccent,
+    },
+    mentionPressed: {
+        opacity: 0.6,
     },
     caption: { marginTop: spacing.xxs },
     reactionRow: {

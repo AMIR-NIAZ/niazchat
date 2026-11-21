@@ -1,5 +1,6 @@
 export * from './screen';
 export * from './app-text';
+export * from './safe-text';
 export * from './form-field';
 export * from './gate-placeholder';
 export * from './offline-caption';
@@ -15,6 +16,7 @@ export * from './glass-input';
 export * from './primary-button';
 export * from './section-header';
 export {
+    MAX_FONT_SCALE,
     palette,
     radii,
     spacing,

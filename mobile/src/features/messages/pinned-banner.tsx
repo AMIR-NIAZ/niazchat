@@ -1,6 +1,13 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Pin } from 'lucide-react-native';
-import { palette, radii, spacing } from '../../shared/theme';
+import {
+    MAX_FONT_SCALE,
+    palette,
+    radii,
+    spacing,
+    typography,
+} from '../../shared/theme';
+import { SafeText } from '../../shared/components';
 import { pinnedPreviewText } from './pinned-messages';
 import type { ChatMessage } from './messages-model';
 
@@ -58,14 +65,30 @@ export function PinnedMessageBanner({
                 />
                 <View style={styles.body}>
                     <View style={styles.titleRow}>
-                        <Text style={styles.title}>Pinned Message</Text>
+                        <SafeText
+                            style={styles.title}
+                            lines={1}
+                            maxFontSizeMultiplier={MAX_FONT_SCALE}
+                        >
+                            Pinned Message
+                        </SafeText>
                         {counter !== null && (
-                            <Text style={styles.counter}>{counter}</Text>
+                            <SafeText
+                                style={styles.counter}
+                                lines={1}
+                                maxFontSizeMultiplier={MAX_FONT_SCALE}
+                            >
+                                {counter}
+                            </SafeText>
                         )}
                     </View>
-                    <Text style={styles.preview} numberOfLines={1}>
+                    <SafeText
+                        style={styles.preview}
+                        lines={1}
+                        maxFontSizeMultiplier={MAX_FONT_SCALE}
+                    >
                         {sender !== '' ? `${sender}: ${preview}` : preview}
-                    </Text>
+                    </SafeText>
                 </View>
                 <Pressable
                     accessibilityRole="button"
@@ -97,8 +120,11 @@ const styles = StyleSheet.create({
         backgroundColor: palette.glass.elevated,
         borderWidth: 1,
         borderColor: palette.border.accent,
+        // Never a fixed height: the title + preview lines decide it. A fixed
+        // 40 px (24 px content box) made the SafeText preview shrink to zero
+        // height under flexShrink, so the pinned text disappeared.
         overflow: 'hidden',
-        height: 40,
+        minHeight: 44,
     },
     pressed: {
         opacity: 0.75,
@@ -113,33 +139,40 @@ const styles = StyleSheet.create({
     },
     icon: {
         marginRight: spacing.xs,
+        flexShrink: 0,
     },
     body: {
         flex: 1,
         minWidth: 0,
+        justifyContent: 'center',
+        gap: 1,
     },
     titleRow: {
         flexDirection: 'row',
         alignItems: 'center',
+        gap: spacing.xxs,
+        minWidth: 0,
     },
     title: {
+        ...typography.micro,
+        flexShrink: 1,
+        minWidth: 0,
         color: palette.primary[600],
-        fontSize: 11,
-        fontWeight: '700',
     },
     counter: {
+        ...typography.micro,
+        flexShrink: 0,
+        fontWeight: '500',
         color: palette.text.muted,
-        fontSize: 10,
-        marginLeft: spacing.xxs,
     },
     preview: {
+        ...typography.caption,
         color: palette.text.primary,
-        fontSize: 12,
-        marginTop: 1,
     },
     close: {
         width: 26,
         height: 26,
+        flexShrink: 0,
         alignItems: 'center',
         justifyContent: 'center',
         marginLeft: spacing.xxs,

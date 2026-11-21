@@ -3,6 +3,7 @@ import { PixelRatio, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { avatarFileNameOf, avatarThumbUrl } from '../../core/config/env';
 import { palette } from '../theme';
+import { normalizeSingleLineText } from '../text-direction';
 
 /**
  * Circular (or rounded) avatar built on `expo-image`.
@@ -33,12 +34,15 @@ export function avatarFallbackColor(userId: number): string {
 }
 
 export function avatarInitials(name: string): string {
-    const words = name.trim().split(/\s+/).filter(Boolean);
+    const words = normalizeSingleLineText(name).split(' ').filter(Boolean);
     if (words.length === 0) {
         return '؟';
     }
-    const first = words[0]?.[0] ?? '';
-    const second = words.length > 1 ? (words[1]?.[0] ?? '') : '';
+    // Array.from keeps an emoji (or any astral character) whole instead of
+    // splitting its surrogate pair into a broken half-glyph.
+    const first = Array.from(words[0] ?? '')[0] ?? '';
+    const second =
+        words.length > 1 ? (Array.from(words[1] ?? '')[0] ?? '') : '';
     return `${first}${second}`.toUpperCase();
 }
 

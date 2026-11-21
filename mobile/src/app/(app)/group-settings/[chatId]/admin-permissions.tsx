@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ApiError } from '../../../../core/api';
 import { dialog, toast } from '../../../../shared/dialog';
 import {
+    SafeText,
     Screen,
     UserAvatar,
     palette,
@@ -573,9 +574,9 @@ function ProfileCard(props: {
                 size={64}
             />
             <View style={styles.profileText}>
-                <Text style={styles.profileName} numberOfLines={1}>
+                <SafeText style={styles.profileName} lines={1}>
                     {name}
-                </Text>
+                </SafeText>
                 {props.member.username !== '' ? (
                     <Text style={styles.profileUsername} numberOfLines={1}>
                         @{props.member.username}
@@ -774,7 +775,7 @@ const styles = StyleSheet.create({
         borderWidth: StyleSheet.hairlineWidth,
         borderColor: palette.border.subtle,
     },
-    profileText: { flex: 1, gap: 2 },
+    profileText: { flex: 1, minWidth: 0, gap: 2 },
     profileName: {
         fontSize: 17,
         fontWeight: '700',

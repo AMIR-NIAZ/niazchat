@@ -17,7 +17,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
 import { blur, palette, radii, spacing } from '../../shared/theme';
-import { GlassSurface } from '../../shared/components';
+import { GlassSurface, SafeText } from '../../shared/components';
 import { dialog } from '../../shared/dialog';
 import { isOwnMessage } from './messages-model';
 import type { ReplyPreview } from './messages-model';
@@ -42,7 +42,16 @@ import type { VoiceDraft } from '../voice/voice-draft-store';
 import { useVoiceRecorder } from '../voice/use-voice-recorder';
 import { VoiceRecorderBar } from '../voice/voice-recorder-bar';
 import { formatDuration, hasDuration } from '../attachments/duration';
-import { Mic } from 'lucide-react-native';
+import {
+    Mic,
+    Play,
+    Pause,
+    Film,
+    Paperclip,
+    X,
+    Plus,
+    Send,
+} from 'lucide-react-native';
 
 /**
  * Multiline message composer with attachments.
@@ -580,10 +589,10 @@ export function MessageComposer(
                     <View style={styles.replyBar}>
                         <View style={styles.replyDivider} />
                         <View style={styles.replyTextWrap}>
-                            <Text style={styles.replyTitle} numberOfLines={1}>
+                            <SafeText style={styles.replyTitle} lines={1}>
                                 Replying to{' '}
                                 {replyName(replyTo, props.currentUserId)}
-                            </Text>
+                            </SafeText>
                             <Text style={styles.replySnippet} numberOfLines={1}>
                                 {replySnippet(replyTo)}
                             </Text>
@@ -628,10 +637,12 @@ export function MessageComposer(
                             style={styles.draftPlay}
                         >
                             <Text style={styles.draftPlayText}>
-                                {draftPlayback.attachmentId ===
-                                    draftPlaybackId && draftPlayback.playing
-                                    ? '❚❚'
-                                    : '▶'}
+                                {draftPlayback.attachmentId === draftPlaybackId &&
+                                    draftPlayback.playing ? (
+                                    <Pause size={17} />
+                                ) : (
+                                    <Play size={17} />
+                                )}
                             </Text>
                         </Pressable>
                         <Text style={styles.draftTime}>
@@ -692,7 +703,7 @@ export function MessageComposer(
                                     ) : item.kind === 'video' ? (
                                         <View style={styles.trayFile}>
                                             <Text style={styles.trayFileIcon}>
-                                                🎬
+                                                <Film size={20} />
                                             </Text>
                                             <Text
                                                 style={styles.trayFileName}
@@ -707,7 +718,7 @@ export function MessageComposer(
                                                 style={styles.trayFileIcon}
                                                 numberOfLines={1}
                                             >
-                                                📎
+                                                <Paperclip size={20} />
                                             </Text>
                                             <Text
                                                 style={styles.trayFileName}
@@ -733,7 +744,7 @@ export function MessageComposer(
                                         }
                                     >
                                         <Text style={styles.trayRemoveText}>
-                                            ✕
+                                            <X size={16} />
                                         </Text>
                                     </Pressable>
                                 </View>
@@ -761,7 +772,9 @@ export function MessageComposer(
                             props.disabled && styles.attachDisabled,
                         ]}
                     >
-                        <Text style={styles.attachText}>＋</Text>
+                        <Text style={styles.attachText}>
+                            <Plus size={20} />
+                        </Text>
                     </Pressable>
                     <TextInput
                         ref={inputRef}
@@ -816,7 +829,9 @@ export function MessageComposer(
                             ]}
                             onPress={submit}
                         >
-                            <Text style={styles.sendText}>➤</Text>
+                            <Text style={styles.sendText}>
+                                <Send size={18} />
+                            </Text>
                         </Pressable>
                     )}
                 </GlassSurface>
@@ -920,7 +935,7 @@ const styles = StyleSheet.create({
         borderRadius: radii.full,
         backgroundColor: palette.primary[500],
     },
-    replyTextWrap: { flex: 1 },
+    replyTextWrap: { flex: 1, minWidth: 0 },
     replyTitle: {
         color: palette.primary[700],
         fontSize: 12,

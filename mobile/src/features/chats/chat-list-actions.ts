@@ -3,12 +3,10 @@ import type { ChatPreview } from './chats-model';
 import type { ChatRole } from '../../core/api/dto/chat.dto';
 import {
     BadgeInfo,
-    Ban,
     EyeOff,
     Pin,
     PinOff,
     SquareArrowRightExit,
-    Trash2,
     User,
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
@@ -21,12 +19,10 @@ import type { LucideIcon } from 'lucide-react-native';
  * - Group info / View profile: the existing navigation targets.
  * - Pin/Unpin: device-local preference (`local-chat-prefs`).
  * - Leave group: real server leave, hidden for the owner (who cannot leave).
- * - Block/Unblock: WS `blockUser`/`unblockUser`, private chats only. The row
- *   follows the caller's own directional state (`blockedByMe`).
- * - Delete for me / for both: WS `deleteChatForMe`/`deleteChatForBoth`,
- *   private chats only. Both are confirmed before they run.
  *
- * Mute/archive do not exist in the backend, so they are not offered.
+ * Block/Unblock and the two delete actions live on the other user's profile
+ * menu, not here. Mute/archive do not exist in the backend, so they are not
+ * offered.
  */
 
 export type ChatListActionId =
@@ -35,11 +31,7 @@ export type ChatListActionId =
     | 'view-profile'
     | 'pin'
     | 'unpin'
-    | 'leave-group'
-    | 'block-user'
-    | 'unblock-user'
-    | 'delete-for-me'
-    | 'delete-for-both';
+    | 'leave-group';
 
 export interface ChatListAction {
     id: ChatListActionId;
@@ -101,26 +93,7 @@ export function getChatListActions(
                 icon: User,
                 destructive: false,
             });
-            const blockedByMe = chat.blockedByMe === true;
-            actions.push({
-                id: blockedByMe ? 'unblock-user' : 'block-user',
-                label: blockedByMe ? 'Unblock user' : 'Block user',
-                icon: Ban,
-                destructive: false,
-            });
         }
-        actions.push({
-            id: 'delete-for-me',
-            label: 'Delete chat for me',
-            icon: Trash2,
-            destructive: true,
-        });
-        actions.push({
-            id: 'delete-for-both',
-            label: 'Delete chat for both',
-            icon: Trash2,
-            destructive: true,
-        });
     } else {
         actions.push({
             id: 'group-info',

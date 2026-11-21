@@ -8,6 +8,7 @@ import { Message } from '../entities/message.entity';
 import { ForwardMessagesDto } from '../dtos/forwardMessages.dto';
 import { ForwardRequestStore } from './forward-request.store';
 import { MessageForwardService } from './message-forward.service';
+import type { MessageLinkService } from './message-link.service';
 
 function sourceMessage(id: number, over: Partial<Message> = {}): Message {
     return {
@@ -136,6 +137,10 @@ describe('MessageForwardService', () => {
                     }),
                 ),
             } as never,
+            {
+                syncForMessage: jest.fn(),
+                clearForMessage: jest.fn(),
+            } as unknown as MessageLinkService,
         );
     });
 

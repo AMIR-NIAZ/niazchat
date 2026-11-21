@@ -23,6 +23,11 @@ import {
     DEFAULT_MESSAGES_PAGE_SIZE,
     GetMessagesDto,
 } from '../dtos/getMessages.dto';
+import {
+    DEFAULT_CHAT_MEDIA_PAGE_SIZE,
+    GetChatMediaDto,
+} from '../dtos/getChatMedia.dto';
+import { MessageMediaService } from '../services/message-media.service';
 import { deleteMessageDto } from '../dtos/deleteMessage.dto';
 import { PinMessageDto } from '../dtos/pinMessage.dto';
 import { GetPinnedMessagesDto } from '../dtos/getPinnedMessages.dto';
@@ -65,6 +70,7 @@ export class MessageGateway {
         private readonly chatService: ChatService,
         private readonly reactions: ReactionsService,
         private readonly visibility: VisibilityService,
+        private readonly media: MessageMediaService,
     ) {}
 
     @SubscribeMessage('sendMessage')
@@ -294,6 +300,29 @@ export class MessageGateway {
                 ),
             ),
         };
+    }
+
+    /**
+     * One page of the chat's shared content (profile tabs), newest first.
+     *
+     * Membership is checked by `wsIsMemberChat`; deleted-for-everyone and
+     * deleted-for-me rows are filtered inside `MessageMediaService`. The ack
+     * shape mirrors `getMessages`: `{ ok, data: { items, nextCursor } }`.
+     */
+    @SubscribeMessage('getChatMedia')
+    @UseGuards(wsIsMemberChat)
+    async getChatMedia(
+        @ConnectedSocket() client: SocketAuth,
+        @MessageBody() dto: GetChatMediaDto,
+    ) {
+        const page = await this.media.getPage(
+            client.data.user.sub,
+            dto.chatId,
+            dto.type,
+            dto.cursor,
+            dto.limit ?? DEFAULT_CHAT_MEDIA_PAGE_SIZE,
+        );
+        return { ok: true, data: page };
     }
 
     @SubscribeMessage('getMessages')

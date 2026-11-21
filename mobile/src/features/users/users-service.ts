@@ -22,6 +22,20 @@ export async function getUserByUsername(userName: string): Promise<UserDto> {
 }
 
 /**
+ * `GET /user/by-username/:username` → the same public projection as the
+ * user-info screen (id, name, username, bio, avatars, presence). Used by
+ * @mentions; never carries phone/status/role.
+ */
+export async function fetchPublicUserByUsername(
+    username: string,
+): Promise<PublicUserProfileView> {
+    const response = await httpClient.get<PublicUserProfileDto>(
+        `/user/by-username/${encodeURIComponent(username)}`,
+    );
+    return toPublicProfileView(response.data, absoluteUploadUrl);
+}
+
+/**
  * `GET /user/search?q=<text>&limit=<n>` — username prefix search for the
  * new-chat screen. `q` is already normalized by the caller (min 2 chars); the
  * server strips a leading `@` and lowercases again. Response is `{ data }`.

@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ApiError } from '../../../../core/api';
 import { dialog, toast } from '../../../../shared/dialog';
 import {
+    SafeText,
     Screen,
     palette,
     radii,
@@ -280,9 +281,9 @@ function MemberOverridesPanel(props: {
                     },
                 ]}
             >
-                <Text style={styles.headerTitle}>
+                <SafeText style={styles.headerTitle} lines={2}>
                     Permissions for {memberName}
-                </Text>
+                </SafeText>
                 <Text style={styles.headerCaption}>
                     Inherit uses the group default. Allow or Deny overrides it
                     for this member only. The server applies the effective value
@@ -530,9 +531,9 @@ function TopBar(props: {
                 <Text style={styles.topBarTitle} numberOfLines={1}>
                     Member permissions
                 </Text>
-                <Text style={styles.topBarSubtitle} numberOfLines={1}>
+                <SafeText style={styles.topBarSubtitle} lines={1}>
                     {props.memberName}
-                </Text>
+                </SafeText>
             </View>
             <View style={styles.topBarSpacer} />
         </View>
@@ -613,7 +614,11 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     backText: { fontSize: 32, lineHeight: 34, color: palette.neutral[900] },
-    topBarTitles: { flex: 1, alignItems: 'center' },
+    topBarTitles: {
+        flex: 1,
+        minWidth: 0,
+        alignItems: 'center',
+    },
     topBarTitle: {
         fontSize: 17,
         fontWeight: '700',

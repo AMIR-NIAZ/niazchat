@@ -10,6 +10,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import {
     AppText,
+    SafeText,
     Screen,
     UserAvatar,
     palette,
@@ -269,9 +270,9 @@ function JoinPreviewCard(props: {
                     uri={preview.avatar}
                     size={96}
                 />
-                <Text style={styles.groupTitle} numberOfLines={3}>
+                <SafeText style={styles.groupTitle} lines={3}>
                     {preview.title || 'Unnamed group'}
-                </Text>
+                </SafeText>
                 {preview.description !== null &&
                     preview.description.trim() !== '' && (
                         <Text style={styles.groupDescription}>
@@ -392,6 +393,7 @@ const styles = StyleSheet.create({
         borderColor: palette.border.subtle,
     },
     groupTitle: {
+        alignSelf: 'stretch',
         marginTop: spacing.xs,
         textAlign: 'center',
         fontSize: 22,

@@ -24,7 +24,7 @@ function truncateReplyContent(content: string | null | undefined): string {
  * Attachment wire metadata shared by message payloads and chat-list previews.
  * `posterPath` never leaves the server; the app only needs `hasPoster`.
  */
-function serializeAttachmentMeta(attachment: {
+export function serializeAttachmentMeta(attachment: {
     id: unknown;
     originalName: string;
     mimeType: string;

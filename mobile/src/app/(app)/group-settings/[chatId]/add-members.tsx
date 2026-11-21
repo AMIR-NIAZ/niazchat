@@ -22,6 +22,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
     AppText,
+    SafeText,
     UserAvatar,
     palette,
     radii,
@@ -496,15 +497,15 @@ function ContactRow(props: {
                 size={44}
             />
             <View style={styles.rowBody}>
-                <Text
+                <SafeText
                     style={[
                         styles.rowName,
                         option.isMember && styles.rowNameMuted,
                     ]}
-                    numberOfLines={1}
+                    lines={1}
                 >
                     {option.displayName}
-                </Text>
+                </SafeText>
                 {option.username !== null && option.username !== '' && (
                     <Text style={styles.rowMeta} numberOfLines={1}>
                         @{option.username}
@@ -849,7 +850,7 @@ const styles = StyleSheet.create({
         color: palette.text.secondary,
         textAlign: 'center',
     },
-    rowBody: { flex: 1, gap: 2 },
+    rowBody: { flex: 1, minWidth: 0, gap: 2 },
     rowName: {
         fontSize: 16,
         fontWeight: '600',
@@ -925,6 +926,7 @@ const styles = StyleSheet.create({
     },
     contactRowPressed: { backgroundColor: palette.glass.elevated },
     checkbox: {
+        flexShrink: 0,
         width: 26,
         height: 26,
         borderRadius: radii.full,
@@ -939,6 +941,7 @@ const styles = StyleSheet.create({
         borderColor: palette.primary[300],
     },
     memberBadge: {
+        flexShrink: 0,
         borderRadius: radii.sm,
         paddingHorizontal: spacing.xs,
         paddingVertical: 3,

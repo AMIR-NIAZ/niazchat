@@ -12,6 +12,7 @@ import type { ListRenderItemInfo } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
     AppText,
+    SafeText,
     UserAvatar,
     palette,
     radii,
@@ -187,9 +188,9 @@ function BannedUsers({ chatId }: { chatId: number }): React.ReactElement {
                 contentContainerStyle={styles.list}
                 ListHeaderComponent={
                     <View style={styles.listHeader}>
-                        <AppText variant="title" numberOfLines={2}>
+                        <SafeText variant="title" lines={2}>
                             {info.title || 'Unnamed group'}
-                        </AppText>
+                        </SafeText>
                         <Text style={styles.caption}>
                             Banned users cannot rejoin until you unban them.
                         </Text>
@@ -318,9 +319,9 @@ function BannedRow(props: {
                     size={40}
                 />
                 <View style={styles.rowBody}>
-                    <Text style={styles.rowName} numberOfLines={1}>
+                    <SafeText style={styles.rowName} lines={1}>
                         {name}
-                    </Text>
+                    </SafeText>
                     {user.username !== '' && (
                         <Text style={styles.rowUsername} numberOfLines={1}>
                             @{user.username}
@@ -453,16 +454,18 @@ const styles = StyleSheet.create({
     rowPressed: { backgroundColor: palette.neutral[100] },
     identity: {
         flex: 1,
+        minWidth: 0,
         flexDirection: 'row',
         alignItems: 'center',
         gap: spacing.sm,
         paddingVertical: spacing.xs,
     },
-    rowBody: { flex: 1, gap: 2 },
+    rowBody: { flex: 1, minWidth: 0, gap: 2 },
     rowName: { fontSize: 16, fontWeight: '600', color: palette.neutral[900] },
     rowUsername: typography.caption,
     rowMeta: { ...typography.caption, color: palette.neutral[500] },
     unbanButton: {
+        flexShrink: 0,
         minWidth: 72,
         minHeight: 44,
         alignItems: 'center',

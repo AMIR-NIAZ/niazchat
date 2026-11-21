@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { palette, radii, spacing, typography } from '../../shared/theme';
-import { UserAvatar } from '../../shared/components';
+import { SafeText, UserAvatar } from '../../shared/components';
 import { useDebouncedValue } from '../../shared/hooks/use-debounced-value';
 import { getChatDisplay, isPrivateChat } from '../chats/chats-model';
 import { useChats } from '../chats/use-chats';
@@ -214,9 +214,9 @@ export function ForwardPicker({
                                 }
                                 style={styles.chip}
                             >
-                                <Text style={styles.chipText} numberOfLines={1}>
+                                <SafeText style={styles.chipText} lines={1}>
                                     {chatForwardLabel(chat)} ✕
-                                </Text>
+                                </SafeText>
                             </Pressable>
                         ))}
                     </ScrollView>
@@ -285,12 +285,12 @@ export function ForwardPicker({
                                         size={36}
                                     />
                                     <View style={styles.rowBody}>
-                                        <Text
+                                        <SafeText
                                             style={styles.rowTitle}
-                                            numberOfLines={1}
+                                            lines={1}
                                         >
                                             {display.title}
-                                        </Text>
+                                        </SafeText>
                                         <Text
                                             style={styles.rowType}
                                             numberOfLines={1}
@@ -461,7 +461,7 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: '700',
     },
-    rowBody: { flex: 1 },
+    rowBody: { flex: 1, minWidth: 0 },
     rowTitle: { color: palette.neutral[900], fontSize: 15, fontWeight: '600' },
     rowType: { color: palette.neutral[500], fontSize: 12 },
     errorBox: {

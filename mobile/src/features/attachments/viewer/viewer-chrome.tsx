@@ -9,7 +9,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { MoreHorizontal, X } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
-import { UserAvatar } from '../../../shared/components';
+import { SafeText, UserAvatar } from '../../../shared/components';
 import type { ViewInstance } from '../../../shared/context-popup';
 import { palette, radii, spacing } from '../../../shared/theme';
 import { useReducedMotion } from '../../../shared/hooks/use-reduced-motion';
@@ -145,9 +145,9 @@ export const ViewerHeader = memo(function ViewerHeader({
                     size={36}
                 />
                 <View style={styles.headerText}>
-                    <Text style={styles.headerName} numberOfLines={1}>
+                    <SafeText style={styles.headerName} lines={1}>
                         {item.message.senderName}
-                    </Text>
+                    </SafeText>
                     <Text style={styles.headerDate} numberOfLines={1}>
                         {viewerDateLabel(item.message.createdAtIso)}
                     </Text>

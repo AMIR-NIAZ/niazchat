@@ -73,7 +73,6 @@ export function useContacts(): ContactsQuery {
 function toPayload(variables: AddContactVariables): CreateContactPayload {
     const payload: CreateContactPayload = {};
     if (variables.userId !== undefined) payload.userId = variables.userId;
-    if (variables.username !== undefined) payload.username = variables.username;
     if (variables.phone !== undefined) payload.phone = variables.phone;
     if (variables.alias !== undefined) payload.alias = variables.alias;
     return payload;

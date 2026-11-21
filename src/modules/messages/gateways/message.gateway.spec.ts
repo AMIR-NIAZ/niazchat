@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { MessageGateway } from './message.gateway';
 import { MessageService } from '../services/message.service';
 import { MessageForwardService } from '../services/message-forward.service';
+import { MessageMediaService } from '../services/message-media.service';
 import { ChatService } from 'src/modules/chats/services/chat.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { JwtAppService } from 'src/modules/auth/services/jwt.service';
@@ -29,6 +30,7 @@ describe('MessageGateway', () => {
     };
     let chatService: { getMemberIds: jest.Mock };
     let forwardService: { forward: jest.Mock };
+    let media: { getPage: jest.Mock };
     let reactions: { summariesFor: jest.Mock; myReactionsFor: jest.Mock };
     let roomEmit: jest.Mock;
 
@@ -45,6 +47,7 @@ describe('MessageGateway', () => {
         };
         chatService = { getMemberIds: jest.fn().mockResolvedValue([1, 2]) };
         forwardService = { forward: jest.fn() };
+        media = { getPage: jest.fn() };
         reactions = {
             summariesFor: jest.fn().mockResolvedValue(new Map()),
             myReactionsFor: jest.fn().mockResolvedValue(new Map()),
@@ -61,18 +64,15 @@ describe('MessageGateway', () => {
                 },
                 { provide: ChatService, useValue: chatService },
                 { provide: ReactionsService, useValue: reactions },
+                { provide: MessageMediaService, useValue: media },
                 {
                     provide: VisibilityService,
                     useValue: {
-                        blockedRelationsInChat: jest
-                            .fn()
-                            .mockResolvedValue([]),
+                        blockedRelationsInChat: jest.fn().mockResolvedValue([]),
                         blockersOfViewer: jest
                             .fn()
                             .mockResolvedValue(new Set()),
-                        hiddenUserIdsFor: jest
-                            .fn()
-                            .mockReturnValue(new Set()),
+                        hiddenUserIdsFor: jest.fn().mockReturnValue(new Set()),
                     },
                 },
                 { provide: JwtAppService, useValue: {} },
@@ -622,6 +622,53 @@ describe('MessageGateway', () => {
             'sendMessage:list',
             expect.objectContaining({ id: 103 }),
         );
+    });
+
+    it('returns a getChatMedia page for the viewer with the default page size', async () => {
+        media.getPage.mockResolvedValue({
+            items: [
+                {
+                    id: 5,
+                    messageId: 200,
+                    createdAt: '2026-01-01T00:00:00.000Z',
+                },
+            ],
+            nextCursor: 'cursor-2',
+        });
+
+        const result = await (
+            gateway as unknown as {
+                getChatMedia: (
+                    client: unknown,
+                    dto: unknown,
+                ) => Promise<{ ok: boolean; data: unknown }>;
+            }
+        ).getChatMedia(makeClient(), {
+            chatId: 10,
+            type: 'links',
+            cursor: 'cursor-1',
+        });
+
+        expect(media.getPage).toHaveBeenCalledWith(
+            1,
+            10,
+            'links',
+            'cursor-1',
+            30,
+        );
+        expect(result).toEqual({
+            ok: true,
+            data: {
+                items: [
+                    {
+                        id: 5,
+                        messageId: 200,
+                        createdAt: '2026-01-01T00:00:00.000Z',
+                    },
+                ],
+                nextCursor: 'cursor-2',
+            },
+        });
     });
 
     /** Minimal SocketAuth stand-in: rooms + per-socket emit. */

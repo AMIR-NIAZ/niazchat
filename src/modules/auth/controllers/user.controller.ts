@@ -120,6 +120,23 @@ export class UserController {
     }
 
     /**
+     * Minimal username lookup for @mentions: exactly the public profile
+     * projection (id, name, username, bio, avatars, presence) so the client
+     * can open the user-info screen without receiving phone/status/role.
+     */
+    @Get('by-username/:username')
+    @Role([RoleEnum.ALL])
+    async getPublicUserByUsername(
+        @Param('username') username: string,
+        @Req() req: RequestAuth,
+    ) {
+        return await this.userService.getPublicProfileByUsername(
+            username,
+            req.user.sub,
+        );
+    }
+
+    /**
      * Username prefix search for "new chat". Declared BEFORE `:userId/profile`
      * so the literal segment can never be read as a user id.
      */

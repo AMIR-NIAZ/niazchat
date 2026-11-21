@@ -23,6 +23,7 @@ import {
     GlassInput,
     OfflineCaption,
     PrimaryButton,
+    SafeText,
     Screen,
     UserAvatar,
     palette,
@@ -587,7 +588,7 @@ function EmptyState({
             </View>
             <AppText variant="title">No contacts yet</AppText>
             <AppText style={styles.detail}>
-                Add someone by phone or username, or let the app find friends
+                Add someone by phone number, or let the app find friends
                 from your phone's contacts.
             </AppText>
             <PrimaryButton
@@ -685,9 +686,9 @@ const ContactRowView = memo(function ContactRowView({
                     size={46}
                 />
                 <View style={styles.rowBody}>
-                    <Text style={typography.body} numberOfLines={1}>
+                    <SafeText style={typography.body} lines={1}>
                         {row.displayName}
-                    </Text>
+                    </SafeText>
                     {subtitle !== null && (
                         <Text style={typography.caption} numberOfLines={1}>
                             {subtitle}
@@ -834,8 +835,9 @@ const styles = StyleSheet.create({
         borderRadius: radii.md,
     },
     rowPressed: { backgroundColor: palette.glass.elevated },
-    rowBody: { flex: 1, gap: 2 },
+    rowBody: { flex: 1, minWidth: 0, gap: 2 },
     badge: {
+        flexShrink: 0,
         paddingHorizontal: 8,
         paddingVertical: 3,
         borderRadius: radii.full,

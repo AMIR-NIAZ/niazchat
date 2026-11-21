@@ -13,6 +13,7 @@ import {
 import {
     AppText,
     GlassHeader,
+    SafeText,
     Screen,
     UserAvatar,
     palette,
@@ -90,9 +91,9 @@ export default function SettingsScreen(): React.ReactElement {
                         size={52}
                     />
                     <View style={styles.profileBody}>
-                        <Text style={styles.profileName} numberOfLines={1}>
+                        <SafeText lines={1} style={styles.profileName}>
                             {me?.name ?? 'Your account'}
-                        </Text>
+                        </SafeText>
                         <Text style={styles.profileHandle} numberOfLines={1}>
                             {me?.username === null || me?.username === undefined
                                 ? 'View profile'
@@ -179,7 +180,7 @@ const styles = StyleSheet.create({
         borderColor: palette.border.subtle,
     },
     cardPressed: { backgroundColor: palette.glass.elevated },
-    profileBody: { flex: 1, gap: 2 },
+    profileBody: { flex: 1, minWidth: 0, gap: 2 },
     profileName: {
         color: palette.text.primary,
         fontSize: 16,

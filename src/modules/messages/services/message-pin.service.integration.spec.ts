@@ -197,6 +197,7 @@ function connectionOptions(database: string) {
                 {} as never,
                 {} as never,
                 {} as never,
+                {} as never,
             );
         }, 120_000);
 

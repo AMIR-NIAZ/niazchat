@@ -1,16 +1,13 @@
 import { absoluteUploadUrl } from '../../core/config/env';
-import { searchUsers } from '../users/users-service';
 import { matchContacts } from './contacts-service';
 import { deviceDefaultRegion, normalizePhone } from './contacts-phone';
 
 /**
- * "Find" step of the Add-contact flow: resolves a username or phone to the
+ * "Find" step of the Add-contact flow: resolves a phone number to the
  * registered user BEFORE anything is saved.
  *
- * - Username: the existing exact-prefix search (`GET /user/search`), narrowed
- *   to an exact, case-insensitive match.
- * - Phone: one `POST /contacts/match` batch with the single normalized number.
- *   Only normalized numbers are ever uploaded; the server does not store them.
+ * Phone: one `POST /contacts/match` batch with the single normalized number.
+ * Only normalized numbers are ever uploaded; the server does not store them.
  */
 
 export interface ContactLookupResult {
@@ -18,31 +15,6 @@ export interface ContactLookupResult {
     name: string;
     username: string | null;
     avatarUrl: string | null;
-}
-
-/** `null` = no account with that exact username. */
-export async function lookupContactByUsername(
-    raw: string,
-): Promise<ContactLookupResult | null> {
-    const username = raw.trim().replace(/^@/, '').toLowerCase();
-    if (username.length < 2) {
-        return null;
-    }
-    const items = await searchUsers(username);
-    const match = items.find(
-        (item) => item.username.toLowerCase() === username,
-    );
-    if (match === undefined) {
-        return null;
-    }
-    return {
-        userId: Number(match.id),
-        name: match.name,
-        username: match.username,
-        avatarUrl: match.avatars[0]
-            ? absoluteUploadUrl(match.avatars[0])
-            : null,
-    };
 }
 
 export interface PhoneLookup {

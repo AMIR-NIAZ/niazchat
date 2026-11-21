@@ -34,14 +34,9 @@ import type { PopupRect } from '../../../shared/context-popup';
 import { useHomeTabReselect, useTabBarInset } from '../../../shared/tab-bar';
 import { dialog, toast } from '../../../shared/dialog';
 import {
-    applyChatBlockedEvent,
-    blockChatPeer,
-    CHATS_QUERY_KEY,
     ChatRowContent,
     ChatRowPreview,
     chatPreviewText,
-    deleteChatForBoth,
-    deleteChatForMe,
     getChatListActions,
     invalidateChats,
     leaveGroupFailure,
@@ -51,14 +46,12 @@ import {
     purgeChatFromCaches,
     setChatUnreadCount,
     sortPinnedFirst,
-    unblockChatPeer,
     useChats,
     useLeaveGroup,
     usePinnedChatIds,
 } from '../../../features/chats';
 import type { ChatListActionId, ChatRole } from '../../../features/chats';
 import { markChatSeen } from '../../../features/messages';
-import { deleteLocalChatMessages } from '../../../shared/local-db';
 import { openUserProfile } from '../../../features/users';
 import { useCurrentUserId } from '../../../features/auth';
 import { Search } from 'lucide-react-native';
@@ -226,172 +219,6 @@ export default function ChatsScreen(): React.ReactElement {
             });
     };
 
-    // ── Private-chat actions (block / delete) ──────────────────────────────
-    // One request per chat at a time: repeated taps and double confirmations
-    // are ignored while the first call is in flight.
-    const privateActionInFlightRef = useRef<Set<number>>(new Set());
-
-    const reportActionError = (title: string, error: unknown): void => {
-        dialog.show({
-            title,
-            message:
-                error instanceof Error
-                    ? error.message
-                    : 'Try again in a moment.',
-            tone: 'danger',
-        });
-    };
-
-    const runPrivateAction = (
-        chatId: number,
-        run: () => Promise<void>,
-    ): void => {
-        if (privateActionInFlightRef.current.has(chatId)) {
-            return;
-        }
-        privateActionInFlightRef.current.add(chatId);
-        void run().finally((): void => {
-            privateActionInFlightRef.current.delete(chatId);
-        });
-    };
-
-    const patchBlockedRow = (
-        chatId: number,
-        blockedByMe: boolean,
-        blockedMe: boolean,
-    ): void => {
-        const current = queryClient.getQueryData<ChatRow[]>(CHATS_QUERY_KEY);
-        if (current === undefined) {
-            return;
-        }
-        const next = applyChatBlockedEvent(current, {
-            chatId,
-            blockedByMe,
-            blockedMe,
-        });
-        if (next !== current) {
-            queryClient.setQueryData<ChatRow[]>(CHATS_QUERY_KEY, [...next]);
-        }
-    };
-
-    const confirmBlockUser = (chat: ChatRow): void => {
-        const chatId = Number(chat.id);
-        const peerName = chat.peer?.name.trim() || 'this user';
-        void dialog
-            .confirm({
-                title: `Block ${peerName}?`,
-                message:
-                    'They will no longer be able to send you messages. Existing messages stay, and you can unblock them at any time.',
-                confirmText: 'Block',
-                destructive: true,
-            })
-            .then((confirmed): void => {
-                if (!confirmed) {
-                    return;
-                }
-                runPrivateAction(chatId, async (): Promise<void> => {
-                    try {
-                        const result = await blockChatPeer(chatId);
-                        if (result !== null) {
-                            patchBlockedRow(
-                                chatId,
-                                result.blockedByMe,
-                                result.blockedMe,
-                            );
-                        }
-                        toast.show('User blocked');
-                    } catch (error: unknown) {
-                        reportActionError('Could not block user', error);
-                    }
-                });
-            });
-    };
-
-    const unblockUser = (chat: ChatRow): void => {
-        const chatId = Number(chat.id);
-        runPrivateAction(chatId, async (): Promise<void> => {
-            try {
-                const result = await unblockChatPeer(chatId);
-                if (result !== null) {
-                    patchBlockedRow(
-                        chatId,
-                        result.blockedByMe,
-                        result.blockedMe,
-                    );
-                }
-                toast.show('User unblocked');
-            } catch (error: unknown) {
-                reportActionError('Could not unblock user', error);
-            }
-        });
-    };
-
-    /** One-sided delete: only this account loses the conversation + history. */
-    const confirmDeleteForMe = (chat: ChatRow): void => {
-        const chatId = Number(chat.id);
-        void dialog
-            .confirm({
-                title: 'Delete chat for me?',
-                message:
-                    'This removes the conversation and its messages from your account only. The other person keeps their copy and is not notified.',
-                confirmText: 'Delete',
-                destructive: true,
-            })
-            .then((confirmed): void => {
-                if (!confirmed) {
-                    return;
-                }
-                runPrivateAction(chatId, async (): Promise<void> => {
-                    try {
-                        await deleteChatForMe(chatId);
-                        purgeChatFromCaches(queryClient, chatId);
-                        if (currentUserId !== null) {
-                            void deleteLocalChatMessages(
-                                currentUserId,
-                                chatId,
-                            ).catch((): void => undefined);
-                        }
-                        toast.show('Chat deleted for you');
-                    } catch (error: unknown) {
-                        reportActionError('Could not delete chat', error);
-                    }
-                });
-            });
-    };
-
-    /** Irreversible: both participants lose the conversation and its history. */
-    const confirmDeleteForBoth = (chat: ChatRow): void => {
-        const chatId = Number(chat.id);
-        const peerName = chat.peer?.name.trim() || 'the other person';
-        void dialog
-            .confirm({
-                title: 'Delete chat for both?',
-                message: `This permanently deletes the conversation and all of its messages for you and ${peerName}. This cannot be undone.`,
-                confirmText: 'Delete for both',
-                destructive: true,
-            })
-            .then((confirmed): void => {
-                if (!confirmed) {
-                    return;
-                }
-                runPrivateAction(chatId, async (): Promise<void> => {
-                    try {
-                        await deleteChatForBoth(chatId);
-                        purgeChatFromCaches(queryClient, chatId);
-                        if (currentUserId !== null) {
-                            void deleteLocalChatMessages(
-                                currentUserId,
-                                chatId,
-                            ).catch((): void => undefined);
-                        }
-                        toast.show('Chat deleted for both');
-                    } catch (error: unknown) {
-                        reportActionError('Could not delete chat', error);
-                    }
-                });
-            });
-    };
-
     const runChatAction = (chat: ChatRow, action: ChatListActionId): void => {
         const chatId = Number(chat.id);
         switch (action) {
@@ -417,18 +244,6 @@ export default function ChatsScreen(): React.ReactElement {
             }
             case 'leave-group':
                 confirmLeaveGroup(chat);
-                return;
-            case 'block-user':
-                confirmBlockUser(chat);
-                return;
-            case 'unblock-user':
-                unblockUser(chat);
-                return;
-            case 'delete-for-me':
-                confirmDeleteForMe(chat);
-                return;
-            case 'delete-for-both':
-                confirmDeleteForBoth(chat);
                 return;
         }
     };

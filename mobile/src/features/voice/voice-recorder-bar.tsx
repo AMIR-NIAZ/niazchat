@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { palette, radii, spacing } from '../../shared/theme';
 import { recordingTimeLabel } from './recording-machine';
+import { Trash2 } from 'lucide-react-native';
 
 /** Recording bar shown while the microphone is live (tap or hold flow). */
 export function VoiceRecorderBar({
@@ -46,7 +47,7 @@ export function VoiceRecorderBar({
                 onPress={onCancel}
                 style={styles.side}
             >
-                <Text style={styles.trash}>🗑</Text>
+                    <Trash2 size={17} color={palette.semantic.danger} />
             </Pressable>
             <Animated.View style={[styles.dot, { opacity: pulse }]} />
             <Text style={styles.time}>{recordingTimeLabel(durationMs)}</Text>

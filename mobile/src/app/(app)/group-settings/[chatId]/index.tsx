@@ -12,6 +12,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import {
     AppText,
+    SafeText,
     palette,
     radii,
     spacing,
@@ -188,9 +189,9 @@ function GroupSettings({ chatId }: { chatId: number }): React.ReactElement {
                     contentContainerStyle={styles.list}
                     ListHeaderComponent={
                         <View style={styles.listHeader}>
-                            <AppText variant="title" numberOfLines={2}>
+                            <SafeText variant="title" lines={2}>
                                 {info.title || 'Unnamed group'}
-                            </AppText>
+                            </SafeText>
                             <Text style={styles.caption}>
                                 Choose what you want to change.
                             </Text>

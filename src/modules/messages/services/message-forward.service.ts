@@ -8,6 +8,7 @@ import { DataSource, In, Repository } from 'typeorm';
 import { Attachment } from 'src/modules/attachments/entities/attachment.entity';
 import { AttachmentStatus } from 'src/modules/attachments/enums/attachmentStatus.enum';
 import { AttachmentService } from 'src/modules/attachments/services/attachment.service';
+import { MessageLinkService } from './message-link.service';
 import { ChatMember } from 'src/modules/chats/entities/chat_members.entity';
 import { RoleChatEnum } from 'src/common/enums/roleChat.enum';
 import { TypeChatEnum } from 'src/common/enums/typeChat.enum';
@@ -60,6 +61,7 @@ export class MessageForwardService {
         private readonly store: ForwardRequestStore,
         private readonly userBlocks: UserBlockService,
         private readonly memberPermissions: MemberPermissionResolverService,
+        private readonly messageLinks: MessageLinkService,
     ) {}
 
     async forward(
@@ -239,6 +241,16 @@ export class MessageForwardService {
                             forwardedFromName: origin.name,
                         });
                         createdIds.push(Number(saved.id));
+
+                        // Forwarded text carries links too: index them with
+                        // the new message so the Links tab stays correct.
+                        await this.messageLinks.syncForMessage(
+                            Number(saved.id),
+                            Number(chatId),
+                            saved.content,
+                            saved.createdAt,
+                            manager,
+                        );
 
                         for (const attachment of source.attachments ?? []) {
                             const files =

@@ -23,7 +23,6 @@ interface SavedContactDto {
 
 export interface CreateContactPayload {
     userId?: number;
-    username?: string;
     phone?: string;
     alias?: string | null;
 }

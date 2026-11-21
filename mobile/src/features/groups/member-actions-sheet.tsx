@@ -2,6 +2,7 @@ import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ban } from 'lucide-react-native';
 import { palette, radii, spacing, typography } from '../../shared/theme';
+import { SafeText } from '../../shared/components';
 import {
     GroupMemberActions,
     memberActionLabel,
@@ -20,6 +21,8 @@ export function MemberActionsSheet(props: {
     actions: GroupMemberActions;
     busy: boolean;
     onClose: () => void;
+    /** Fires once the sheet has finished dismissing (iOS `Modal.onDismiss`). */
+    onDismiss?: () => void;
     onAction: (action: GroupMemberAction) => void;
 }): React.ReactElement {
     const insets = useSafeAreaInsets();
@@ -32,6 +35,7 @@ export function MemberActionsSheet(props: {
             animationType="slide"
             statusBarTranslucent={true}
             onRequestClose={props.onClose}
+            onDismiss={props.onDismiss}
         >
             <Pressable style={styles.backdrop} onPress={props.onClose}>
                 <Pressable
@@ -41,9 +45,9 @@ export function MemberActionsSheet(props: {
                         { paddingBottom: Math.max(insets.bottom, spacing.md) },
                     ]}
                 >
-                    <Text style={styles.title} numberOfLines={1}>
+                    <SafeText style={styles.title} lines={1}>
                         {props.memberName}
-                    </Text>
+                    </SafeText>
                     <View style={styles.divider} />
 
                     {visibleActions.map((action) => (

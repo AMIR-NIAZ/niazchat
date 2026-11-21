@@ -154,6 +154,12 @@ export interface EnsureMessageOptions {
 export interface ChatMessagesApi {
     detail: ConversationDetail | null;
     isLoading: boolean;
+    /**
+     * The first fetch attempt has settled (success or failure). A locally
+     * seeded conversation becomes safe to position on only at this point: until
+     * then the join ack can still supply the read position its rows lack.
+     */
+    isFetched: boolean;
     error: Error | null;
     refetch: () => void;
     loadingOlder: boolean;
@@ -459,14 +465,19 @@ export function useChatMessages(
                 return;
             }
             const oldest = local[0]?.id ?? null;
+            const info = buildCachedChatInfo(queryClient, chatId);
             queryClient.setQueryData<ConversationDetail>(key, {
-                info: buildCachedChatInfo(queryClient, chatId),
+                info,
                 messages: local,
                 hasMore: true,
                 nextCursor: oldest,
                 nextCursorSource: oldest === null ? 'server' : 'local',
-                myLastSeenId: null,
-                othersLastSeenId: null,
+                // The mirrored rows carry no read state of their own. Reuse the
+                // persisted chat-info position when it exists, so an offline
+                // open can still place the unread divider correctly instead of
+                // treating the whole saved page as unread.
+                myLastSeenId: toNumericId(info?.myLastSeenId),
+                othersLastSeenId: toNumericId(info?.othersLastSeenId),
                 pinnedMessages: local.filter((message) => message.isPinned),
             });
         })();
@@ -1721,6 +1732,7 @@ export function useChatMessages(
         () => ({
             detail,
             isLoading: query.isPending,
+            isFetched: query.isFetched,
             error: query.error instanceof Error ? query.error : null,
             refetch: (): void => {
                 void query.refetch();
@@ -1750,6 +1762,7 @@ export function useChatMessages(
         [
             detail,
             query.isPending,
+            query.isFetched,
             query.error,
             loadingOlder,
             loadOlderError,

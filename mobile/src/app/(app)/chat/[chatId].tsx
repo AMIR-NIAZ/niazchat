@@ -29,7 +29,9 @@ import * as Clipboard from 'expo-clipboard';
 import {
     AppText,
     GlassHeader,
+    MAX_FONT_SCALE,
     OfflineCaption,
+    SafeText,
     Screen,
     UserAvatar,
     palette,
@@ -69,6 +71,13 @@ import {
     useChatMessages,
     useMarkSeen,
     useScrollToBottomButton,
+    approximateScrollOffset,
+    canAnchorUnread,
+    canApplyInitialPosition,
+    canRetryScrollIndex,
+    INITIAL_UNREAD_VIEW_POSITION,
+    NEAR_BOTTOM_OFFSET,
+    shouldFollowNewest,
     chatListGeometry,
     useTypingEmitter,
     useTypingUsers,
@@ -129,6 +138,7 @@ import {
     voiceCachePath,
 } from '../../../features/voice';
 import {
+    fetchPublicUserByUsername,
     openUserProfile,
     presenceLabel,
     useUserProfile,
@@ -159,14 +169,26 @@ import type {
 
 type ChatDetailRouteParams = { chatId?: string | string[] };
 
-/** Inverted list: offset 0 is the newest message; below it counts as "scrolled up". */
-const NEAR_BOTTOM_OFFSET = 80;
 /** Jump-to-original cap: 10 pages × 30 messages = 300 messages. */
 const JUMP_MAX_PAGES = 10;
 const HIGHLIGHT_MS = 1000;
 const JUMP_NOTICE_MS = 3000;
 /** Breathing room between the list content and the floating chrome. */
 const LIST_GAP = 12;
+/**
+ * Equal horizontal space the header reserves for its side controls on BOTH
+ * sides (back + avatar on the start side). Keeping it symmetric is what
+ * centers the title on the screen instead of in the leftover gap.
+ */
+const HEADER_SIDE_RESERVE = 84;
+/** One programmatic scroll-to-index request, re-resolved by message id. */
+interface ScrollTarget {
+    /** The row being navigated to (null for an index-only scroll). */
+    messageId: number | null;
+    index: number;
+    viewPosition: number;
+    animated: boolean;
+}
 
 type ListChunk =
     | {
@@ -433,11 +455,25 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
 
     const listRef = useRef<FlatList<List>>(null);
     const atBottomRef = useRef(true);
-    const initialScrollDoneRef = useRef(false);
+    /** Last reported scroll offset (used to tell pre-jump frames apart). */
+    const lastOffsetRef = useRef(0);
+    /** The one-time initial position for this chat has been decided. */
+    const initialPositionedRef = useRef(false);
+    /**
+     * Set while the initial unread-divider jump is in flight: viewability must
+     * not advance the read position from the pre-jump bottom rows.
+     */
+    const initialAnchorIdRef = useRef<number | null>(null);
     /** True while the user's finger/momentum owns the list. */
     const userScrollingRef = useRef(false);
     const jumpInProgressRef = useRef(false);
     const jumpAbortRef = useRef<AbortController | null>(null);
+    /** The scroll request whose measurement may still be retried. */
+    const scrollTargetRef = useRef<ScrollTarget | null>(null);
+    const scrollRetryFrameRef = useRef<number | null>(null);
+    const scrollRetryAttemptsRef = useRef(0);
+    /** Deferred `performJump` wait: the loaded page must render first. */
+    const jumpFrameRef = useRef<number | null>(null);
     const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
         null,
     );
@@ -464,6 +500,129 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     const reversedListDataRef = useRef<List[]>(reversedListData);
     reversedListDataRef.current = reversedListData;
 
+    /** Index of a message row in the inverted (visual) data, or -1. */
+    const indexOfMessage = (messageId: number): number =>
+        reversedListDataRef.current.findIndex(
+            (item) => item.kind === 'message' && item.message.id === messageId,
+        );
+
+    /**
+     * Drops the pending retry of the previous scroll request. Bumping the
+     * attempt counter is what makes a stale failure callback a no-op.
+     */
+    const cancelScrollRetry = (): void => {
+        scrollRetryAttemptsRef.current = 0;
+        if (scrollRetryFrameRef.current !== null) {
+            cancelAnimationFrame(scrollRetryFrameRef.current);
+            scrollRetryFrameRef.current = null;
+        }
+    };
+
+    /**
+     * Asks the list for one index position and remembers what it is navigating
+     * to, so `handleScrollToIndexFailed` can retry the SAME message after its
+     * row is measured (and not an index that pagination has since shifted).
+     */
+    const requestScrollToMessage = (
+        messageId: number | null,
+        index: number,
+        viewPosition: number,
+        animated: boolean,
+    ): void => {
+        cancelScrollRetry();
+        scrollTargetRef.current = { messageId, index, viewPosition, animated };
+        listRef.current?.scrollToIndex({ index, viewPosition, animated });
+    };
+
+    /**
+     * Variable message heights mean `scrollToIndex` can fail until the target
+     * row is rendered. Land near the row, let the list measure it, then retry
+     * the exact index — at most `MAX_SCROLL_INDEX_RETRIES` times. The retries
+     * are frame-based (not timers) and cancelled by any newer user/intent
+     * scroll, so they can never bounce the list between two positions.
+     */
+    const handleScrollToIndexFailed = (info: {
+        index: number;
+        averageItemLength: number;
+    }): void => {
+        const target = scrollTargetRef.current;
+        if (target === null) {
+            return;
+        }
+        if (!canRetryScrollIndex(scrollRetryAttemptsRef.current)) {
+            // Unreachable target: keep the approximate offset the user already
+            // sees and never make the unread anchor block read tracking.
+            scrollTargetRef.current = null;
+            initialAnchorIdRef.current = null;
+            return;
+        }
+        scrollRetryAttemptsRef.current += 1;
+        listRef.current?.scrollToOffset({
+            // Same viewPosition as the final request: the first correction
+            // already lands near the target instead of bouncing to the
+            // opposite end of the list and then moving again.
+            offset: approximateScrollOffset({
+                index: info.index,
+                averageItemLength: info.averageItemLength,
+                viewportHeight: listHeight,
+                viewPosition: target.viewPosition,
+            }),
+            animated: false,
+        });
+        if (scrollRetryFrameRef.current !== null) {
+            cancelAnimationFrame(scrollRetryFrameRef.current);
+        }
+        scrollRetryFrameRef.current = requestAnimationFrame((): void => {
+            scrollRetryFrameRef.current = requestAnimationFrame((): void => {
+                scrollRetryFrameRef.current = null;
+                const target = scrollTargetRef.current;
+                if (target === null) {
+                    return;
+                }
+                const index =
+                    target.messageId === null
+                        ? target.index
+                        : indexOfMessage(target.messageId);
+                if (index < 0) {
+                    scrollTargetRef.current = null;
+                    initialAnchorIdRef.current = null;
+                    return;
+                }
+                listRef.current?.scrollToIndex({
+                    index,
+                    viewPosition: target.viewPosition,
+                    animated: false,
+                });
+            });
+        });
+    };
+
+    /**
+     * The initial position is settled (applied or taken over by the user, a
+     * send or a jump). Marks the one-shot so no later data pass repositions
+     * the list, and releases the initial viewability gate.
+     */
+    const settleInitialPositioningRef = useRef<() => void>(() => undefined);
+    settleInitialPositioningRef.current = (): void => {
+        initialPositionedRef.current = true;
+        initialAnchorIdRef.current = null;
+        if (!readTrackingReadyRef.current) {
+            readTrackingReadyRef.current = true;
+            setReadTrackingReady(true);
+        }
+    };
+
+    /** Newest confirmed (server id) message of the loaded list. */
+    const newestConfirmedId = useMemo((): number | null => {
+        for (let index = messages.length - 1; index >= 0; index -= 1) {
+            const id = messages[index]?.id ?? null;
+            if (id !== null) {
+                return id;
+            }
+        }
+        return null;
+    }, [messages]);
+
     // Only rows the user can actually see may advance the read position. The
     // callback identity must stay stable across renders (FlatList requirement).
     const viewabilityConfig = useRef({
@@ -478,6 +637,29 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
             for (const token of info.viewableItems) {
                 if (token.item !== undefined) {
                     rows.push(token.item);
+                }
+            }
+            // Until the initial unread anchor is on screen, the bottom rows
+            // that happen to be visible before its jump must not mark the
+            // whole unread block read. A batch is only ignored while the list
+            // is still at the pre-jump bottom (offset < the near-bottom band).
+            if (initialAnchorIdRef.current !== null) {
+                const anchor = initialAnchorIdRef.current;
+                const reached = rows.some(
+                    (row) =>
+                        row.kind === 'message' && row.message.id === anchor,
+                );
+                if (!reached && lastOffsetRef.current <= NEAR_BOTTOM_OFFSET) {
+                    return;
+                }
+                initialAnchorIdRef.current = null;
+                // Reconcile `atBottom` once the gate is released, in case the
+                // jump produced no further scroll event (e.g. it clamped to
+                // the newest edge), so live-follow/read tracking stay correct.
+                const nearBottom = lastOffsetRef.current <= NEAR_BOTTOM_OFFSET;
+                if (atBottomRef.current !== nearBottom) {
+                    atBottomRef.current = nearBottom;
+                    setAtBottom(nearBottom);
                 }
             }
             const id = highestVisibleMessageId(rows);
@@ -513,11 +695,21 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         setHighestVisibleId(null);
         setReadTrackingReady(false);
         readTrackingReadyRef.current = false;
+        newMessageCountRef.current = 0;
+        setNewMessageCount(0);
         // A newly opened chat starts at its newest item until the divider
         // effect says otherwise.
         atBottomRef.current = true;
         setAtBottom(true);
-        initialScrollDoneRef.current = false;
+        initialPositionedRef.current = false;
+        initialAnchorIdRef.current = null;
+        lastOffsetRef.current = 0;
+        scrollTargetRef.current = null;
+        cancelScrollRetry();
+        if (jumpFrameRef.current !== null) {
+            cancelAnimationFrame(jumpFrameRef.current);
+            jumpFrameRef.current = null;
+        }
         userScrollingRef.current = false;
         lastNewestIdRef.current = null;
     }, [chatId]);
@@ -591,40 +783,63 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         return (): void => subscription.remove();
     }, []);
 
-    // First load: snapshot the unread block, position the list on its first
-    // message, and only then enable read tracking.
+    // First load: snapshot the unread block and position the list EXACTLY ONCE.
     //
-    // This is deliberately ONE effect. The snapshot and the initial
-    // positioning must be driven by the same `detail`/`messages` pass: when
-    // the snapshot was set by a separate effect, this effect ran with a stale
-    // `unreadDividerId` (still null in the commit that set it), enabled read
-    // tracking with no target, and never scrolled to the divider. The
-    // viewability callback had already fired before tracking was enabled, so
-    // `highestVisibleId` stayed null and no read receipt was sent until the
-    // list changed again (e.g. the user sent a message).
+    // Positioning waits for the whole input to be authoritative:
+    //   · the first server pass (or its offline failure) — a SQLite seed has
+    //     no read position, so anchoring on it picks the wrong target when the
+    //     join ack lands a moment later;
+    //   · the measured header/composer/list — their padding shifts every row
+    //     of the inverted list, so anchoring before they settle is a second,
+    //     invisible scroll.
     //
-    // Later markSeen calls advance the read position but must not hide the
-    // one-shot divider anchor.
+    // Nothing else may scroll before this pass: the newest-message follower is
+    // gated on `initialPositionedRef`, so the list can no longer jump to
+    // offset 0 and then be moved to the divider by a competing routine, and a
+    // send/jump/drag settles the one-shot early so a late response cannot yank
+    // the user back.
     useEffect((): void => {
         if (
-            initialScrollDoneRef.current ||
             detail === null ||
-            messages.length === 0
+            !canApplyInitialPosition({
+                alreadyPositioned: initialPositionedRef.current,
+                hasMessages: messages.length > 0,
+                chromeMeasured:
+                    headerHeight > 0 && composerHeight > 0 && listHeight > 0,
+                readPositionPending:
+                    detail.nextCursorSource === 'local' &&
+                    !conversation.isFetched,
+                jumpInProgress: jumpInProgressRef.current,
+            })
         ) {
             return;
         }
-        initialScrollDoneRef.current = true;
+        initialPositionedRef.current = true;
+        // The follower must not treat the initial data as a live arrival.
+        lastNewestIdRef.current = newestConfirmedId;
 
-        const dividerId = firstUnreadMessageId({
-            messages,
+        // A SQLite seed does not carry the read position itself. If chat-info
+        // was not cached either, `myLastSeenId` is unknown and treating the
+        // whole saved history as unread would anchor on its oldest row — the
+        // exact "opens somewhere in the middle, then moves" symptom. Only
+        // anchor on an authoritative read position; otherwise open at latest.
+        const dividerId = canAnchorUnread({
             myLastSeenId: detail.myLastSeenId,
-            currentUserId,
-        });
+            source: detail.nextCursorSource,
+        })
+            ? firstUnreadMessageId({
+                  messages,
+                  myLastSeenId: detail.myLastSeenId,
+                  currentUserId,
+              })
+            : null;
 
         if (dividerId === null) {
-            // Already at the newest message: the newest id is the read target.
+            // Opening at the newest message: offset 0 is the anchor (and a
+            // chat switch reuses this list, so reset it silently).
             readTrackingReadyRef.current = true;
             setReadTrackingReady(true);
+            listRef.current?.scrollToOffset({ offset: 0, animated: false });
             return;
         }
 
@@ -633,33 +848,38 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         // the divider's message, not the newest one.
         atBottomRef.current = false;
         setAtBottom(false);
+        initialAnchorIdRef.current = dividerId;
+        readTrackingReadyRef.current = true;
+        setReadTrackingReady(true);
+        setHighestVisibleId((current) => current ?? dividerId);
 
-        const index = reversedListData.findIndex(
-            (item) => item.kind === 'message' && item.message.id === dividerId,
-        );
+        const index = indexOfMessage(dividerId);
         if (index < 0) {
-            // The divider row is not addressable (filtered or not laid out):
-            // still make its message the initial target rather than none.
-            readTrackingReadyRef.current = true;
-            setReadTrackingReady(true);
-            setHighestVisibleId((current) => current ?? dividerId);
+            // The divider row is not addressable: keep its message as the
+            // initial read target rather than none.
+            initialAnchorIdRef.current = null;
             return;
         }
-        setTimeout((): void => {
-            listRef.current?.scrollToIndex({
-                index,
-                viewPosition: 0.5,
-                animated: false,
-            });
-            // Enable only after the jump so the initial bottom render cannot
-            // mark the whole unread block read before it is shown. The
-            // divider's message is visible at the centre of the jump and is
-            // the initial read target.
-            readTrackingReadyRef.current = true;
-            setReadTrackingReady(true);
-            setHighestVisibleId((current) => current ?? dividerId);
-        }, 50);
-    }, [detail, messages, currentUserId, reversedListData]);
+        // Inverted list: viewPosition 1 is the VISUAL top, so the first unread
+        // message opens at the top of the viewport (not centred). Immediate
+        // and non-animated: a deferred jump only makes the newest messages
+        // visibly flash before the list moves.
+        requestScrollToMessage(
+            dividerId,
+            index,
+            INITIAL_UNREAD_VIEW_POSITION,
+            false,
+        );
+    }, [
+        detail,
+        messages,
+        currentUserId,
+        headerHeight,
+        composerHeight,
+        listHeight,
+        newestConfirmedId,
+        conversation.isFetched,
+    ]);
 
     useEffect((): (() => void) => {
         return (): void => {
@@ -671,6 +891,14 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
             if (noticeTimerRef.current !== null) {
                 clearTimeout(noticeTimerRef.current);
             }
+            // Deferred scrolls must not outlive this chat: their list ref now
+            // belongs to the next screen.
+            if (jumpFrameRef.current !== null) {
+                cancelAnimationFrame(jumpFrameRef.current);
+                jumpFrameRef.current = null;
+            }
+            cancelScrollRetry();
+            scrollTargetRef.current = null;
         };
     }, [chatId]);
 
@@ -695,16 +923,6 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
             closeMediaViewer();
         };
     }, [popup, chatId]);
-
-    const newestConfirmedId = useMemo((): number | null => {
-        for (let index = messages.length - 1; index >= 0; index -= 1) {
-            const id = messages[index]?.id ?? null;
-            if (id !== null) {
-                return id;
-            }
-        }
-        return null;
-    }, [messages]);
 
     // Focus + foreground + a settled initial position is what allows reads;
     // the target is either the newest message (at the bottom) or the highest
@@ -743,6 +961,12 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         if (newestId === null) {
             return;
         }
+        // Never move the list while its one-time initial position is pending
+        // (or was taken over): the initial pass owns the first placement.
+        if (!initialPositionedRef.current) {
+            lastNewestIdRef.current = newestId;
+            return;
+        }
         const previousId = lastNewestIdRef.current;
         lastNewestIdRef.current = newestId;
         const newest = messages[messages.length - 1];
@@ -761,16 +985,22 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
             );
             setNewMessageCount(newMessageCountRef.current);
         }
-        if (newestId === previousId) {
-            return;
-        }
         if (
-            jumpInProgressRef.current ||
-            userScrollingRef.current ||
-            !atBottomRef.current
+            !shouldFollowNewest({
+                initialized: initialPositionedRef.current,
+                newestId,
+                previousNewestId: previousId,
+                atBottom: atBottomRef.current,
+                userScrolling: userScrollingRef.current,
+                jumpInProgress: jumpInProgressRef.current,
+            })
         ) {
             return;
         }
+        // This explicit edge scroll wins over any unmeasured-row correction
+        // still waiting from an earlier request.
+        cancelScrollRetry();
+        scrollTargetRef.current = null;
         listRef.current?.scrollToOffset({
             offset: 0,
             animated: previousId !== null,
@@ -789,7 +1019,15 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
             return undefined;
         }
         const frame = requestAnimationFrame((): void => {
-            if (atBottomRef.current && !userScrollingRef.current) {
+            if (
+                initialPositionedRef.current &&
+                atBottomRef.current &&
+                !userScrollingRef.current &&
+                !jumpInProgressRef.current
+            ) {
+                // The keyboard re-anchor owns the position now.
+                cancelScrollRetry();
+                scrollTargetRef.current = null;
                 listRef.current?.scrollToOffset({
                     offset: 0,
                     animated: false,
@@ -800,6 +1038,10 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     }, [keyboardVisible, keyboardHeight]);
 
     const scrollToBottom = (): void => {
+        // An explicit "go to latest" outranks the initial unread anchor.
+        settleInitialPositioningRef.current();
+        cancelScrollRetry();
+        scrollTargetRef.current = null;
         atBottomRef.current = true;
         setAtBottom(true);
         newMessageCountRef.current = 0;
@@ -821,6 +1063,10 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         jumpAbortRef.current?.abort();
         jumpAbortRef.current = null;
         jumpInProgressRef.current = false;
+        if (jumpFrameRef.current !== null) {
+            cancelAnimationFrame(jumpFrameRef.current);
+            jumpFrameRef.current = null;
+        }
         setJumpLoadingId(null);
     };
 
@@ -831,33 +1077,42 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     };
 
     const performJump = (messageId: number): void => {
+        // A jump is an explicit position: it outranks the initial anchor.
+        settleInitialPositioningRef.current();
         jumpInProgressRef.current = true;
         setJumpLoadingId(null);
         atBottomRef.current = false;
-        // Let a just-loaded page reach the list data before measuring it.
-        setTimeout((): void => {
-            const index = reversedListDataRef.current.findIndex(
-                (item) =>
-                    item.kind === 'message' && item.message.id === messageId,
-            );
-            if (index < 0) {
-                jumpInProgressRef.current = false;
+        if (jumpFrameRef.current !== null) {
+            cancelAnimationFrame(jumpFrameRef.current);
+        }
+        // Frame-based (not a timer): a just-loaded page is rendered before the
+        // target index is measured, and a stale frame is cancelled above.
+        jumpFrameRef.current = requestAnimationFrame((): void => {
+            if (!jumpInProgressRef.current) {
+                jumpFrameRef.current = null;
                 return;
             }
-            listRef.current?.scrollToIndex({
-                index,
-                viewPosition: 0.5,
-                animated: true,
+            jumpFrameRef.current = requestAnimationFrame((): void => {
+                jumpFrameRef.current = null;
+                if (!jumpInProgressRef.current) {
+                    return;
+                }
+                const index = indexOfMessage(messageId);
+                if (index < 0) {
+                    jumpInProgressRef.current = false;
+                    return;
+                }
+                requestScrollToMessage(messageId, index, 0.5, true);
+                setHighlightedKey(String(messageId));
+                if (highlightTimerRef.current !== null) {
+                    clearTimeout(highlightTimerRef.current);
+                }
+                highlightTimerRef.current = setTimeout((): void => {
+                    setHighlightedKey(null);
+                    jumpInProgressRef.current = false;
+                }, HIGHLIGHT_MS);
             });
-            setHighlightedKey(String(messageId));
-            if (highlightTimerRef.current !== null) {
-                clearTimeout(highlightTimerRef.current);
-            }
-            highlightTimerRef.current = setTimeout((): void => {
-                setHighlightedKey(null);
-                jumpInProgressRef.current = false;
-            }, HIGHLIGHT_MS);
-        }, 50);
+        });
     };
 
     // "Go to message" from the full player: jump to the track's bubble. The
@@ -1009,6 +1264,30 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     const handleOpenLink = (url: string): void => {
         if (selecting) return;
         openMessageLink(url);
+    };
+
+    /** One mention lookup at a time: repeated taps while it loads are ignored. */
+    const mentionLookupRef = useRef(false);
+    const handleMentionPress = async (username: string): Promise<void> => {
+        if (selecting || mentionLookupRef.current) return;
+        mentionLookupRef.current = true;
+        try {
+            const profile = await fetchPublicUserByUsername(username);
+            openUserProfile({
+                userId: profile.id,
+                name: profile.name,
+                avatar: profile.avatars[0]?.storedPath ?? null,
+                isSelf: currentUserId !== null && profile.id === currentUserId,
+            });
+        } catch (error) {
+            toast.show(
+                error instanceof ApiError && error.statusCode === 404
+                    ? 'User not found'
+                    : 'Could not open this profile',
+            );
+        } finally {
+            mentionLookupRef.current = false;
+        }
     };
 
     const handleToggleSelection = (message: ChatMessage): void => {
@@ -1452,8 +1731,14 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         event: NativeSyntheticEvent<NativeScrollEvent>,
     ): void => {
         scrollToLatestButton.onScroll(event);
+        lastOffsetRef.current = event.nativeEvent.contentOffset.y;
         const nearBottom =
             event.nativeEvent.contentOffset.y <= NEAR_BOTTOM_OFFSET;
+        // `atBottom` tracks the actual offset (so a jump that clamps to the
+        // newest edge still allows live-follow). The one-shot unread read gate
+        // is separate: it is released by viewability (the anchor was shown) or
+        // by the failed-index path, never by a raw scroll event — otherwise the
+        // pre-jump bottom frame would mark the whole unread block read.
         if (atBottomRef.current !== nearBottom) {
             atBottomRef.current = nearBottom;
             setAtBottom(nearBottom);
@@ -1794,40 +2079,58 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
         );
     }
 
+    /** Both the avatar and the centered title open the same profile/group. */
+    const canOpenHeaderTarget = peerUserId !== null || isGroup;
+    const openHeaderTarget = (): void => {
+        if (peerUserId !== null) {
+            openUserProfile({
+                userId: peerUserId,
+                name,
+                avatar: avatarPath,
+            });
+            return;
+        }
+        if (isGroup) {
+            openGroupInfo();
+        }
+    };
+    const headerTargetLabel =
+        peerUserId !== null
+            ? `Open profile of ${name}`
+            : `Open group info for ${name}`;
+
     const headerIdentity = (
-        <>
-            <UserAvatar
-                userId={headerAvatarUserId}
-                name={name}
-                uri={avatarPath}
-                size={40}
-            />
-            <View style={styles.headerMeta}>
-                <Text style={typography.title} numberOfLines={1}>
-                    {name}
-                </Text>
-                {isGroup ? (
-                    <GroupChatSubtitle
-                        names={typingUsers.map((user) => user.name)}
-                        membersCount={
-                            membersCount !== null &&
-                            Number.isFinite(membersCount)
-                                ? membersCount
-                                : null
-                        }
-                        suffix={info?.isBan === true ? ' · banned' : ''}
-                    />
-                ) : (
-                    <GroupChatSubtitle
-                        names={[]}
-                        membersCount={null}
-                        fallbackText={peerPresence ?? ''}
-                        typing={typingUsers.length > 0}
-                        typingLabel="typing"
-                    />
-                )}
-            </View>
-        </>
+        <View style={styles.headerTitleBlock}>
+            <SafeText
+                style={[typography.title, styles.headerName]}
+                lines={1}
+                align="center"
+                maxFontSizeMultiplier={MAX_FONT_SCALE}
+            >
+                {name}
+            </SafeText>
+            {isGroup ? (
+                <GroupChatSubtitle
+                    names={typingUsers.map((user) => user.name)}
+                    membersCount={
+                        membersCount !== null && Number.isFinite(membersCount)
+                            ? membersCount
+                            : null
+                    }
+                    suffix={info?.isBan === true ? ' · banned' : ''}
+                    align="center"
+                />
+            ) : (
+                <GroupChatSubtitle
+                    names={[]}
+                    membersCount={null}
+                    fallbackText={peerPresence ?? ''}
+                    typing={typingUsers.length > 0}
+                    typingLabel="typing"
+                    align="center"
+                />
+            )}
+        </View>
     );
 
     // Row renderer kept OUT of the list props: it is read through a ref by a
@@ -1887,6 +2190,13 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                 showSenderName={item.showSenderName}
                 showAvatar={item.showAvatar}
                 onOpenLink={selecting ? undefined : handleOpenLink}
+                onMentionPress={
+                    selecting
+                        ? undefined
+                        : (username): void => {
+                              void handleMentionPress(username);
+                          }
+                }
                 onOpenProfile={
                     selecting
                         ? undefined
@@ -2023,47 +2333,74 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                     </View>
                 ) : (
                     <GlassHeader layout="row">
-                        <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel="Go back"
-                            style={styles.backButton}
-                            onPress={(): void => router.back()}
-                        >
-                            <Text style={styles.backText}>‹</Text>
-                        </Pressable>
-                        {peerUserId !== null ? (
+                        {/* Side controls are absolutely positioned; the title
+                            block owns the full width with equal reserves on
+                            both sides, so it is centered on the SCREEN (not
+                            centered in whatever space the sides leave). */}
+                        <View style={styles.headerRow}>
+                            <View style={styles.headerLeft}>
+                                <Pressable
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Go back"
+                                    style={styles.headerIconButton}
+                                    onPress={(): void => router.back()}
+                                >
+                                    <Text
+                                        style={styles.backText}
+                                        maxFontSizeMultiplier={MAX_FONT_SCALE}
+                                    >
+                                        ‹
+                                    </Text>
+                                </Pressable>
+                                <Pressable
+                                    accessibilityRole="button"
+                                    accessibilityLabel={
+                                        canOpenHeaderTarget
+                                            ? headerTargetLabel
+                                            : name
+                                    }
+                                    accessibilityState={{
+                                        disabled: !canOpenHeaderTarget,
+                                    }}
+                                    disabled={!canOpenHeaderTarget}
+                                    onPress={openHeaderTarget}
+                                    style={({ pressed }) => [
+                                        styles.headerAvatarButton,
+                                        pressed && styles.pressed,
+                                    ]}
+                                >
+                                    <UserAvatar
+                                        userId={headerAvatarUserId}
+                                        name={name}
+                                        uri={avatarPath}
+                                        size={40}
+                                    />
+                                </Pressable>
+                            </View>
                             <Pressable
                                 accessibilityRole="button"
-                                accessibilityLabel={`Open profile of ${name}`}
-                                onPress={(): void => {
-                                    openUserProfile({
-                                        userId: peerUserId,
-                                        name,
-                                        avatar: avatarPath,
-                                    });
+                                accessibilityLabel={
+                                    canOpenHeaderTarget
+                                        ? headerTargetLabel
+                                        : name
+                                }
+                                accessibilityState={{
+                                    disabled: !canOpenHeaderTarget,
                                 }}
+                                disabled={!canOpenHeaderTarget}
+                                onPress={openHeaderTarget}
                                 style={({ pressed }) => [
-                                    styles.headerIdentity,
+                                    styles.headerCenter,
                                     pressed && styles.pressed,
                                 ]}
                             >
                                 {headerIdentity}
                             </Pressable>
-                        ) : isGroup ? (
-                            <Pressable
-                                accessibilityRole="button"
-                                accessibilityLabel={`Open group info for ${name}`}
-                                onPress={openGroupInfo}
-                                style={({ pressed }) => [
-                                    styles.headerIdentity,
-                                    pressed && styles.pressed,
-                                ]}
-                            >
-                                {headerIdentity}
-                            </Pressable>
-                        ) : (
-                            headerIdentity
-                        )}
+                            <View
+                                style={styles.headerRight}
+                                pointerEvents="none"
+                            />
+                        </View>
                     </GlassHeader>
                 )}
                 {!selecting && !pinnedBannerHidden && (
@@ -2120,6 +2457,11 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                                 // explicit action) does.
                                 keyboardDismissMode="none"
                                 onScrollBeginDrag={(): void => {
+                                    // The user owns the list now: no pending
+                                    // initial anchor or index retry may fight.
+                                    settleInitialPositioningRef.current();
+                                    cancelScrollRetry();
+                                    scrollTargetRef.current = null;
                                     userScrollingRef.current = true;
                                     cancelJump();
                                     scrollToLatestButton.cancelScrollToBottom();
@@ -2149,22 +2491,9 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                                     conversation.loadOlder()
                                 }
                                 onEndReachedThreshold={0.4}
-                                onScrollToIndexFailed={(info): void => {
-                                    // Variable row heights: jump approximately, then
-                                    // retry the exact target once rows are measured.
-                                    listRef.current?.scrollToOffset({
-                                        offset:
-                                            info.averageItemLength * info.index,
-                                        animated: false,
-                                    });
-                                    setTimeout((): void => {
-                                        listRef.current?.scrollToIndex({
-                                            index: info.index,
-                                            viewPosition: 0.5,
-                                            animated: true,
-                                        });
-                                    }, 120);
-                                }}
+                                onScrollToIndexFailed={
+                                    handleScrollToIndexFailed
+                                }
                                 ListFooterComponent={
                                     <>
                                         {conversation.loadingOlder ? (
@@ -2232,7 +2561,12 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                     </KeyboardAvoidingView>
                 )}
                 <ScrollToBottomButton
-                    visible={scrollToLatestButton.visible}
+                    // A live message while the user is reading back must show
+                    // its indicator even when they are only slightly above the
+                    // bottom (inside the button's own distance hysteresis).
+                    visible={
+                        scrollToLatestButton.visible || newMessageCount > 0
+                    }
                     count={newMessageCount}
                     bottomOffset={scrollButtonBottom}
                     onPress={handleScrollToLatest}
@@ -2588,14 +2922,65 @@ const styles = StyleSheet.create({
         fontSize: 13,
         fontWeight: '700',
     },
-    headerIdentity: {
+    headerRow: {
         flex: 1,
+        minWidth: 0,
+        justifyContent: 'center',
+    },
+    headerLeft: {
+        position: 'absolute',
+        start: 0,
+        top: 0,
+        bottom: 0,
         flexDirection: 'row',
         alignItems: 'center',
-        gap: spacing.sm,
+        gap: spacing.xxs,
+        zIndex: 1,
+    },
+    headerRight: {
+        position: 'absolute',
+        end: 0,
+        top: 0,
+        bottom: 0,
+        width: 40,
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1,
+    },
+    headerIconButton: {
+        width: 40,
+        height: 40,
+        flexShrink: 0,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    headerAvatarButton: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        flexShrink: 0,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    headerCenter: {
+        flex: 1,
+        minWidth: 0,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: HEADER_SIDE_RESERVE,
+    },
+    headerTitleBlock: {
+        width: '100%',
+        minWidth: 0,
+        alignItems: 'center',
+        gap: 2,
     },
     pressed: { opacity: 0.6 },
-    headerMeta: { flex: 1 },
+    headerName: {
+        width: '100%',
+        includeFontPadding: false,
+        textAlign: 'center',
+    },
     avatar: { width: 44, height: 44, borderRadius: 22 },
     avatarFallback: {
         width: 44,
@@ -2610,8 +2995,12 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontWeight: '700',
     },
-    backButton: { paddingHorizontal: spacing.xxs, paddingVertical: spacing.xs },
-    backText: { color: palette.primary[600], fontSize: 26, fontWeight: '700' },
+    backText: {
+        color: palette.primary[600],
+        fontSize: 26,
+        lineHeight: 30,
+        fontWeight: '700',
+    },
     blockedNotice: {
         flexDirection: 'row',
         alignItems: 'center',

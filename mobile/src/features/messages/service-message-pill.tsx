@@ -7,6 +7,7 @@ import Reanimated, {
     withTiming,
 } from 'react-native-reanimated';
 import { palette, radii, spacing, motion } from '../../shared/theme';
+import { textDirectionStyle } from '../../shared/text-direction';
 import { useReducedMotion } from '../../shared/hooks/use-reduced-motion';
 import type { ChatMessage } from './messages-model';
 import { serviceMessageParts } from './service-message';
@@ -63,11 +64,18 @@ export function ServiceMessagePill({
         service === null
             ? [{ text: fallback, userId: null, isYou: false }]
             : serviceMessageParts(service, currentUserId);
+    const sentence = parts.map((part) => part.text).join('');
 
     return (
         <View style={styles.row}>
             <Reanimated.View style={[styles.pill, animatedStyle]}>
-                <Text style={styles.text} numberOfLines={2}>
+                <Text
+                    style={[
+                        styles.text,
+                        textDirectionStyle(sentence, 'center'),
+                    ]}
+                    numberOfLines={2}
+                >
                     {parts.map((part, index) => {
                         const tappable =
                             part.userId !== null &&

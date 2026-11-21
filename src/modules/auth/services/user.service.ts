@@ -203,6 +203,35 @@ export class UserService {
         };
     }
 
+    /**
+     * Username → public profile, for @mentions. Same case-sensitive compare
+     * as `getUserByUsername`; unknown and inactive users answer the same 404,
+     * and the response is the public whitelist only (never phone/status/role).
+     */
+    async getPublicProfileByUsername(username: string, viewerId?: number) {
+        const name = username.trim();
+        if (name === '') {
+            throw new NotFoundException('User not found');
+        }
+
+        const profile = await this.profileRepository.findOne({
+            where: { username: name },
+            relations: { user: true },
+        });
+        if (!profile || profile.user.status !== UserStatusEnum.ACTIVE) {
+            throw new NotFoundException('User not found');
+        }
+
+        if (viewerId !== undefined) {
+            await this.visibility.assertCanViewUserProfile(
+                Number(viewerId),
+                Number(profile.user.id),
+            );
+        }
+
+        return toPublicUserProfile({ ...profile.user, profile });
+    }
+
     async getUserByUsername(username: string, viewerId?: number) {
         const profile = await this.profileRepository.findOne({
             where: { username },

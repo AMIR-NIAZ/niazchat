@@ -1,19 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
-    FlatList,
     Pressable,
-    RefreshControl,
     StyleSheet,
     Text,
     TextInput,
     View,
 } from 'react-native';
-import type { ListRenderItemInfo } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import {
     AppText,
+    SafeText,
     UserAvatar,
     palette,
     radii,
@@ -21,6 +19,7 @@ import {
     typography,
     OfflineCaption,
 } from '../../../shared/components';
+import { useAfterModalClose } from '../../../shared/hooks/use-after-modal-close';
 import { useDebouncedValue } from '../../../shared/hooks/use-debounced-value';
 import { dialog, toast } from '../../../shared/dialog';
 import { ApiError } from '../../../core/api';
@@ -62,6 +61,8 @@ import {
 } from '../../../features/groups/use-group';
 import { describeGroupAvatarError } from '../../../features/groups/group-errors';
 import { Settings, UserPlus } from 'lucide-react-native';
+import { ChatSharedContent } from '../../../features/shared-content';
+import type { MembersTabConfig } from '../../../features/shared-content';
 
 /**
  * GROUP INFO panel — reachable from a group chat header only.
@@ -114,6 +115,17 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
     const setMainAvatar = useSetMainGroupAvatar(chatId);
 
     const [actionTarget, setActionTarget] = useState<GroupMember | null>(null);
+    // The sheet's content is driven by the last selected member, so clearing
+    // `actionTarget` (which hides the Modal) does not empty the sheet while it
+    // slides away.
+    const sheetMemberRef = useRef<GroupMember | null>(null);
+    if (actionTarget !== null) {
+        sheetMemberRef.current = actionTarget;
+    }
+    const sheetMember = actionTarget ?? sheetMemberRef.current;
+    // Ignore repeated taps on an action while the sheet is closing.
+    const actionLockRef = useRef(false);
+    const { deferUntilDismissed, onModalDismiss } = useAfterModalClose();
     const [pendingMemberId, setPendingMemberId] = useState<number | null>(null);
     const [notice, setNotice] = useState<string | null>(null);
     const [viewerIndex, setViewerIndex] = useState<number | null>(null);
@@ -350,9 +362,9 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
                         size={256}
                     />
                 </Pressable>
-                <Text style={styles.title} numberOfLines={2}>
+                <SafeText style={styles.title} lines={2}>
                     {info.title || 'Unnamed group'}
-                </Text>
+                </SafeText>
                 {info.description !== null &&
                     info.description.trim() !== '' && (
                         <Text style={styles.description}>
@@ -376,52 +388,6 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
                     />
                 </View>
             )}
-
-            <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Members</Text>
-                {info.capabilities.canAddMembers === true && (
-                    <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Add members"
-                        style={({ pressed }) => [
-                            styles.addMembersButton,
-                            pressed && styles.rowPressed,
-                        ]}
-                        onPress={(): void => {
-                            if (addMembersNavRef.current) return;
-                            addMembersNavRef.current = true;
-                            router.push(
-                                `/(app)/group-settings/${chatId}/add-members`,
-                            );
-                            setTimeout((): void => {
-                                addMembersNavRef.current = false;
-                            }, 700);
-                        }}
-                    >
-                        <UserPlus
-                            size={16}
-                            color={palette.primary[300]}
-                            strokeWidth={2}
-                        />
-                        <Text style={styles.addMembersText}>Add</Text>
-                    </Pressable>
-                )}
-            </View>
-            <TextInput
-                value={searchInput}
-                onChangeText={setSearchInput}
-                placeholder="Search members"
-                placeholderTextColor={palette.neutral[500]}
-                autoCorrect={false}
-                returnKeyType="search"
-                accessibilityLabel="Search members"
-                style={styles.search}
-            />
-            {notice !== null && (
-                <Text style={styles.notice} accessibilityLiveRegion="polite">
-                    {notice}
-                </Text>
-            )}
         </View>
     );
 
@@ -429,6 +395,169 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
         membersQuery.isError && members.length === 0
             ? describeMemberActionError(membersQuery.error)
             : null;
+
+    // The tab's rows are the existing members UI, virtualized by the shared
+    // section's list: toolbar/search first, then one row per member.
+    const memberRows: { key: string; node: React.ReactNode }[] = [
+        {
+            key: 'members-toolbar',
+            node: (
+                <View>
+                    {notice !== null && (
+                        <Text
+                            style={styles.notice}
+                            accessibilityLiveRegion="polite"
+                        >
+                            {notice}
+                        </Text>
+                    )}
+                    <View style={styles.membersToolbar}>
+                        <TextInput
+                            value={searchInput}
+                            onChangeText={setSearchInput}
+                            placeholder="Search members"
+                            placeholderTextColor={palette.neutral[500]}
+                            autoCorrect={false}
+                            returnKeyType="search"
+                            accessibilityLabel="Search members"
+                            style={styles.search}
+                        />
+                        {info.capabilities.canAddMembers === true && (
+                            <Pressable
+                                accessibilityRole="button"
+                                accessibilityLabel="Add members"
+                                style={({ pressed }) => [
+                                    styles.addMembersButton,
+                                    pressed && styles.rowPressed,
+                                ]}
+                                onPress={(): void => {
+                                    if (addMembersNavRef.current) return;
+                                    addMembersNavRef.current = true;
+                                    router.push(
+                                        `/(app)/group-settings/${chatId}/add-members`,
+                                    );
+                                    setTimeout((): void => {
+                                        addMembersNavRef.current = false;
+                                    }, 700);
+                                }}
+                            >
+                                <UserPlus
+                                    size={16}
+                                    color={palette.primary[300]}
+                                    strokeWidth={2}
+                                />
+                                <Text style={styles.addMembersText}>Add</Text>
+                            </Pressable>
+                        )}
+                    </View>
+                </View>
+            ),
+        },
+    ];
+    for (const item of members) {
+        memberRows.push({
+            key: `member-${item.memberId}`,
+            node: (
+                <MemberRow
+                    member={item}
+                    isSelf={
+                        currentUserId !== null && item.userId === currentUserId
+                    }
+                    pending={pendingMemberId === item.memberId}
+                    onOpenProfile={(): void => {
+                        openUserProfile({
+                            userId: item.userId,
+                            name: item.name,
+                            avatar: item.avatars[0] ?? null,
+                            isSelf:
+                                currentUserId !== null &&
+                                item.userId === currentUserId,
+                        });
+                    }}
+                    onOpenActions={(): void => {
+                        actionLockRef.current = false;
+                        setActionTarget(item);
+                    }}
+                />
+            ),
+        });
+    }
+    if (membersQuery.isPending) {
+        memberRows.push({
+            key: 'members-loading',
+            node: (
+                <View style={styles.listState}>
+                    <ActivityIndicator
+                        size="small"
+                        color={palette.primary[500]}
+                    />
+                </View>
+            ),
+        });
+    }
+    if (listError !== null) {
+        memberRows.push({
+            key: 'members-error',
+            node: (
+                <View style={styles.listState}>
+                    <Text style={styles.stateTitle}>
+                        Could not load members
+                    </Text>
+                    <Text style={styles.stateDetail}>{listError}</Text>
+                    <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Retry loading members"
+                        style={styles.retryButton}
+                        onPress={(): void => {
+                            void membersQuery.refetch();
+                        }}
+                    >
+                        <Text style={styles.retryText}>Retry</Text>
+                    </Pressable>
+                </View>
+            ),
+        });
+    }
+    if (!membersQuery.isPending && listError === null && members.length === 0) {
+        memberRows.push({
+            key: 'members-empty',
+            node: (
+                <View style={styles.listState}>
+                    <Text style={styles.stateTitle}>No members found</Text>
+                </View>
+            ),
+        });
+    }
+    if (membersQuery.hasNextPage && !membersQuery.isFetchingNextPage) {
+        memberRows.push({
+            key: 'members-load-more',
+            node: (
+                <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Load more members"
+                    style={styles.loadMoreButton}
+                    onPress={(): void => {
+                        void membersQuery.fetchNextPage();
+                    }}
+                >
+                    <Text style={styles.loadMoreText}>Load more members</Text>
+                </Pressable>
+            ),
+        });
+    }
+
+    const membersTab: MembersTabConfig = {
+        rows: memberRows,
+        hasNextPage: membersQuery.hasNextPage,
+        isFetchingNextPage: membersQuery.isFetchingNextPage,
+        isRefetching: membersQuery.isRefetching,
+        onLoadMore: (): void => {
+            void membersQuery.fetchNextPage();
+        },
+        onRefresh: (): void => {
+            void membersQuery.refetch();
+        },
+    };
 
     return (
         <View style={styles.root}>
@@ -460,107 +589,23 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
 
             <OfflineCaption />
 
-            <FlatList
-                data={members}
-                keyExtractor={(item): string => String(item.memberId)}
-                renderItem={({ item }: ListRenderItemInfo<GroupMember>) => (
-                    <MemberRow
-                        member={item}
-                        isSelf={
-                            currentUserId !== null &&
-                            item.userId === currentUserId
-                        }
-                        pending={pendingMemberId === item.memberId}
-                        onOpenProfile={(): void => {
-                            openUserProfile({
-                                userId: item.userId,
-                                name: item.name,
-                                avatar: item.avatars[0] ?? null,
-                                isSelf:
-                                    currentUserId !== null &&
-                                    item.userId === currentUserId,
-                            });
-                        }}
-                        onOpenActions={(): void => setActionTarget(item)}
-                    />
-                )}
-                ListHeaderComponent={header}
-                ListEmptyComponent={
-                    membersQuery.isPending ? (
-                        <View style={styles.listState}>
-                            <ActivityIndicator
-                                size="small"
-                                color={palette.primary[500]}
-                            />
-                        </View>
-                    ) : listError !== null ? (
-                        <View style={styles.listState}>
-                            <Text style={styles.stateTitle}>
-                                Could not load members
-                            </Text>
-                            <Text style={styles.stateDetail}>{listError}</Text>
-                            <Pressable
-                                accessibilityRole="button"
-                                accessibilityLabel="Retry loading members"
-                                style={styles.retryButton}
-                                onPress={(): void => {
-                                    void membersQuery.refetch();
-                                }}
-                            >
-                                <Text style={styles.retryText}>Retry</Text>
-                            </Pressable>
-                        </View>
-                    ) : (
-                        <View style={styles.listState}>
-                            <Text style={styles.stateTitle}>
-                                No members found
-                            </Text>
-                        </View>
-                    )
-                }
-                ListFooterComponent={
-                    membersQuery.isFetchingNextPage ? (
-                        <View style={styles.footer}>
-                            <ActivityIndicator
-                                size="small"
-                                color={palette.primary[500]}
-                            />
-                        </View>
-                    ) : undefined
-                }
-                contentContainerStyle={styles.listContent}
-                refreshControl={
-                    <RefreshControl
-                        refreshing={
-                            membersQuery.isRefetching &&
-                            !membersQuery.isFetchingNextPage
-                        }
-                        onRefresh={(): void => {
-                            void infoQuery.refetch();
-                            void membersQuery.refetch();
-                        }}
-                        tintColor={palette.primary[500]}
-                    />
-                }
-                onEndReached={(): void => {
-                    if (
-                        membersQuery.hasNextPage &&
-                        !membersQuery.isFetchingNextPage
-                    ) {
-                        void membersQuery.fetchNextPage();
-                    }
-                }}
-                onEndReachedThreshold={0.4}
-                keyboardShouldPersistTaps="handled"
+            {/* One scroll container for the whole profile: group info scrolls
+                as the header, the tab bar pins under the top bar, and the
+                active tab's rows (Members first) scroll beneath it. */}
+            <ChatSharedContent
+                chatId={chatId}
+                showSender={true}
+                header={header}
+                members={membersTab}
             />
 
             <MemberActionsSheet
                 visible={actionTarget !== null}
                 memberName={
-                    actionTarget?.name || actionTarget?.username || 'Member'
+                    sheetMember?.name || sheetMember?.username || 'Member'
                 }
                 actions={
-                    actionTarget?.actions ?? {
+                    sheetMember?.actions ?? {
                         canPromote: false,
                         canDemote: false,
                         canRemove: false,
@@ -570,9 +615,14 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
                     }
                 }
                 busy={pendingMemberId !== null}
-                onClose={(): void => setActionTarget(null)}
+                onDismiss={onModalDismiss}
+                onClose={(): void => {
+                    actionLockRef.current = false;
+                    setActionTarget(null);
+                }}
                 onAction={(action): void => {
-                    if (actionTarget === null) return;
+                    if (actionTarget === null || actionLockRef.current) return;
+                    actionLockRef.current = true;
                     if (action === 'member-permissions') {
                         const member = actionTarget;
                         setActionTarget(null);
@@ -589,7 +639,15 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
                         );
                         return;
                     }
-                    confirmAction(action, actionTarget);
+                    // Close the sheet first: the shared dialog is an in-tree
+                    // overlay, so it would otherwise sit behind this native
+                    // Modal (or make the Modal/dialog stack). The captured
+                    // member survives the sheet closing.
+                    const member = actionTarget;
+                    setActionTarget(null);
+                    deferUntilDismissed((): void =>
+                        confirmAction(action, member),
+                    );
                 }}
             />
 
@@ -662,9 +720,9 @@ function MemberRow(props: {
                 )}
             </View>
             <View style={styles.rowBody}>
-                <Text style={styles.rowName} numberOfLines={1}>
+                <SafeText style={styles.rowName} lines={1}>
                     {name}
-                </Text>
+                </SafeText>
                 {member.username !== '' && (
                     <Text style={styles.rowUsername} numberOfLines={1}>
                         @{member.username}
@@ -810,8 +868,19 @@ const styles = StyleSheet.create({
         lineHeight: 24,
         color: palette.neutral[700],
     },
-    listContent: {
-        paddingBottom: spacing.xl,
+    loadMoreButton: {
+        alignSelf: 'center',
+        marginVertical: spacing.sm,
+        borderWidth: 1,
+        borderColor: palette.primary[500],
+        borderRadius: radii.sm,
+        paddingHorizontal: spacing.md,
+        paddingVertical: spacing.xxs,
+    },
+    loadMoreText: {
+        color: palette.primary[600],
+        fontSize: 13,
+        fontWeight: '600',
     },
     identityBlock: {
         alignItems: 'center',
@@ -828,6 +897,7 @@ const styles = StyleSheet.create({
     },
     title: {
         ...typography.title,
+        alignSelf: 'stretch',
         textAlign: 'center',
         marginTop: spacing.xs,
     },
@@ -844,13 +914,15 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         paddingHorizontal: spacing.md,
     },
-    sectionHeader: {
+    membersToolbar: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
+        gap: spacing.sm,
         paddingHorizontal: spacing.md,
-        paddingTop: spacing.lg,
-        paddingBottom: spacing.xs,
+        paddingVertical: spacing.sm,
+        backgroundColor: palette.surface,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: palette.border.subtle,
     },
     addMembersButton: {
         flexDirection: 'row',
@@ -868,14 +940,8 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         color: palette.primary[300],
     },
-    sectionTitle: {
-        fontSize: 17,
-        fontWeight: '700',
-        color: palette.neutral[900],
-    },
     search: {
-        marginHorizontal: spacing.md,
-        marginBottom: spacing.xs,
+        flex: 1,
         minHeight: 44,
         borderRadius: radii.md,
         backgroundColor: palette.surface,
@@ -902,7 +968,7 @@ const styles = StyleSheet.create({
         borderBottomColor: palette.border.subtle,
     },
     rowPressed: { backgroundColor: palette.glass.elevated },
-    rowBody: { flex: 1, gap: 2 },
+    rowBody: { flex: 1, minWidth: 0, gap: 2 },
     rowName: {
         fontSize: 16,
         fontWeight: '600',
@@ -921,6 +987,7 @@ const styles = StyleSheet.create({
         borderColor: palette.neutral[0],
     },
     badge: {
+        flexShrink: 0,
         borderRadius: radii.sm,
         paddingHorizontal: spacing.xs,
         paddingVertical: 2,
@@ -960,7 +1027,6 @@ const styles = StyleSheet.create({
         ...typography.caption,
         textAlign: 'center',
     },
-    footer: { paddingVertical: spacing.md, alignItems: 'center' },
     centered: {
         flex: 1,
         alignItems: 'center',

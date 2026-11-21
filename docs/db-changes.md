@@ -692,3 +692,45 @@ Notes:
 - The effective value (`override ?? groupDefault`) is resolved by
   `MemberPermissionResolverService` and stored in every caller context; no
   enforcement site reads the client's view.
+
+## Shared content (chat profile tabs)
+
+The profile's "Media / Voice / Music / Links / Files" tabs read two additive
+structures: a new `message_links` table (URLs extracted at write time) and an
+index on `attachments`. Both are safe to re-run.
+
+```sql
+CREATE TABLE IF NOT EXISTS "message_links" (
+    "id"        bigserial PRIMARY KEY,
+    "messageId" bigint NOT NULL REFERENCES "messages"(id) ON DELETE CASCADE,
+    "chatId"    bigint NOT NULL REFERENCES "chats"(id)    ON DELETE CASCADE,
+    "url"       character varying(2048) NOT NULL,
+    "domain"    character varying(255)  NOT NULL,
+    "createdAt" timestamp NOT NULL DEFAULT now(),
+    "updatedAt" timestamp NOT NULL DEFAULT now(),
+    CONSTRAINT "UQ_message_links_message_url" UNIQUE ("messageId", "url")
+);
+
+CREATE INDEX IF NOT EXISTS "IDX_message_links_chat_created_id"
+    ON "message_links" ("chatId", "createdAt", "id");
+
+CREATE INDEX IF NOT EXISTS "IDX_attachments_chat_message"
+    ON "attachments" ("chatId", "messageId");
+```
+
+| Change | Meaning |
+| ------ | ------- |
+| `message_links` | One row per distinct URL of a message. `createdAt` mirrors the MESSAGE time (not the insert time), so backfilled links group under their real month. |
+| `(messageId, url)` unique | Re-extraction and the backfill are idempotent; a concurrent retry cannot duplicate a link. |
+| `IDX_message_links_chat_created_id` | The Links tab's stable newest-first pagination cursor is `(createdAt, id)`. |
+| `IDX_attachments_chat_message` | Media/Voice/Music/Files pages and counts filter one chat's attachments by message; avoids a full attachments scan. |
+
+Notes:
+
+- `message_links` rows are written in the SAME transaction as their message
+  (create and forward), replaced on edit, and deleted when the message is
+  soft-deleted.
+- Old messages need one backfill (idempotent): `npm run backfill:links` (add
+  `-- --chat <id>` for one chat, `--dry-run` to only report).
+- No index is needed on `messages` for these tabs: the attachment join uses
+  `attachments."messageId"` and the cursor filters on the joined message.

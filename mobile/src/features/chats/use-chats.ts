@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { fetchChats } from './chats-socket-api';
 import {
     toChatPreview,
@@ -56,6 +56,30 @@ export function setChatUnreadCount(
             Number(chat.id) === chatId ? { ...chat, unreadCount } : chat,
         ),
     );
+}
+
+/**
+ * The chat list as it currently sits in the cache — this never requests
+ * anything and never mounts a new query. It subscribes to the query cache so
+ * a screen that only reads an existing row (the user profile's block state)
+ * still follows live `chat:blocked` / list writes while it is open.
+ */
+export function useCachedChats(): ChatPreview[] | undefined {
+    const queryClient = useQueryClient();
+
+    const subscribe = useCallback(
+        (onChange: () => void): (() => void) =>
+            queryClient.getQueryCache().subscribe(onChange),
+        [queryClient],
+    );
+
+    const getSnapshot = useCallback(
+        (): ChatPreview[] | undefined =>
+            queryClient.getQueryData<ChatPreview[]>(CHATS_QUERY_KEY),
+        [queryClient],
+    );
+
+    return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
 export function useChats(): ReturnType<typeof useQuery<ChatPreview[]>> {

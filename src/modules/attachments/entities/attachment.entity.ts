@@ -1,4 +1,4 @@
-import { Column, Entity, JoinColumn, ManyToOne } from 'typeorm';
+import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
 import { BaseEntity } from 'src/common/entities/base.entity';
 import { User } from 'src/modules/auth/entities/user.entity';
 import { Chat } from 'src/modules/chats/entities/chat.entity';
@@ -7,6 +7,10 @@ import { AttachmentId } from 'src/common/types/brands.type';
 import { AttachmentStatus } from '../enums/attachmentStatus.enum';
 
 @Entity('attachments')
+// Shared-content tabs filter a chat's attachments and page them by message:
+// the composite index serves both the media/voice/music/files lists and their
+// counts without scanning the table.
+@Index('IDX_attachments_chat_message', ['chat', 'message'])
 export class Attachment extends BaseEntity {
     declare id: AttachmentId;
 

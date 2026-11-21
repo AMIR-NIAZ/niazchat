@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import type { ComponentRef } from 'react';
 import {
     ActivityIndicator,
     Pressable,
-    ScrollView,
     StyleSheet,
     Text,
     View,
@@ -10,10 +10,18 @@ import {
 import { router, useLocalSearchParams } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import {
+    Ban,
+    EllipsisVertical,
+    Trash2,
+    UserMinus,
+    UserPlus,
+} from 'lucide-react-native';
+import {
     AppText,
     Avatar,
     GlassCard,
     GlassHeader,
+    SafeText,
     Screen,
     palette,
     radii,
@@ -27,15 +35,31 @@ import { hideUserProfileEverywhere } from '../../../features/users/visibility-ca
 import { useUserProfile } from '../../../features/users/use-user-profile';
 import { describePublicProfileError } from '../../../features/users/users-service';
 import { useCurrentUserId } from '../../../features/auth';
-import { openPrivateChat } from '../../../features/chats';
+import {
+    blockChatPeer,
+    createPrivateChat,
+    deleteChatForBoth,
+    deleteChatForMe,
+    findPrivateChatWithPeer,
+    openPrivateChat,
+    purgeChatFromCaches,
+    unblockChatPeer,
+    useCachedChats,
+} from '../../../features/chats';
+import {
+    measureInWindow,
+    useContextPopup,
+} from '../../../shared/context-popup';
+import type { ContextMenuItem } from '../../../shared/context-popup';
 import { dialog, toast } from '../../../shared/dialog';
 import { ApiError } from '../../../core/api';
+import { deleteLocalChatMessages } from '../../../shared/local-db';
 import {
     useAddContact,
     useContacts,
     useRemoveContact,
 } from '../../../features/contacts/use-contacts';
-import { describeSavedContactError } from '../../../features/contacts/contacts-api';
+import { ChatSharedContent } from '../../../features/shared-content';
 
 /**
  * User info screen (`GET /user/:userId/profile`).
@@ -112,15 +136,27 @@ function UserProfile({
     const savedContacts = useContacts();
     const addContact = useAddContact();
     const removeContact = useRemoveContact();
-    const [contactPending, setContactPending] = useState(false);
-    const [contactError, setContactError] = useState<string | null>(null);
-    /** Blocks a second add/remove while one (including its confirm) is open. */
-    const contactBusyRef = useRef(false);
+    const popup = useContextPopup();
+    const menuButtonRef = useRef<ComponentRef<typeof View>>(null);
+    /** One header action at a time: repeated taps are ignored. */
+    const [actionPending, setActionPending] = useState(false);
+    const actionBusyRef = useRef(false);
+    // Cached list row for this user (if any) carries the block state. Reading
+    // the cache only — no fetch is started by this screen.
+    const cachedChats = useCachedChats();
+    const chat = findPrivateChatWithPeer(cachedChats, userId);
+    const [blockedByMe, setBlockedByMe] = useState(false);
 
     const profile = query.profile;
     const unavailable =
         query.error instanceof ApiError && query.error.statusCode === 404;
     const hiddenHandled = useRef(false);
+
+    // Follow the cache's directional block flag (updated by chat:blocked events
+    // while this screen is open).
+    useEffect((): void => {
+        setBlockedByMe(chat?.blockedByMe === true);
+    }, [chat?.id, chat?.blockedByMe]);
 
     // The server hides this profile (its owner blocked the viewer). Overwrite
     // every cached copy ONCE so a stale photo does not survive offline.
@@ -149,42 +185,55 @@ function UserProfile({
     );
     const isSavedContact = savedContact !== undefined;
 
-    const handleAddContact = async (): Promise<void> => {
-        if (contactBusyRef.current) return;
-        contactBusyRef.current = true;
-        setContactPending(true);
-        setContactError(null);
+    /** Runs one menu action with the shared busy guard and failure toast. */
+    const runAction = async (task: () => Promise<void>): Promise<void> => {
+        if (actionBusyRef.current) return;
+        actionBusyRef.current = true;
+        setActionPending(true);
         try {
-            await addContact.mutateAsync({
-                userId,
-                preview: {
-                    userId,
-                    name: profile?.name ?? name,
-                    username: profile?.username ?? null,
-                    avatarUrl: avatars[0]?.url ?? null,
-                },
-            });
-            toast.show('Added to contacts', { tone: 'success' });
+            await task();
         } catch (error) {
-            if (error instanceof ApiError && error.statusCode === 409) {
-                // The contact already exists server-side: refresh so the hero
-                // switches to "Remove from contacts" instead of allowing a
-                // second create.
-                savedContacts.refetch();
-                toast.show('Already in your contacts');
-            } else {
-                setContactError(describeSavedContactError(error));
-            }
+            toast.show(
+                error instanceof Error && error.message.trim() !== ''
+                    ? error.message
+                    : 'Something went wrong. Try again.',
+                { tone: 'danger' },
+            );
         } finally {
-            contactBusyRef.current = false;
-            setContactPending(false);
+            actionBusyRef.current = false;
+            setActionPending(false);
         }
     };
 
-    const handleRemoveContact = async (): Promise<void> => {
-        if (contactBusyRef.current || savedContact === undefined) return;
-        contactBusyRef.current = true;
-        try {
+    const handleAddContact = (): void => {
+        void runAction(async (): Promise<void> => {
+            try {
+                await addContact.mutateAsync({
+                    userId,
+                    preview: {
+                        userId,
+                        name: profile?.name ?? name,
+                        username: profile?.username ?? null,
+                        avatarUrl: avatars[0]?.url ?? null,
+                    },
+                });
+                toast.show('Added to contacts', { tone: 'success' });
+            } catch (error) {
+                if (error instanceof ApiError && error.statusCode === 409) {
+                    // The contact already exists server-side: refresh so the
+                    // menu offers "Remove from contacts".
+                    savedContacts.refetch();
+                    toast.show('Already in your contacts');
+                    return;
+                }
+                throw error;
+            }
+        });
+    };
+
+    const handleRemoveContact = (): void => {
+        if (savedContact === undefined) return;
+        void (async (): Promise<void> => {
             const confirmed = await dialog.confirm({
                 title: `Remove ${name} from contacts?`,
                 message:
@@ -193,25 +242,162 @@ function UserProfile({
                 destructive: true,
             });
             if (!confirmed) return;
-            setContactPending(true);
-            setContactError(null);
-            // A still-optimistic row has no server id yet; wait for the list
-            // instead of sending a delete for a local placeholder id.
-            if (savedContact.id <= 0) {
-                savedContacts.refetch();
-                return;
-            }
-            await removeContact.mutateAsync(savedContact.id);
-            toast.show('Removed from contacts', { tone: 'success' });
-        } catch (error) {
-            if (error instanceof ApiError && error.statusCode === 404) {
-                savedContacts.refetch();
-            }
-            setContactError(describeSavedContactError(error));
-        } finally {
-            contactBusyRef.current = false;
-            setContactPending(false);
+            await runAction(async (): Promise<void> => {
+                // A still-optimistic row has no server id yet; wait for the
+                // list instead of deleting a local placeholder id.
+                if (savedContact.id <= 0) {
+                    savedContacts.refetch();
+                    return;
+                }
+                try {
+                    await removeContact.mutateAsync(savedContact.id);
+                    toast.show('Removed from contacts', { tone: 'success' });
+                } catch (error) {
+                    if (error instanceof ApiError && error.statusCode === 404) {
+                        savedContacts.refetch();
+                    }
+                    throw error;
+                }
+            });
+        })();
+    };
+
+    /** Existing chat with this user, or the server's idempotent chat row. */
+    const resolveChatId = async (): Promise<number> => {
+        if (chat !== null) {
+            return Number(chat.id);
         }
+        const created = await createPrivateChat(userId);
+        return created.chatId;
+    };
+
+    const handleToggleBlock = (): void => {
+        const willBlock = !blockedByMe;
+        void (async (): Promise<void> => {
+            if (willBlock) {
+                const confirmed = await dialog.confirm({
+                    title: `Block ${name}?`,
+                    message:
+                        'They will no longer be able to send you messages. Existing messages stay, and you can unblock them at any time.',
+                    confirmText: 'Block',
+                    destructive: true,
+                });
+                if (!confirmed) return;
+            }
+            await runAction(async (): Promise<void> => {
+                const chatId = await resolveChatId();
+                const result = willBlock
+                    ? await blockChatPeer(chatId)
+                    : await unblockChatPeer(chatId);
+                if (result !== null) {
+                    setBlockedByMe(result.blockedByMe);
+                }
+                toast.show(willBlock ? 'User blocked' : 'User unblocked');
+            });
+        })();
+    };
+
+    /** Pops the profile (and the chat underneath) after a chat is deleted. */
+    const leaveDeletedChat = (): void => {
+        if (router.canDismiss()) {
+            router.dismissAll();
+            return;
+        }
+        router.replace('/(app)');
+    };
+
+    const deleteChat = (forBoth: boolean): void => {
+        if (chat === null) return;
+        const chatId = Number(chat.id);
+        void (async (): Promise<void> => {
+            const confirmed = await dialog.confirm(
+                forBoth
+                    ? {
+                          title: 'Delete chat for both?',
+                          message: `This permanently deletes the conversation and all of its messages for you and ${name}. This cannot be undone.`,
+                          confirmText: 'Delete for both',
+                          destructive: true,
+                      }
+                    : {
+                          title: 'Delete chat for me?',
+                          message:
+                              'This removes the conversation and its messages from your account only. The other person keeps their copy and is not notified.',
+                          confirmText: 'Delete',
+                          destructive: true,
+                      },
+            );
+            if (!confirmed) return;
+            await runAction(async (): Promise<void> => {
+                if (forBoth) {
+                    await deleteChatForBoth(chatId);
+                } else {
+                    await deleteChatForMe(chatId);
+                }
+                purgeChatFromCaches(queryClient, chatId);
+                if (currentUserId !== null) {
+                    void deleteLocalChatMessages(currentUserId, chatId).catch(
+                        (): void => undefined,
+                    );
+                }
+                toast.show(
+                    forBoth ? 'Chat deleted for both' : 'Chat deleted for you',
+                    { tone: 'success' },
+                );
+                leaveDeletedChat();
+            });
+        })();
+    };
+
+    const openMenu = async (): Promise<void> => {
+        if (actionBusyRef.current) return;
+        const anchor = await measureInWindow(menuButtonRef);
+        if (anchor === null) return;
+        const actions: ContextMenuItem[] = [
+            {
+                id: 'contact-toggle',
+                label: isSavedContact
+                    ? 'Remove from contacts'
+                    : 'Add to contacts',
+                icon: isSavedContact ? UserMinus : UserPlus,
+                onPress: isSavedContact
+                    ? handleRemoveContact
+                    : handleAddContact,
+            },
+            {
+                id: 'block-toggle',
+                label: blockedByMe ? 'Unblock' : 'Block',
+                icon: Ban,
+                onPress: handleToggleBlock,
+            },
+        ];
+        // Nothing to delete when there is no conversation yet.
+        if (chat !== null) {
+            actions.push(
+                {
+                    id: 'delete-for-me',
+                    label: 'Delete for me',
+                    icon: Trash2,
+                    destructive: true,
+                    onPress: (): void => deleteChat(false),
+                },
+                {
+                    id: 'delete-for-both',
+                    label: 'Delete for both',
+                    icon: Trash2,
+                    destructive: true,
+                    onPress: (): void => deleteChat(true),
+                },
+            );
+        }
+        // `align: 'end'` keeps the card inside the window under the trailing
+        // header button, in LTR and RTL alike (the popup clamps to safe area).
+        popup.open({
+            anchor,
+            align: 'end',
+            sourceKey: `user-menu:${userId}`,
+            actions,
+            accessibilityLabel: `Actions for ${name}`,
+        });
     };
 
     const handleMessage = async (): Promise<void> => {
@@ -245,198 +431,198 @@ function UserProfile({
                         <Text style={styles.backText}>‹</Text>
                     </Pressable>
                 }
-            >
-                <Text
-                    style={[typography.heading, styles.headerTitle]}
-                    numberOfLines={1}
-                >
-                    {name}
-                </Text>
-            </GlassHeader>
-
-            <ScrollView
-                contentContainerStyle={styles.scroll}
-                keyboardShouldPersistTaps="handled"
-            >
-                <GlassCard
-                    padding={spacing.lg}
-                    contentStyle={styles.hero}
-                    floating={true}
-                >
-                    {avatars.length > 0 ? (
+                trailing={
+                    isSelf ? undefined : (
                         <Pressable
+                            ref={menuButtonRef}
                             accessibilityRole="button"
-                            accessibilityLabel={`View all photos of ${name}`}
-                            onPress={(): void => setViewerIndex(0)}
-                            style={({ pressed }) => pressed && styles.pressed}
-                        >
-                            <Avatar
-                                userId={userId}
-                                name={name}
-                                uri={currentAvatarPath}
-                                size={116}
-                                ring={true}
-                            />
-                        </Pressable>
-                    ) : (
-                        <Avatar
-                            userId={userId}
-                            name={name}
-                            uri={currentAvatarPath}
-                            size={116}
-                            ring={true}
-                        />
-                    )}
-
-                    <Text style={[typography.title, styles.name]}>{name}</Text>
-                    {profile?.username !== null &&
-                        profile?.username !== undefined && (
-                            <AppText variant="caption">
-                                @{profile.username}
-                            </AppText>
-                        )}
-                    {presence !== null && (
-                        <AppText variant="caption">{presence}</AppText>
-                    )}
-                    <AppText variant="caption" style={styles.userId}>
-                        User ID: {userId}
-                    </AppText>
-                    {!isSelf && (
-                        <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel={`Message ${name}`}
-                            accessibilityState={{ disabled: messagePending }}
-                            disabled={messagePending}
+                            accessibilityLabel={`Actions for ${name}`}
+                            accessibilityState={{
+                                disabled: actionPending,
+                                busy: actionPending,
+                            }}
+                            disabled={actionPending}
+                            hitSlop={8}
                             onPress={(): void => {
-                                void handleMessage();
+                                void openMenu();
                             }}
                             style={({ pressed }) => [
-                                styles.messageButton,
+                                styles.menuButton,
                                 pressed && styles.pressed,
-                                messagePending && styles.messageButtonBusy,
                             ]}
                         >
-                            {messagePending ? (
+                            {actionPending ? (
                                 <ActivityIndicator
                                     size="small"
-                                    color={palette.text.onAccent}
+                                    color={palette.primary[500]}
                                 />
                             ) : (
-                                <Text style={styles.messageButtonText}>
-                                    Message
-                                </Text>
+                                <EllipsisVertical
+                                    size={20}
+                                    strokeWidth={2}
+                                    color={palette.text.primary}
+                                />
                             )}
                         </Pressable>
-                    )}
-                    {!isSelf &&
-                        (isSavedContact ? (
-                            <Pressable
-                                accessibilityRole="button"
-                                accessibilityLabel={`Remove ${name} from contacts`}
-                                accessibilityState={{
-                                    disabled: contactPending,
-                                    busy: contactPending,
-                                }}
-                                disabled={contactPending}
-                                onPress={(): void => {
-                                    void handleRemoveContact();
-                                }}
-                                style={({ pressed }) => [
-                                    styles.contactButton,
-                                    pressed && styles.pressed,
-                                    contactPending && styles.messageButtonBusy,
-                                ]}
-                            >
-                                {contactPending ? (
-                                    <ActivityIndicator
-                                        size="small"
-                                        color={palette.primary[600]}
-                                    />
-                                ) : (
-                                    <Text style={styles.contactButtonText}>
-                                        Remove from contacts
-                                    </Text>
-                                )}
-                            </Pressable>
-                        ) : (
-                            <Pressable
-                                accessibilityRole="button"
-                                accessibilityLabel={`Add ${name} to contacts`}
-                                accessibilityState={{
-                                    disabled: contactPending,
-                                    busy: contactPending,
-                                }}
-                                disabled={contactPending}
-                                onPress={(): void => {
-                                    void handleAddContact();
-                                }}
-                                style={({ pressed }) => [
-                                    styles.contactButton,
-                                    pressed && styles.pressed,
-                                    contactPending && styles.messageButtonBusy,
-                                ]}
-                            >
-                                {contactPending ? (
-                                    <ActivityIndicator
-                                        size="small"
-                                        color={palette.primary[600]}
-                                    />
-                                ) : (
-                                    <Text style={styles.contactButtonText}>
-                                        ＋ Add to contacts
-                                    </Text>
-                                )}
-                            </Pressable>
-                        ))}
-                    {contactError !== null && (
-                        <AppText style={styles.errorText}>
-                            {contactError}
-                        </AppText>
-                    )}
-                    {messageError !== null && (
-                        <AppText style={styles.errorText}>
-                            {messageError}
-                        </AppText>
-                    )}
-                </GlassCard>
+                    )
+                }
+            >
+                <SafeText
+                    lines={1}
+                    style={[typography.heading, styles.headerTitle]}
+                >
+                    {name}
+                </SafeText>
+            </GlassHeader>
 
-                {query.isLoading && (
-                    <View style={styles.center}>
-                        <ActivityIndicator
-                            size="small"
-                            color={palette.primary[500]}
-                        />
-                    </View>
-                )}
-
-                {query.error !== null && (
-                    <View style={styles.errorBlock}>
-                        <AppText style={styles.errorText}>
-                            {describePublicProfileError(query.error)}
-                        </AppText>
-                        <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel="Retry loading this profile"
-                            onPress={query.refetch}
-                            style={({ pressed }) => [
-                                styles.retryButton,
-                                pressed && styles.pressed,
-                            ]}
+            {/* Shared content is the screen's single scroll container; the
+                existing profile block above it is passed unchanged as the
+                header. Without a conversation there is nothing to list, so
+                only the header renders. */}
+            <ChatSharedContent
+                chatId={
+                    chat !== null && chat !== undefined ? Number(chat.id) : null
+                }
+                header={
+                    <View style={styles.scroll}>
+                        <GlassCard
+                            padding={spacing.lg}
+                            contentStyle={styles.hero}
+                            floating={true}
                         >
-                            <Text style={styles.retryText}>Retry</Text>
-                        </Pressable>
-                    </View>
-                )}
+                            {avatars.length > 0 ? (
+                                <Pressable
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`View all photos of ${name}`}
+                                    onPress={(): void => setViewerIndex(0)}
+                                    style={({ pressed }) =>
+                                        pressed && styles.pressed
+                                    }
+                                >
+                                    <Avatar
+                                        userId={userId}
+                                        name={name}
+                                        uri={currentAvatarPath}
+                                        size={116}
+                                        ring={true}
+                                    />
+                                </Pressable>
+                            ) : (
+                                <Avatar
+                                    userId={userId}
+                                    name={name}
+                                    uri={currentAvatarPath}
+                                    size={116}
+                                    ring={true}
+                                />
+                            )}
 
-                {bio !== undefined && bio !== '' && (
-                    <View style={styles.section}>
-                        <AppText variant="caption" style={styles.sectionLabel}>
-                            Bio
-                        </AppText>
-                        <Text style={styles.bio}>{bio}</Text>
+                            <SafeText
+                                lines={2}
+                                style={[typography.title, styles.name]}
+                            >
+                                {name}
+                            </SafeText>
+                            {profile?.username !== null &&
+                                profile?.username !== undefined && (
+                                    <AppText variant="caption">
+                                        @{profile.username}
+                                    </AppText>
+                                )}
+                            {presence !== null && (
+                                <AppText variant="caption">{presence}</AppText>
+                            )}
+                            {/* The numeric id stays internal (params, API, keys); it
+                        is only surfaced on the viewer's own profile. */}
+                            {isSelf && (
+                                <AppText
+                                    variant="caption"
+                                    style={styles.userId}
+                                >
+                                    User ID: {userId}
+                                </AppText>
+                            )}
+                            {!isSelf && (
+                                <Pressable
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`Message ${name}`}
+                                    accessibilityState={{
+                                        disabled: messagePending,
+                                    }}
+                                    disabled={messagePending}
+                                    onPress={(): void => {
+                                        void handleMessage();
+                                    }}
+                                    style={({ pressed }) => [
+                                        styles.messageButton,
+                                        pressed && styles.pressed,
+                                        messagePending &&
+                                            styles.messageButtonBusy,
+                                    ]}
+                                >
+                                    {messagePending ? (
+                                        <ActivityIndicator
+                                            size="small"
+                                            color={palette.text.onAccent}
+                                        />
+                                    ) : (
+                                        <Text style={styles.messageButtonText}>
+                                            Message
+                                        </Text>
+                                    )}
+                                </Pressable>
+                            )}
+                            {messageError !== null && (
+                                <AppText style={styles.errorText}>
+                                    {messageError}
+                                </AppText>
+                            )}
+                        </GlassCard>
+
+                        {query.isLoading && (
+                            <View style={styles.center}>
+                                <ActivityIndicator
+                                    size="small"
+                                    color={palette.primary[500]}
+                                />
+                            </View>
+                        )}
+
+                        {query.error !== null && (
+                            <View style={styles.errorBlock}>
+                                <AppText style={styles.errorText}>
+                                    {describePublicProfileError(query.error)}
+                                </AppText>
+                                <Pressable
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Retry loading this profile"
+                                    onPress={query.refetch}
+                                    style={({ pressed }) => [
+                                        styles.retryButton,
+                                        pressed && styles.pressed,
+                                    ]}
+                                >
+                                    <Text style={styles.retryText}>Retry</Text>
+                                </Pressable>
+                            </View>
+                        )}
+
+                        {bio !== undefined && bio !== '' && (
+                            <View style={styles.section}>
+                                <AppText
+                                    variant="caption"
+                                    style={styles.sectionLabel}
+                                >
+                                    Bio
+                                </AppText>
+                                <SafeText lines={0} style={styles.bio}>
+                                    {bio}
+                                </SafeText>
+                            </View>
+                        )}
                     </View>
-                )}
-            </ScrollView>
+                }
+            />
 
             <AvatarViewer
                 readOnly={true}
@@ -552,9 +738,20 @@ const styles = StyleSheet.create({
     },
     backText: { color: palette.primary[600], fontSize: 26, fontWeight: '700' },
     headerTitle: { textAlign: 'center' },
+    menuButton: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     scroll: { paddingVertical: spacing.sm, gap: spacing.md },
     hero: { alignItems: 'center', gap: spacing.xxs },
-    name: { marginTop: spacing.xs },
+    name: {
+        alignSelf: 'stretch',
+        textAlign: 'center',
+        marginTop: spacing.xs,
+    },
     userId: { color: palette.text.muted },
     center: { alignItems: 'center', justifyContent: 'center', flex: 1 },
     pressed: { opacity: 0.6 },
@@ -586,23 +783,6 @@ const styles = StyleSheet.create({
     messageButtonText: {
         color: palette.text.onAccent,
         fontSize: 15,
-        fontWeight: '700',
-    },
-    contactButton: {
-        marginTop: spacing.xxs,
-        minWidth: 128,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderRadius: radii.lg,
-        borderWidth: 1,
-        borderColor: palette.border.accent,
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.xs,
-        backgroundColor: palette.glass.accent,
-    },
-    contactButtonText: {
-        color: palette.primary[600],
-        fontSize: 14,
         fontWeight: '700',
     },
     section: { gap: spacing.xxs },

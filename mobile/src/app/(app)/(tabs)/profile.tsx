@@ -10,13 +10,17 @@ import {
     View,
 } from 'react-native';
 import { router } from 'expo-router';
+import * as Clipboard from 'expo-clipboard';
+import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
+import { Copy } from 'lucide-react-native';
 import {
     AppText,
     Avatar,
     GlassCard,
     GlassHeader,
     OfflineCaption,
+    SafeText,
     Screen,
     palette,
     radii,
@@ -24,7 +28,7 @@ import {
     typography,
 } from '../../../shared/components';
 import { useTabBarInset } from '../../../shared/tab-bar';
-import { dialog } from '../../../shared/dialog';
+import { dialog, toast } from '../../../shared/dialog';
 import {
     describeAvatarError,
     MAX_AVATARS,
@@ -287,6 +291,25 @@ export default function ProfileScreen(): React.ReactElement {
             });
     };
 
+    // Telegram-style: tap your own @username to copy it.
+    const copyUsername = async (): Promise<void> => {
+        if (user.username === null) {
+            return;
+        }
+        try {
+            // Light haptic feedback; unsupported on some targets.
+            try {
+                void Haptics.selectionAsync();
+            } catch {
+                // Ignore unsupported haptics targets.
+            }
+            await Clipboard.setStringAsync(user.username);
+            toast.show('Username copied', { tone: 'success' });
+        } catch {
+            toast.show('Could not copy username', { tone: 'danger' });
+        }
+    };
+
     return (
         <Screen style={styles.screen} withTopInset={true}>
             <ScrollView
@@ -372,12 +395,19 @@ export default function ProfileScreen(): React.ReactElement {
 
                 <GlassCard padding={spacing.md} contentStyle={styles.infoCard}>
                     <InfoRow label="Name" value={user.name} />
-                    <InfoRow label="User ID" value={String(user.id)} />
                     <InfoRow
                         label="Username"
                         value={
                             user.username === null ? '—' : `@${user.username}`
                         }
+                        onPress={
+                            user.username === null
+                                ? undefined
+                                : (): void => {
+                                      void copyUsername();
+                                  }
+                        }
+                        hint="Tap to copy your username"
                     />
                     <InfoRow
                         label="Bio"
@@ -425,23 +455,60 @@ function InfoRow(props: {
     label: string;
     value: string;
     multiline?: boolean;
+    onPress?: (() => void) | undefined;
+    hint?: string;
 }): React.ReactElement {
-    return (
-        <View style={styles.infoRow}>
-            <AppText variant="caption" style={styles.infoLabel}>
-                {props.label}
-            </AppText>
-            <Text
+    const multiline = props.multiline !== undefined && props.multiline;
+    const value = (
+        <View style={styles.infoValueRow}>
+            <SafeText
+                lines={multiline ? 0 : 1}
                 style={[
                     styles.infoValue,
-                    props.multiline !== undefined &&
-                        props.multiline &&
-                        styles.infoMultiline,
+                    multiline && styles.infoMultiline,
+                    props.onPress !== undefined && styles.infoValueTappable,
                 ]}
             >
                 {props.value}
-            </Text>
+            </SafeText>
+            {props.onPress !== undefined && (
+                <Copy
+                    size={14}
+                    color={palette.text.muted}
+                    accessibilityElementsHidden={true}
+                    importantForAccessibility="no-hide-descendants"
+                />
+            )}
         </View>
+    );
+
+    if (props.onPress === undefined) {
+        return (
+            <View style={styles.infoRow}>
+                <AppText variant="caption" style={styles.infoLabel}>
+                    {props.label}
+                </AppText>
+                {value}
+            </View>
+        );
+    }
+
+    return (
+        <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${props.label}: ${props.value}`}
+            accessibilityHint={props.hint}
+            onPress={props.onPress}
+            style={({ pressed }) => [
+                styles.infoRow,
+                pressed && styles.infoRowPressed,
+            ]}
+        >
+            <AppText variant="caption" style={styles.infoLabel}>
+                {props.label}
+            </AppText>
+            {value}
+        </Pressable>
     );
 }
 
@@ -517,8 +584,22 @@ const styles = StyleSheet.create({
         borderTopWidth: 1,
         borderTopColor: palette.border.subtle,
     },
+    infoRowPressed: { backgroundColor: palette.glass.accent },
     infoLabel: { color: palette.text.muted },
-    infoValue: { color: palette.text.primary, fontSize: 15 },
+    infoValueRow: {
+        flex: 1,
+        minWidth: 0,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.xxs,
+    },
+    infoValue: {
+        flexShrink: 1,
+        minWidth: 0,
+        color: palette.text.primary,
+        fontSize: 15,
+    },
+    infoValueTappable: { color: palette.primary[600] },
     infoMultiline: { minHeight: 40 },
     feedback: {
         color: palette.text.secondary,

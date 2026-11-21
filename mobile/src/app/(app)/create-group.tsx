@@ -8,6 +8,7 @@ import {
   AppText,
   FormButton,
   FormField,
+  SafeText,
   Screen,
   palette,
   spacing,
@@ -174,7 +175,9 @@ export default function CreateGroupScreen(): React.ReactElement {
               style={styles.chip}
               onPress={(): void => removeMember(chip.id)}
             >
-              <Text style={styles.chipText}>{chip.label} ×</Text>
+              <SafeText style={styles.chipText} lines={1}>
+                {chip.label} ×
+              </SafeText>
             </Pressable>
           ))}
         </View>
@@ -221,6 +224,7 @@ const styles = StyleSheet.create({
   addMemberText: { color: palette.primary[600], fontSize: 13, fontWeight: '600' },
   chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xxs },
   chip: {
+    maxWidth: '100%',
     backgroundColor: palette.primary[100],
     borderRadius: 999,
     paddingHorizontal: spacing.sm,
