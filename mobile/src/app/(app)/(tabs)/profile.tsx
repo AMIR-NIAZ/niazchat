@@ -45,6 +45,8 @@ import {
     AvatarViewer,
 } from '../../../features/users/avatar-gallery';
 import type { AvatarUploadAsset } from '../../../features/users';
+import { useTheme, useThemedStyles } from '../../../shared/theme';
+import type { AppTheme } from '../../../shared/theme';
 
 /**
  * Profile screen (GET /auth/getme).
@@ -63,6 +65,8 @@ import type { AvatarUploadAsset } from '../../../features/users';
 const MAX_AVATAR_LABEL = `${Math.round(MAX_AVATAR_BYTES / (1024 * 1024))} MB`;
 
 export default function ProfileScreen(): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const profile = useProfile();
     const tabBarInset = useTabBarInset();
     const uploadAvatar = useUploadMyAvatar();
@@ -90,7 +94,7 @@ export default function ProfileScreen(): React.ReactElement {
     if (profile.isLoading && user === null) {
         return (
             <Screen style={styles.center}>
-                <ActivityIndicator size="large" color={palette.primary[500]} />
+                <ActivityIndicator size="large" color={theme.accent} />
             </Screen>
         );
     }
@@ -329,7 +333,7 @@ export default function ProfileScreen(): React.ReactElement {
                             }
                             style={styles.editPill}
                         >
-                            <Text style={styles.editPillText}>Edit</Text>
+                            <AppText style={styles.editPillText}>Edit</AppText>
                         </Pressable>
                     }
                 >
@@ -380,16 +384,16 @@ export default function ProfileScreen(): React.ReactElement {
                     </AppText>
 
                     {feedback !== null && (
-                        <Text
+                        <AppText
                             style={[
-                                typography.caption,
+                                theme.type.caption,
                                 feedback.kind === 'error'
                                     ? styles.errorText
                                     : styles.okText,
                             ]}
                         >
                             {feedback.text}
-                        </Text>
+                        </AppText>
                     )}
                 </GlassCard>
 
@@ -458,6 +462,8 @@ function InfoRow(props: {
     onPress?: (() => void) | undefined;
     hint?: string;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const multiline = props.multiline !== undefined && props.multiline;
     const value = (
         <View style={styles.infoValueRow}>
@@ -474,7 +480,7 @@ function InfoRow(props: {
             {props.onPress !== undefined && (
                 <Copy
                     size={14}
-                    color={palette.text.muted}
+                    color={theme.colors.textMuted}
                     accessibilityElementsHidden={true}
                     importantForAccessibility="no-hide-descendants"
                 />
@@ -516,6 +522,8 @@ function FormRow(props: {
     label: string;
     onPress: () => void;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     return (
         <Pressable
             accessibilityRole="button"
@@ -523,25 +531,26 @@ function FormRow(props: {
             onPress={props.onPress}
             style={styles.button}
         >
-            <Text style={styles.buttonText}>{props.label}</Text>
+            <AppText style={styles.buttonText}>{props.label}</AppText>
         </Pressable>
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     screen: { gap: spacing.sm, paddingHorizontal: spacing.lg },
     scroll: { paddingVertical: spacing.sm, gap: spacing.xs },
     center: { alignItems: 'center', justifyContent: 'center', gap: spacing.xs },
     editPill: {
         borderWidth: 1,
-        borderColor: palette.border.strong,
+        borderColor: theme.colors.borderStrong,
         borderRadius: radii.full,
         paddingHorizontal: spacing.sm,
         paddingVertical: 6,
-        backgroundColor: palette.glass.accent,
+        backgroundColor: theme.colors.glassAccent,
     },
     editPillText: {
-        color: palette.primary[600],
+        color: theme.accent,
         fontSize: 13,
         fontWeight: '600',
     },
@@ -555,37 +564,37 @@ const styles = StyleSheet.create({
         width: 120,
         height: 120,
         borderRadius: 60,
-        backgroundColor: palette.primary[100],
+        backgroundColor: theme.colors.accentSoft,
         alignItems: 'center',
         justifyContent: 'center',
     },
     avatarFallbackText: {
-        color: palette.primary[700],
+        color: theme.accent,
         fontSize: 42,
         fontWeight: '700',
     },
-    avatarHint: { color: palette.text.secondary },
+    avatarHint: { color: theme.colors.textSecondary },
     button: {
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
         borderRadius: radii.full,
         paddingHorizontal: spacing.md,
         paddingVertical: 8,
     },
     buttonText: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 13,
         fontWeight: '600',
     },
-    errorText: { color: palette.semantic.danger },
-    okText: { color: palette.semantic.success },
+    errorText: { color: theme.colors.danger },
+    okText: { color: theme.colors.success },
     infoRow: {
         gap: spacing.xxs,
         paddingVertical: spacing.sm,
         borderTopWidth: 1,
-        borderTopColor: palette.border.subtle,
+        borderTopColor: theme.colors.border,
     },
-    infoRowPressed: { backgroundColor: palette.glass.accent },
-    infoLabel: { color: palette.text.muted },
+    infoRowPressed: { backgroundColor: theme.colors.glassAccent },
+    infoLabel: { color: theme.colors.textMuted },
     infoValueRow: {
         flex: 1,
         minWidth: 0,
@@ -596,13 +605,13 @@ const styles = StyleSheet.create({
     infoValue: {
         flexShrink: 1,
         minWidth: 0,
-        color: palette.text.primary,
+        color: theme.colors.text,
         fontSize: 15,
     },
-    infoValueTappable: { color: palette.primary[600] },
+    infoValueTappable: { color: theme.accent },
     infoMultiline: { minHeight: 40 },
     feedback: {
-        color: palette.text.secondary,
+        color: theme.colors.textSecondary,
         textAlign: 'center',
         paddingHorizontal: spacing.lg,
     },

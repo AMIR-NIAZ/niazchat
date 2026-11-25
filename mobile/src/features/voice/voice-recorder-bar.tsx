@@ -3,6 +3,9 @@ import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { palette, radii, spacing } from '../../shared/theme';
 import { recordingTimeLabel } from './recording-machine';
 import { Trash2 } from 'lucide-react-native';
+import { useTheme, useThemedStyles } from '../../shared/theme';
+import type { AppTheme } from '../../shared/theme';
+import { AppText } from '../../shared/components';
 
 /** Recording bar shown while the microphone is live (tap or hold flow). */
 export function VoiceRecorderBar({
@@ -18,6 +21,8 @@ export function VoiceRecorderBar({
     onCancel: () => void;
     onSend: () => void;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const levelPercent = `${Math.round(Math.max(0, Math.min(1, level)) * 100)}%`;
     const pulse = useRef(new Animated.Value(1)).current;
 
@@ -47,29 +52,30 @@ export function VoiceRecorderBar({
                 onPress={onCancel}
                 style={styles.side}
             >
-                    <Trash2 size={17} color={palette.semantic.danger} />
+                    <Trash2 size={17} color={theme.colors.danger} />
             </Pressable>
             <Animated.View style={[styles.dot, { opacity: pulse }]} />
-            <Text style={styles.time}>{recordingTimeLabel(durationMs)}</Text>
+            <AppText style={styles.time}>{recordingTimeLabel(durationMs)}</AppText>
             <View style={styles.levelTrack}>
                 <View style={[styles.levelFill, { width: levelPercent }]} />
             </View>
-            <Text style={styles.hint} numberOfLines={1}>
+            <AppText style={styles.hint} numberOfLines={1}>
                 {hint}
-            </Text>
+            </AppText>
             <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Stop and send"
                 onPress={onSend}
                 style={styles.send}
             >
-                <Text style={styles.sendText}>➤</Text>
+                <AppText style={styles.sendText}>➤</AppText>
             </Pressable>
         </View>
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     row: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -77,9 +83,9 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.xs,
         paddingHorizontal: spacing.xs,
         borderRadius: radii.lg,
-        backgroundColor: palette.neutral[50],
+        backgroundColor: theme.colors.glassSurface,
         borderWidth: 1,
-        borderColor: palette.neutral[100],
+        borderColor: theme.colors.border,
     },
     side: {
         width: 36,
@@ -93,10 +99,10 @@ const styles = StyleSheet.create({
         width: 10,
         height: 10,
         borderRadius: radii.full,
-        backgroundColor: palette.semantic.danger,
+        backgroundColor: theme.colors.danger,
     },
     time: {
-        color: palette.neutral[900],
+        color: theme.colors.text,
         fontSize: 13,
         fontVariant: ['tabular-nums'],
         minWidth: 38,
@@ -105,18 +111,18 @@ const styles = StyleSheet.create({
         flex: 1,
         height: 4,
         borderRadius: radii.full,
-        backgroundColor: palette.neutral[100],
+        backgroundColor: theme.colors.glassElevated,
         overflow: 'hidden',
     },
-    levelFill: { height: '100%', backgroundColor: palette.primary[500] },
-    hint: { color: palette.neutral[500], fontSize: 11 },
+    levelFill: { height: '100%', backgroundColor: theme.accent },
+    hint: { color: theme.colors.textSecondary, fontSize: 11 },
     send: {
         width: 36,
         height: 36,
         borderRadius: radii.full,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
     },
-    sendText: { color: palette.text.onAccent, fontSize: 14 },
+    sendText: { color: theme.colors.accentText, fontSize: 14 },
 });

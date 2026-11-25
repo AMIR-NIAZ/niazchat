@@ -118,7 +118,10 @@ async function readFileHead(filePath: string, bytes: number): Promise<Buffer> {
  * container does not match the declared extension (or the MIME is not in the
  * accepted audio list).
  */
-function musicMimeFor(extension: string, detected: string | null): string | null {
+function musicMimeFor(
+    extension: string,
+    detected: string | null,
+): string | null {
     if (detected === null) return null;
     const expected: Record<string, string[]> = {
         mp3: ['audio/mpeg'],
@@ -342,8 +345,7 @@ export class AttachmentService {
                         ? {
                               title: file.title,
                               artist: file.artist ?? null,
-                              durationSeconds:
-                                  file.durationSeconds ?? null,
+                              durationSeconds: file.durationSeconds ?? null,
                               coverUrl: file.coverKey
                                   ? `/attachments/${Number(row.id)}/cover`
                                   : null,
@@ -665,7 +667,9 @@ export class AttachmentService {
         const detected = detectAudioMimeType(head);
         const mimeType = musicMimeFor(extension, detected);
         if (mimeType === null) {
-            throw new BadRequestException('This file is not a valid audio track');
+            throw new BadRequestException(
+                'This file is not a valid audio track',
+            );
         }
 
         const fallbackTitle = titleFromFileName(originalName);
@@ -1428,7 +1432,11 @@ export class AttachmentService {
         });
         let removed = 0;
         for (const row of rows) {
-            await this.deleteFile(row.storageKey, row.posterPath, row.coverPath);
+            await this.deleteFile(
+                row.storageKey,
+                row.posterPath,
+                row.coverPath,
+            );
             await this.attachmentRepository.delete(row.id);
             removed += 1;
         }
@@ -1455,7 +1463,11 @@ export class AttachmentService {
 
         let removed = 0;
         for (const row of rows) {
-            await this.deleteFile(row.storageKey, row.posterPath, row.coverPath);
+            await this.deleteFile(
+                row.storageKey,
+                row.posterPath,
+                row.coverPath,
+            );
             await this.attachmentRepository.delete(row.id);
             removed += 1;
         }

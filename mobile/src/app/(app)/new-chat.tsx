@@ -33,6 +33,8 @@ import { searchUsers } from '../../features/users/users-service';
 import type { UserSearchItemDto } from '../../core/api/dto/user.dto';
 import { ApiError } from '../../core/api';
 import { parseInviteInput } from '../../features/groups/invite-links-model';
+import { useTheme, useThemedStyles, withAlpha } from '../../shared/theme';
+import type { AppTheme } from '../../shared/theme';
 
 /**
  * New private chat: search a username, tap a result, open the conversation.
@@ -62,6 +64,8 @@ function describeSearchError(error: unknown): string {
 }
 
 export default function NewChatScreen(): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const queryClient = useQueryClient();
     const [query, setQuery] = useState('');
     const debounced = useDebouncedValue(query, DEBOUNCE_MS);
@@ -171,7 +175,7 @@ export default function NewChatScreen(): React.ReactElement {
                         style={styles.backButton}
                         onPress={(): void => router.back()}
                     >
-                        <Text style={styles.backText}>‹</Text>
+                        <AppText style={styles.backText}>‹</AppText>
                     </Pressable>
                 }
             >
@@ -191,14 +195,14 @@ export default function NewChatScreen(): React.ReactElement {
                 ]}
             >
                 <View style={styles.joinRowBody}>
-                    <Text style={styles.joinRowTitle}>
+                    <AppText style={styles.joinRowTitle}>
                         Join a group with a link
-                    </Text>
-                    <Text style={styles.joinRowHint}>
+                    </AppText>
+                    <AppText style={styles.joinRowHint}>
                         Paste an invite link or code
-                    </Text>
+                    </AppText>
                 </View>
-                <Text style={styles.joinRowChevron}>›</Text>
+                <AppText style={styles.joinRowChevron}>›</AppText>
             </Pressable>
 
             <GlassInput
@@ -209,7 +213,7 @@ export default function NewChatScreen(): React.ReactElement {
                 autoCapitalize="none"
                 autoCorrect={false}
                 accessibilityLabel="Search users"
-                leading={<Text style={styles.searchGlyph}>⌕</Text>}
+                leading={<AppText style={styles.searchGlyph}>⌕</AppText>}
             />
 
             {error !== null ? (
@@ -221,7 +225,7 @@ export default function NewChatScreen(): React.ReactElement {
                 <View style={styles.center}>
                     <ActivityIndicator
                         size="large"
-                        color={palette.primary[500]}
+                        color={theme.accent}
                     />
                 </View>
             ) : normalized === null ? (
@@ -266,20 +270,20 @@ export default function NewChatScreen(): React.ReactElement {
                                 size={44}
                             />
                             <View style={styles.rowBody}>
-                                <SafeText style={typography.body} lines={1}>
+                                <SafeText style={theme.type.body} lines={1}>
                                     {item.name}
                                 </SafeText>
-                                <Text
-                                    style={typography.caption}
+                                <AppText
+                                    style={theme.type.caption}
                                     numberOfLines={1}
                                 >
                                     @{item.username}
-                                </Text>
+                                </AppText>
                             </View>
                             {openingId === item.id && (
                                 <ActivityIndicator
                                     size="small"
-                                    color={palette.primary[500]}
+                                    color={theme.accent}
                                 />
                             )}
                         </Pressable>
@@ -288,7 +292,7 @@ export default function NewChatScreen(): React.ReactElement {
             )}
 
             {openError !== null && (
-                <Text style={styles.error}>{openError}</Text>
+                <AppText style={styles.error}>{openError}</AppText>
             )}
 
             <Modal
@@ -299,10 +303,10 @@ export default function NewChatScreen(): React.ReactElement {
             >
                 <View style={styles.modalBackdrop}>
                     <View style={styles.modalSheet}>
-                        <Text style={styles.modalTitle}>Join a group</Text>
-                        <Text style={styles.modalHint}>
+                        <AppText style={styles.modalTitle}>Join a group</AppText>
+                        <AppText style={styles.modalHint}>
                             Paste the invite link or the 22-character code.
-                        </Text>
+                        </AppText>
                         <GlassInput
                             placeholder="Invite link or code"
                             value={joinText}
@@ -315,7 +319,7 @@ export default function NewChatScreen(): React.ReactElement {
                             accessibilityLabel="Invite link or code"
                         />
                         {joinError !== null && (
-                            <Text style={styles.error}>{joinError}</Text>
+                            <AppText style={styles.error}>{joinError}</AppText>
                         )}
                         <View style={styles.modalActions}>
                             <Pressable
@@ -326,9 +330,9 @@ export default function NewChatScreen(): React.ReactElement {
                                 }}
                                 style={styles.ghostButton}
                             >
-                                <Text style={styles.ghostButtonText}>
+                                <AppText style={styles.ghostButtonText}>
                                     Paste
-                                </Text>
+                                </AppText>
                             </Pressable>
                             <Pressable
                                 accessibilityRole="button"
@@ -336,9 +340,9 @@ export default function NewChatScreen(): React.ReactElement {
                                 onPress={continueJoin}
                                 style={styles.primaryButton}
                             >
-                                <Text style={styles.primaryButtonText}>
+                                <AppText style={styles.primaryButtonText}>
                                     Continue
-                                </Text>
+                                </AppText>
                             </Pressable>
                         </View>
                     </View>
@@ -348,25 +352,26 @@ export default function NewChatScreen(): React.ReactElement {
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     screen: { paddingHorizontal: spacing.md, gap: spacing.sm },
-    searchGlyph: { color: palette.text.muted, fontSize: 20 },
+    searchGlyph: { color: theme.colors.textMuted, fontSize: 20 },
     backButton: {
         width: 40,
         height: 40,
         alignItems: 'center',
         justifyContent: 'center',
     },
-    backText: { color: palette.primary[600], fontSize: 26, fontWeight: '700' },
+    backText: { color: theme.accent, fontSize: 26, fontWeight: '700' },
     headerTitle: { flex: 1, textAlign: 'center' },
     search: {
         borderWidth: 1,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
         borderRadius: radii.md,
         paddingHorizontal: spacing.sm,
         paddingVertical: spacing.xs,
-        color: palette.text.primary,
-        backgroundColor: palette.glass.elevated,
+        color: theme.colors.text,
+        backgroundColor: theme.colors.glassElevated,
     },
     center: {
         flex: 1,
@@ -374,7 +379,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         gap: spacing.xxs,
     },
-    detail: { textAlign: 'center', color: palette.text.secondary },
+    detail: { textAlign: 'center', color: theme.colors.textSecondary },
     list: { paddingBottom: spacing.md },
     joinRow: {
         flexDirection: 'row',
@@ -383,35 +388,35 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.md,
         paddingVertical: spacing.sm,
         borderRadius: radii.lg,
-        backgroundColor: palette.glass.accent,
+        backgroundColor: theme.colors.glassAccent,
         borderWidth: 1,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
     },
     joinRowBody: { flex: 1, gap: 2 },
     joinRowTitle: {
-        color: palette.primary[700],
+        color: theme.accent,
         fontSize: 14,
         fontWeight: '700',
     },
     joinRowHint: {
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
         fontSize: 12,
     },
     joinRowChevron: {
-        color: palette.primary[700],
+        color: theme.accent,
         fontSize: 22,
     },
     modalBackdrop: {
         flex: 1,
         justifyContent: 'flex-end',
-        backgroundColor: 'rgba(0,0,0,0.35)',
+        backgroundColor: withAlpha(theme.colors.background, 0.62),
     },
     modalSheet: {
-        backgroundColor: palette.elevated,
+        backgroundColor: theme.colors.glassElevated,
         borderTopLeftRadius: radii.xl,
         borderTopRightRadius: radii.xl,
         borderWidth: 1,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
         padding: spacing.md,
         paddingBottom: spacing.lg,
         gap: spacing.xs,
@@ -419,10 +424,10 @@ const styles = StyleSheet.create({
     modalTitle: {
         fontSize: 18,
         fontWeight: '700',
-        color: palette.text.primary,
+        color: theme.colors.text,
     },
     modalHint: {
-        color: palette.text.secondary,
+        color: theme.colors.textSecondary,
         fontSize: 13,
     },
     modalActions: {
@@ -437,7 +442,7 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.xs,
     },
     ghostButtonText: {
-        color: palette.primary[700],
+        color: theme.accent,
         fontSize: 14,
         fontWeight: '600',
     },
@@ -445,10 +450,10 @@ const styles = StyleSheet.create({
         borderRadius: radii.sm,
         paddingHorizontal: spacing.md,
         paddingVertical: spacing.xs,
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
     },
     primaryButtonText: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 14,
         fontWeight: '600',
     },
@@ -459,7 +464,7 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.xs,
         borderRadius: radii.sm,
     },
-    rowPressed: { backgroundColor: palette.neutral[50] },
+    rowPressed: { backgroundColor: theme.colors.glassAccent },
     rowBody: { flex: 1, minWidth: 0, gap: 2 },
-    error: { color: palette.semantic.danger, textAlign: 'center' },
+    error: { color: theme.colors.danger, textAlign: 'center' },
 });

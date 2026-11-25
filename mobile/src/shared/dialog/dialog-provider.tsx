@@ -34,7 +34,7 @@ import { scheduleOnRN } from 'react-native-worklets';
 import type { SharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useReducedMotion } from '../hooks/use-reduced-motion';
-import { palette } from '../theme';
+import { useTheme } from '../theme/theme-provider';
 import { DialogCard } from './dialog-card';
 import {
     dialogStore,
@@ -359,6 +359,7 @@ const DialogBackdrop = memo(function DialogBackdrop({
 }: {
     progress: SharedValue<number>;
 }): React.ReactElement {
+    const theme = useTheme();
     const scrimStyle = useAnimatedStyle(() => ({
         opacity: progress.value * SCRIM_OPACITY,
     }));
@@ -378,7 +379,11 @@ const DialogBackdrop = memo(function DialogBackdrop({
                 </Animated.View>
             )}
             <Animated.View
-                style={[StyleSheet.absoluteFill, styles.scrim, scrimStyle]}
+                style={[
+                    StyleSheet.absoluteFill,
+                    { backgroundColor: theme.colors.background },
+                    scrimStyle,
+                ]}
             />
         </View>
     );
@@ -505,7 +510,6 @@ const styles = StyleSheet.create({
         zIndex: OVERLAY_Z,
         elevation: OVERLAY_Z,
     },
-    scrim: { backgroundColor: palette.background },
     center: {
         flex: 1,
         alignItems: 'center',

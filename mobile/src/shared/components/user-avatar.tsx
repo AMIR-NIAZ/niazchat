@@ -1,8 +1,10 @@
 import { memo, useMemo, useState } from 'react';
-import { PixelRatio, StyleSheet, Text, View } from 'react-native';
+import { PixelRatio, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import { avatarFileNameOf, avatarThumbUrl } from '../../core/config/env';
-import { palette } from '../theme';
+import { AppText } from './app-text';
+import { mixColors, readableTextColor } from '../theme/colors';
+import { useTheme } from '../theme/theme-provider';
 import { normalizeSingleLineText } from '../text-direction';
 
 /**
@@ -15,22 +17,20 @@ import { normalizeSingleLineText } from '../text-direction';
  *   for a re-render, a chat reopen or an app restart.
  * - `recyclingKey` is the file name, so a recycled list row swaps the image
  *   instead of briefly showing the previous sender's face.
- * - No avatar / load failure → initial(s) on a purple accent derived from
- *   `userId`, at the same size, so there is no gap and no layout shift.
+ * - No avatar / load failure → initial(s) on a shade derived from the active
+ *   accent, at the same size, so there is no gap and no layout shift.
  */
 
-const FALLBACK_COLORS = [
-    palette.primary[500],
-    '#5B3A8E',
-    '#8B57D6',
-    '#3D2A57',
-    '#A970F5',
-    '#4C2C73',
-] as const;
+/** How far each stable shade is mixed toward the app background. */
+const FALLBACK_STEPS = [0, 0.16, 0.3, 0.08, 0.24, 0.4] as const;
 
-export function avatarFallbackColor(userId: number): string {
-    const index = Math.abs(Math.trunc(userId)) % FALLBACK_COLORS.length;
-    return FALLBACK_COLORS[index] ?? palette.primary[500];
+export function avatarFallbackColor(
+    userId: number,
+    accent: string,
+    backdrop: string,
+): string {
+    const index = Math.abs(Math.trunc(userId)) % FALLBACK_STEPS.length;
+    return mixColors(accent, backdrop, FALLBACK_STEPS[index] ?? 0);
 }
 
 export function avatarInitials(name: string): string {
@@ -62,6 +62,7 @@ export interface UserAvatarProps {
 
 function UserAvatarBase(props: UserAvatarProps): React.ReactElement {
     const { userId, name, uri, size, borderRadius, accessibilityLabel } = props;
+    const theme = useTheme();
     const [failed, setFailed] = useState(false);
     const radius = borderRadius ?? size / 2;
 
@@ -74,6 +75,11 @@ function UserAvatarBase(props: UserAvatarProps): React.ReactElement {
     }, [failed, recyclingKey, uri, size]);
 
     if (source === null) {
+        const fallbackColor = avatarFallbackColor(
+            userId,
+            theme.accent,
+            theme.colors.background,
+        );
         return (
             <View
                 accessible={false}
@@ -83,19 +89,27 @@ function UserAvatarBase(props: UserAvatarProps): React.ReactElement {
                         width: size,
                         height: size,
                         borderRadius: radius,
-                        backgroundColor: avatarFallbackColor(userId),
+                        backgroundColor: fallbackColor,
+                        borderColor: theme.colors.borderStrong,
                     },
                 ]}
             >
-                <Text
+                <AppText
                     style={[
                         styles.initials,
-                        { fontSize: Math.max(10, Math.round(size * 0.38)) },
+                        {
+                            fontSize: Math.max(
+                                10,
+                                Math.round(size * 0.38),
+                            ),
+                            color: readableTextColor(fallbackColor),
+                        },
                     ]}
                     numberOfLines={1}
+                    allowFontScaling={false}
                 >
                     {avatarInitials(name)}
-                </Text>
+                </AppText>
             </View>
         );
     }
@@ -124,10 +138,8 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 1,
-        borderColor: palette.border.strong,
     },
     initials: {
-        color: palette.text.onAccent,
         fontWeight: '700',
     },
 });

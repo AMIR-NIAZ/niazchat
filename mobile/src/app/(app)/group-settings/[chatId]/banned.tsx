@@ -30,6 +30,8 @@ import {
     useGroupInfo,
     useUnbanMember,
 } from '../../../../features/groups';
+import { useTheme, useThemedStyles } from '../../../../shared/theme';
+import type { AppTheme } from '../../../../shared/theme';
 
 /**
  * "Banned users" (`/group-settings/:chatId/banned`).
@@ -51,6 +53,7 @@ function parseChatId(value: string | string[] | undefined): number | null {
 }
 
 export default function BannedUsersScreen(): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     const params = useLocalSearchParams<BannedRouteParams>();
     const chatId = parseChatId(params.chatId);
 
@@ -69,6 +72,8 @@ export default function BannedUsersScreen(): React.ReactElement {
 }
 
 function BannedUsers({ chatId }: { chatId: number }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const infoQuery = useGroupInfo(chatId);
     const info = infoQuery.data;
     const allowed = info !== undefined && canManageBans(info.capabilities);
@@ -140,7 +145,7 @@ function BannedUsers({ chatId }: { chatId: number }): React.ReactElement {
                 <View style={styles.centered}>
                     <ActivityIndicator
                         size="large"
-                        color={palette.primary[500]}
+                        color={theme.accent}
                     />
                 </View>
             </View>
@@ -191,9 +196,9 @@ function BannedUsers({ chatId }: { chatId: number }): React.ReactElement {
                         <SafeText variant="title" lines={2}>
                             {info.title || 'Unnamed group'}
                         </SafeText>
-                        <Text style={styles.caption}>
+                        <AppText style={styles.caption}>
                             Banned users cannot rejoin until you unban them.
-                        </Text>
+                        </AppText>
                     </View>
                 }
                 renderItem={({
@@ -218,15 +223,15 @@ function BannedUsers({ chatId }: { chatId: number }): React.ReactElement {
                         <View style={styles.state}>
                             <ActivityIndicator
                                 size="small"
-                                color={palette.primary[500]}
+                                color={theme.accent}
                             />
                         </View>
                     ) : listError !== null ? (
                         <View style={styles.state}>
-                            <Text style={styles.stateTitle}>
+                            <AppText style={styles.stateTitle}>
                                 Could not load banned users
-                            </Text>
-                            <Text style={styles.stateDetail}>{listError}</Text>
+                            </AppText>
+                            <AppText style={styles.stateDetail}>{listError}</AppText>
                             <Pressable
                                 accessibilityRole="button"
                                 accessibilityLabel="Retry loading banned users"
@@ -235,14 +240,14 @@ function BannedUsers({ chatId }: { chatId: number }): React.ReactElement {
                                     void bannedQuery.refetch();
                                 }}
                             >
-                                <Text style={styles.retryText}>Retry</Text>
+                                <AppText style={styles.retryText}>Retry</AppText>
                             </Pressable>
                         </View>
                     ) : (
                         <View style={styles.state}>
-                            <Text style={styles.stateTitle}>
+                            <AppText style={styles.stateTitle}>
                                 No banned users
-                            </Text>
+                            </AppText>
                         </View>
                     )
                 }
@@ -251,7 +256,7 @@ function BannedUsers({ chatId }: { chatId: number }): React.ReactElement {
                         <View style={styles.footer}>
                             <ActivityIndicator
                                 size="small"
-                                color={palette.primary[500]}
+                                color={theme.accent}
                             />
                         </View>
                     ) : undefined
@@ -266,7 +271,7 @@ function BannedUsers({ chatId }: { chatId: number }): React.ReactElement {
                             void infoQuery.refetch();
                             void bannedQuery.refetch();
                         }}
-                        tintColor={palette.primary[500]}
+                        tintColor={theme.accent}
                     />
                 }
                 onEndReached={(): void => {
@@ -294,6 +299,8 @@ function BannedRow(props: {
     onOpenProfile: () => void;
     onUnban: () => void;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const user = props.user;
     const name = displayName(user);
     const bannedOn =
@@ -323,14 +330,14 @@ function BannedRow(props: {
                         {name}
                     </SafeText>
                     {user.username !== '' && (
-                        <Text style={styles.rowUsername} numberOfLines={1}>
+                        <AppText style={styles.rowUsername} numberOfLines={1}>
                             @{user.username}
-                        </Text>
+                        </AppText>
                     )}
                     {bannedOn !== null && (
-                        <Text style={styles.rowMeta} numberOfLines={1}>
+                        <AppText style={styles.rowMeta} numberOfLines={1}>
                             {bannedOn}
-                        </Text>
+                        </AppText>
                     )}
                 </View>
             </Pressable>
@@ -338,7 +345,7 @@ function BannedRow(props: {
                 <View style={styles.unbanButton}>
                     <ActivityIndicator
                         size="small"
-                        color={palette.primary[500]}
+                        color={theme.accent}
                     />
                 </View>
             ) : (
@@ -353,7 +360,7 @@ function BannedRow(props: {
                         pressed && styles.rowPressed,
                     ]}
                 >
-                    <Text style={styles.unbanText}>Unban</Text>
+                    <AppText style={styles.unbanText}>Unban</AppText>
                 </Pressable>
             )}
         </View>
@@ -361,6 +368,7 @@ function BannedRow(props: {
 }
 
 function TopBar(): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.topBar}>
             <Pressable
@@ -369,11 +377,11 @@ function TopBar(): React.ReactElement {
                 style={styles.backButton}
                 onPress={(): void => router.back()}
             >
-                <Text style={styles.backText}>‹</Text>
+                <AppText style={styles.backText}>‹</AppText>
             </Pressable>
-            <Text style={styles.topBarTitle} numberOfLines={1}>
+            <AppText style={styles.topBarTitle} numberOfLines={1}>
                 Banned users
-            </Text>
+            </AppText>
             <View style={styles.topBarSpacer} />
         </View>
     );
@@ -384,6 +392,8 @@ function StateBlock(props: {
     detail: string;
     onRetry?: () => void;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.centered}>
             <AppText variant="title">{props.title}</AppText>
@@ -397,7 +407,7 @@ function StateBlock(props: {
                     style={styles.retryButton}
                     onPress={props.onRetry}
                 >
-                    <Text style={styles.retryText}>Retry</Text>
+                    <AppText style={styles.retryText}>Retry</AppText>
                 </Pressable>
             )}
             <Pressable
@@ -406,22 +416,23 @@ function StateBlock(props: {
                 style={styles.backLink}
                 onPress={(): void => router.back()}
             >
-                <Text style={styles.backLinkText}>Go back</Text>
+                <AppText style={styles.backLinkText}>Go back</AppText>
             </Pressable>
         </View>
     );
 }
 
-const styles = StyleSheet.create({
-    root: { flex: 1, backgroundColor: palette.background },
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+    root: { flex: 1, backgroundColor: 'transparent' },
     topBar: {
         flexDirection: 'row',
         alignItems: 'center',
         minHeight: 52,
         paddingHorizontal: spacing.xs,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: palette.neutral[100],
-        backgroundColor: palette.elevated,
+        borderBottomColor: theme.colors.border,
+        backgroundColor: theme.colors.glassElevated,
     },
     backButton: {
         width: 44,
@@ -429,29 +440,29 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    backText: { fontSize: 32, lineHeight: 34, color: palette.neutral[900] },
+    backText: { fontSize: 32, lineHeight: 34, color: theme.colors.text },
     topBarTitle: {
         flex: 1,
         textAlign: 'center',
         fontSize: 16,
         fontWeight: '700',
-        color: palette.neutral[900],
+        color: theme.colors.text,
     },
     topBarSpacer: { width: 44 },
     list: { paddingBottom: spacing.xl },
     listHeader: { padding: spacing.md },
-    caption: { ...typography.caption, marginTop: spacing.xxs },
+    caption: { ...theme.type.caption, marginTop: spacing.xxs },
     row: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: spacing.sm,
         minHeight: 64,
         paddingHorizontal: spacing.md,
-        backgroundColor: palette.elevated,
+        backgroundColor: theme.colors.glassElevated,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: palette.neutral[100],
+        borderBottomColor: theme.colors.border,
     },
-    rowPressed: { backgroundColor: palette.neutral[100] },
+    rowPressed: { backgroundColor: theme.colors.glassElevated },
     identity: {
         flex: 1,
         minWidth: 0,
@@ -461,9 +472,9 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.xs,
     },
     rowBody: { flex: 1, minWidth: 0, gap: 2 },
-    rowName: { fontSize: 16, fontWeight: '600', color: palette.neutral[900] },
-    rowUsername: typography.caption,
-    rowMeta: { ...typography.caption, color: palette.neutral[500] },
+    rowName: { fontSize: 16, fontWeight: '600', color: theme.colors.text },
+    rowUsername: theme.type.caption,
+    rowMeta: { ...theme.type.caption, color: theme.colors.textSecondary },
     unbanButton: {
         flexShrink: 0,
         minWidth: 72,
@@ -474,7 +485,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.sm,
     },
     unbanText: {
-        color: palette.semantic.danger,
+        color: theme.colors.danger,
         fontSize: 14,
         fontWeight: '700',
     },
@@ -488,9 +499,9 @@ const styles = StyleSheet.create({
     stateTitle: {
         fontSize: 16,
         fontWeight: '600',
-        color: palette.neutral[700],
+        color: theme.colors.text,
     },
-    stateDetail: { ...typography.caption, textAlign: 'center' },
+    stateDetail: { ...theme.type.caption, textAlign: 'center' },
     centered: {
         flex: 1,
         alignItems: 'center',
@@ -504,10 +515,10 @@ const styles = StyleSheet.create({
         borderRadius: radii.sm,
         paddingHorizontal: spacing.md,
         paddingVertical: spacing.xs,
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
     },
     retryText: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 14,
         fontWeight: '600',
     },
@@ -515,6 +526,6 @@ const styles = StyleSheet.create({
     backLinkText: {
         fontSize: 14,
         fontWeight: '600',
-        color: palette.primary[700],
+        color: theme.accent,
     },
 });

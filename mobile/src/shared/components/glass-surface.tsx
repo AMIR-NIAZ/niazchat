@@ -1,13 +1,18 @@
+import { createContext, useContext } from 'react';
+import type { ComponentRef, RefObject } from 'react';
 import { BlurView } from 'expo-blur';
 import type { BlurTint } from 'expo-blur';
 import { Platform, StyleSheet, View } from 'react-native';
 import type { ViewProps } from 'react-native';
-import { blur, palette, radii, shadows } from '../theme';
+import { blur, radii, shadows } from '../theme';
+import { useTheme } from '../theme/theme-provider';
+import type { AppTheme } from '../theme/theme-provider';
+import { useOpaqueRoute } from './opaque-route';
 
 /**
  * The base glass surface: a translucent tinted fill plus a real native blur.
  *
- * - iOS gets the native `dark` blur material.
+ * - iOS gets the native blur material matching the active theme.
  * - Android uses the Dimezis backend on SDK 31+ (older devices fall back to the
  *   tint layer, keeping the UI legible rather than blank).
  * - The fill is always translucent and sits over the screen background, so the
@@ -30,16 +35,38 @@ interface GlassSurfaceProps extends ViewProps {
     opacity?: number;
 }
 
-const toneFill: Record<GlassTone, string> = {
-    surface: palette.glass.surface,
-    elevated: palette.glass.elevated,
-    header: palette.glass.header,
-    accent: palette.glass.accent,
-};
+/**
+ * The Android blur target shared with every glass surface.
+ *
+ * expo-blur's new API (SDK 55+) blurs a `BlurTargetView` that is referenced by
+ * `blurTarget`; without one, Android falls back to `none` and logs a warning.
+ * The root layout points this at the app background layer, which is what every
+ * glass surface sits on top of.
+ */
+export const GlassBlurTargetContext = createContext<RefObject<
+    ComponentRef<typeof View> | null
+> | null>(null);
+
+export function useGlassBlurTarget(): RefObject<ComponentRef<typeof View> | null> | null {
+    return useContext(GlassBlurTargetContext);
+}
+
+function toneFill(tone: GlassTone, theme: AppTheme): string {
+    switch (tone) {
+        case 'elevated':
+            return theme.colors.glassElevated;
+        case 'header':
+            return theme.colors.glassHeader;
+        case 'accent':
+            return theme.colors.glassAccent;
+        default:
+            return theme.colors.glassSurface;
+    }
+}
 
 export function GlassSurface({
     intensity = blur.regular,
-    tint = 'dark',
+    tint,
     tone = 'surface',
     radius = radii.lg,
     bordered = true,
@@ -49,33 +76,49 @@ export function GlassSurface({
     children,
     ...rest
 }: GlassSurfaceProps): React.ReactElement {
+    const theme = useTheme();
+    const blurTarget = useGlassBlurTarget();
+    // Opaque routes cover the app background, so the theme already resolves
+    // `toneFill` to an opaque surface: a native blur has nothing meaningful to
+    // blur and would only bring the translucency back.
+    const opaque = useOpaqueRoute();
     return (
         <View
             style={[
                 styles.base,
                 {
                     borderRadius: radius,
-                    backgroundColor: toneFill[tone],
+                    backgroundColor: toneFill(tone, theme),
                 },
                 opacity < 1 && { opacity },
-                bordered && styles.border,
+                bordered && [
+                    styles.border,
+                    { borderColor: theme.colors.border },
+                ],
                 floating && shadows.glass,
                 style,
             ]}
             {...rest}
         >
-            <BlurView
-                pointerEvents="none"
-                tint={tint}
-                intensity={intensity}
-                blurReductionFactor={4}
-                // `dimezisBlurViewSdk31Plus` falls back to the tint layer on older
-                // Android versions instead of rendering nothing.
-                {...(Platform.OS === 'android'
-                    ? { blurMethod: 'dimezisBlurViewSdk31Plus' as const }
-                    : {})}
-                style={StyleSheet.absoluteFill}
-            />
+            {!opaque && (
+                <BlurView
+                    pointerEvents="none"
+                    tint={tint ?? (theme.isDark ? 'dark' : 'light')}
+                    intensity={intensity}
+                    blurReductionFactor={4}
+                    // `dimezisBlurViewSdk31Plus` falls back to the tint layer on older
+                    // Android versions instead of rendering nothing. It requires a
+                    // `blurTarget`; without one we keep the default `none` method so
+                    // the native side does not warn about a missing target.
+                    {...(Platform.OS === 'android' && blurTarget !== null
+                        ? {
+                              blurMethod: 'dimezisBlurViewSdk31Plus' as const,
+                              blurTarget,
+                          }
+                        : {})}
+                    style={StyleSheet.absoluteFill}
+                />
+            )}
             {children}
         </View>
     );
@@ -87,6 +130,5 @@ const styles = StyleSheet.create({
     },
     border: {
         borderWidth: StyleSheet.hairlineWidth * 2,
-        borderColor: palette.border.subtle,
     },
 });

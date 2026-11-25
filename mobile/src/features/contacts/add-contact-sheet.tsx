@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import {
     AppText,
@@ -8,11 +8,11 @@ import {
     PrimaryButton,
     SafeText,
     UserAvatar,
-    palette,
     radii,
     spacing,
-    typography,
 } from '../../shared/components';
+import { useTheme, useThemedStyles } from '../../shared/theme';
+import type { AppTheme } from '../../shared/theme';
 import { toast } from '../../shared/dialog';
 import { ApiError } from '../../core/api';
 import { openPrivateChat } from '../chats';
@@ -44,6 +44,8 @@ export function AddContactSheet({
     onClose,
 }: AddContactSheetProps): React.ReactElement {
     const queryClient = useQueryClient();
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const addContact = useAddContact();
     const [name, setName] = useState('');
     const [phoneValue, setPhoneValue] = useState('');
@@ -180,7 +182,14 @@ export function AddContactSheet({
                             keyboardType="phone-pad"
                             maxLength={24}
                             error={validationError}
-                            leading={<Text style={styles.fieldGlyph}>☎</Text>}
+                            leading={
+                                <AppText
+                                    style={styles.fieldGlyph}
+                                    allowFontScaling={false}
+                                >
+                                    ☎
+                                </AppText>
+                            }
                             accessibilityLabel="Phone number"
                         />
 
@@ -200,16 +209,19 @@ export function AddContactSheet({
                             size={52}
                         />
                         <View style={styles.previewBody}>
-                            <SafeText style={typography.body} lines={1}>
+                            <SafeText style={theme.type.body} lines={1}>
                                 {preview.name}
                             </SafeText>
                             {preview.username !== null && (
-                                <Text
-                                    style={typography.caption}
-                                    numberOfLines={1}
+                                <SafeText
+                                    style={[
+                                        theme.type.caption,
+                                        styles.previewHandle,
+                                    ]}
+                                    lines={1}
                                 >
                                     @{preview.username}
-                                </Text>
+                                </SafeText>
                             )}
                         </View>
                         <Pressable
@@ -221,16 +233,16 @@ export function AddContactSheet({
                                 pressed && styles.pressed,
                             ]}
                         >
-                            <Text style={styles.linkText}>Change</Text>
+                            <AppText style={styles.linkText}>Change</AppText>
                         </Pressable>
                     </View>
                 )}
 
                 {phase === 'notFound' && (
                     <View style={styles.stateCard}>
-                        <Text style={styles.stateTitle}>
+                        <AppText style={styles.stateTitle}>
                             This person isn't on the app yet
-                        </Text>
+                        </AppText>
                         <AppText variant="caption" style={styles.stateText}>
                             Check the number, or invite them to NiazChat.
                         </AppText>
@@ -243,16 +255,16 @@ export function AddContactSheet({
                                 pressed && styles.pressed,
                             ]}
                         >
-                            <Text style={styles.linkText}>Try again</Text>
+                            <AppText style={styles.linkText}>Try again</AppText>
                         </Pressable>
                     </View>
                 )}
 
                 {phase === 'already' && (
                     <View style={styles.stateCard}>
-                        <Text style={styles.stateTitle}>
+                        <AppText style={styles.stateTitle}>
                             Already in your contacts
-                        </Text>
+                        </AppText>
                         <AppText variant="caption" style={styles.stateText}>
                             You can message them right away.
                         </AppText>
@@ -310,44 +322,59 @@ export function AddContactSheet({
     );
 }
 
-const styles = StyleSheet.create({
-    body: { gap: spacing.sm, paddingBottom: spacing.xs },
-    fieldGlyph: { color: palette.text.muted, fontSize: 16 },
-    previewCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.sm,
-        padding: spacing.sm,
-        borderRadius: radii.lg,
-        backgroundColor: palette.glass.accent,
-        borderWidth: 1,
-        borderColor: palette.border.accent,
-    },
-    previewBody: { flex: 1, minWidth: 0, gap: 2 },
-    stateCard: {
-        alignItems: 'center',
-        gap: spacing.xs,
-        padding: spacing.md,
-        borderRadius: radii.lg,
-        backgroundColor: palette.glass.elevated,
-        borderWidth: 1,
-        borderColor: palette.border.subtle,
-    },
-    stateTitle: {
-        color: palette.text.primary,
-        fontSize: 15,
-        fontWeight: '700',
-        textAlign: 'center',
-    },
-    stateText: { textAlign: 'center' },
-    rowButtons: { flexDirection: 'row', gap: spacing.xs, alignSelf: 'stretch' },
-    grow: { flex: 1 },
-    linkButton: { paddingVertical: spacing.xxs, paddingHorizontal: spacing.xs },
-    linkText: {
-        color: palette.primary[600],
-        fontSize: 13,
-        fontWeight: '700',
-    },
-    pressed: { opacity: 0.6 },
-    error: { color: palette.semantic.danger, textAlign: 'center' },
-});
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+        body: { gap: spacing.sm, paddingBottom: spacing.xs },
+        fieldGlyph: { color: theme.colors.textMuted, fontSize: 16 },
+        previewCard: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: spacing.sm,
+            padding: spacing.sm,
+            borderRadius: radii.lg,
+            backgroundColor: theme.colors.glassAccent,
+            borderWidth: 1,
+            borderColor: theme.colors.accentBorder,
+        },
+        previewBody: { flex: 1, minWidth: 0, gap: 2 },
+        previewHandle: { color: theme.colors.textSecondary },
+        stateCard: {
+            alignItems: 'center',
+            gap: spacing.xs,
+            padding: spacing.md,
+            borderRadius: radii.lg,
+            backgroundColor: theme.colors.glassElevated,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+        },
+        stateTitle: {
+            ...theme.type.heading,
+            fontSize: 16,
+            textAlign: 'center',
+            color: theme.colors.text,
+        },
+        stateText: {
+            textAlign: 'center',
+            color: theme.colors.textSecondary,
+        },
+        rowButtons: {
+            flexDirection: 'row',
+            gap: spacing.xs,
+            alignSelf: 'stretch',
+        },
+        grow: { flex: 1 },
+        linkButton: {
+            paddingVertical: spacing.xxs,
+            paddingHorizontal: spacing.xs,
+        },
+        linkText: {
+            ...theme.type.label,
+            color: theme.accent,
+        },
+        pressed: { opacity: 0.6 },
+        error: {
+            ...theme.type.caption,
+            color: theme.colors.danger,
+            textAlign: 'center',
+        },
+    });

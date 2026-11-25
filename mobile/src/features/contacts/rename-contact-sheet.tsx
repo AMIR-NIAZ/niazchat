@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import {
     AppText,
     GlassBottomSheet,
     GlassInput,
     PrimaryButton,
-    palette,
     spacing,
 } from '../../shared/components';
+import { useThemedStyles } from '../../shared/theme';
+import type { AppTheme } from '../../shared/theme';
 import { dialog, toast } from '../../shared/dialog';
 import { describeSavedContactError } from './contacts-api';
 import { useRenameContact } from './use-contacts';
@@ -30,6 +31,7 @@ export function RenameContactSheet({
     initialAlias: string | null;
     onClose: () => void;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     const rename = useRenameContact();
     const [alias, setAlias] = useState('');
     const [saving, setSaving] = useState(false);
@@ -84,9 +86,9 @@ export function RenameContactSheet({
                     accessibilityLabel="Contact name"
                 />
                 {alias.trim() === '' && (
-                    <Text style={styles.hint}>
+                    <AppText variant="caption" style={styles.hint}>
                         Leave it empty to use the account name.
-                    </Text>
+                    </AppText>
                 )}
                 <PrimaryButton
                     label="Save name"
@@ -100,7 +102,8 @@ export function RenameContactSheet({
     );
 }
 
-const styles = StyleSheet.create({
-    body: { gap: spacing.sm },
-    hint: { color: palette.text.muted, fontSize: 12 },
-});
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+        body: { gap: spacing.sm },
+        hint: { color: theme.colors.textMuted },
+    });

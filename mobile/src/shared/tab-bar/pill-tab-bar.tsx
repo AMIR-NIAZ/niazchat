@@ -15,7 +15,10 @@ import Animated, {
 import { House, Settings, UserRound, UsersRound } from 'lucide-react-native';
 import type { BottomTabBarProps } from 'expo-router/js-tabs';
 import { useReducedMotion } from '../hooks/use-reduced-motion';
-import { palette, radii, shadows } from '../theme';
+import { radii, shadows } from '../theme';
+import { mixColors } from '../theme/colors';
+import { useTheme, useThemedStyles } from '../theme/theme-provider';
+import type { AppTheme } from '../theme/theme-provider';
 import {
     TAB_BAR_BOTTOM_MIN,
     TAB_BAR_BOTTOM_OFFSET,
@@ -25,6 +28,7 @@ import {
 } from './tab-bar-inset';
 import { useTotalUnread } from './use-total-unread';
 import { requestHomeTabReselect } from './tab-bar-events';
+import { AppText } from '../components';
 
 /**
  * Floating, purple, pill-shaped bottom tab bar.
@@ -89,13 +93,14 @@ const PRESS_SPRING = { damping: 20, stiffness: 300, mass: 0.6 };
 const REDUCED_MS = 90;
 /** How much wider than its slot the active highlight is. */
 const ACTIVE_EXTRA_WIDTH = 18;
-const INACTIVE_ICON = 'rgba(255,255,255,0.6)';
 
 function PillTabBarBase(props: BottomTabBarProps): React.ReactElement {
     const { state } = props;
     const insets = useSafeAreaInsets();
     const reduceMotion = useReducedMotion();
     const unread = useTotalUnread();
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
 
     // Stable handlers: the bar is memo'd, so callbacks must not close over the
     // fresh `state`/`navigation` objects on every navigation.
@@ -231,7 +236,11 @@ function PillTabBarBase(props: BottomTabBarProps): React.ReactElement {
                 accessibilityLabel="Main navigation"
             >
                 <LinearGradient
-                    colors={['#2F1B4A', '#150C22']}
+                    colors={
+                        theme.isDark
+                            ? [theme.colors.surfaceElevated, theme.colors.background]
+                            : [theme.colors.surface, theme.colors.backgroundAlt]
+                    }
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}
                     style={StyleSheet.absoluteFill}
@@ -243,8 +252,12 @@ function PillTabBarBase(props: BottomTabBarProps): React.ReactElement {
                     >
                         <LinearGradient
                             colors={[
-                                palette.primary[500],
-                                palette.primary[600],
+                                theme.accent,
+                                mixColors(
+                                    theme.accent,
+                                    theme.colors.background,
+                                    0.22,
+                                ),
                             ]}
                             start={{ x: 0, y: 0 }}
                             end={{ x: 1, y: 1 }}
@@ -293,6 +306,8 @@ const TabButton = memo(function TabButton({
     reduceMotion,
     onSelect,
 }: TabButtonProps): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const press = useSharedValue(1);
     const bounce = useSharedValue(1);
     const label = useSharedValue(active ? 1 : 0);
@@ -348,7 +363,9 @@ const TabButton = memo(function TabButton({
     }));
 
     const iconSize = tab.name === 'index' ? 26 : 23;
-    const iconColor = active ? palette.text.onAccent : INACTIVE_ICON;
+    const iconColor = active
+        ? theme.colors.accentText
+        : theme.colors.textSecondary;
 
     return (
         <Pressable
@@ -375,30 +392,38 @@ const TabButton = memo(function TabButton({
                         size={iconSize}
                         color={iconColor}
                         strokeWidth={active ? 2.4 : 2}
-                        fill={active ? 'rgba(255,255,255,0.26)' : 'none'}
+                        fill={
+                            active
+                                ? mixColors(
+                                      theme.colors.accentText,
+                                      theme.accent,
+                                      0.74,
+                                  )
+                                : 'none'
+                        }
                     />
                     {badge > 0 ? (
                         <Animated.View
                             style={[styles.badge, badgeStyle]}
                             pointerEvents="none"
                         >
-                            <Text
+                            <AppText
                                 style={styles.badgeText}
                                 allowFontScaling={false}
                             >
                                 {badge > 99 ? '99+' : badge}
-                            </Text>
+                            </AppText>
                         </Animated.View>
                     ) : null}
                 </View>
                 <Animated.View style={[styles.labelWrap, labelStyle]}>
-                    <Text
+                    <AppText
                         style={styles.label}
                         numberOfLines={1}
                         allowFontScaling={false}
                     >
                         {tab.label}
-                    </Text>
+                    </AppText>
                 </Animated.View>
             </Animated.View>
         </Pressable>
@@ -407,7 +432,7 @@ const TabButton = memo(function TabButton({
 
 export const PillTabBar = memo(PillTabBarBase);
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) => StyleSheet.create({
     wrap: {
         position: 'absolute',
         left: TAB_BAR_SIDE_MARGIN,
@@ -420,8 +445,8 @@ const styles = StyleSheet.create({
         height: TAB_BAR_HEIGHT,
         borderRadius: radii.full,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.08)',
-        backgroundColor: 'rgba(18,13,28,0.92)',
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.glassSurface,
         overflow: 'hidden',
         shadowColor: shadows.floating.shadowColor,
         shadowOpacity: 0.55,
@@ -442,7 +467,7 @@ const styles = StyleSheet.create({
         left: 0,
         borderRadius: radii.full,
         overflow: 'hidden',
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
     },
     tab: {
         flex: 1,
@@ -467,12 +492,12 @@ const styles = StyleSheet.create({
         height: 17,
         paddingHorizontal: 4,
         borderRadius: 9,
-        backgroundColor: '#F06BB7',
+        backgroundColor: theme.colors.badge,
         alignItems: 'center',
         justifyContent: 'center',
     },
     badgeText: {
-        color: palette.text.onAccent,
+        color: theme.colors.badgeText,
         fontSize: 9,
         fontWeight: '800',
     },
@@ -481,7 +506,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     label: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 11,
         fontWeight: '700',
         marginStart: 5,

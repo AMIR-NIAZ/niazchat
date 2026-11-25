@@ -1,7 +1,8 @@
 import { StyleSheet, View } from 'react-native';
 import { UserAvatar } from './user-avatar';
 import type { UserAvatarProps } from './user-avatar';
-import { palette } from '../theme';
+import { useThemedStyles } from '../theme/theme-provider';
+import type { AppTheme } from '../theme/theme-provider';
 
 interface AvatarProps extends UserAvatarProps {
     /** Adds the lavender ring + soft purple glow used on hero avatars. */
@@ -22,6 +23,7 @@ export function Avatar({
     borderRadius,
     ...rest
 }: AvatarProps): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     if (!ring) {
         return (
             <UserAvatar
@@ -53,17 +55,18 @@ export function Avatar({
     );
 }
 
-const styles = StyleSheet.create({
-    ring: {
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 1,
-        borderColor: palette.border.strong,
-        backgroundColor: palette.glass.highlight,
-        shadowColor: palette.primary[500],
-        shadowOpacity: 0.45,
-        shadowRadius: 16,
-        shadowOffset: { width: 0, height: 6 },
-        elevation: 6,
-    },
-});
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+        ring: {
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderWidth: 1,
+            borderColor: theme.colors.borderStrong,
+            backgroundColor: theme.colors.glassAccent,
+            shadowColor: theme.accent,
+            shadowOpacity: 0.45,
+            shadowRadius: 16,
+            shadowOffset: { width: 0, height: 6 },
+            elevation: 6,
+        },
+    });

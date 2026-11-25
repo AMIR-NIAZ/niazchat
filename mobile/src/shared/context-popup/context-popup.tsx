@@ -33,7 +33,7 @@ import type { AnimatedStyle, SharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
 import { useReducedMotion } from '../hooks/use-reduced-motion';
-import { palette } from '../theme';
+import { useTheme } from '../theme/theme-provider';
 import { ContextMenuCard } from './menu-card';
 import type { ContextMenuItem } from './menu-card';
 import { ReactionPill } from './reaction-pill';
@@ -588,6 +588,7 @@ const PopupBackdrop = memo(function PopupBackdrop({
     progress: SharedValue<number>;
     reduceMotion: boolean;
 }): React.ReactElement {
+    const theme = useTheme();
     const animatedStyle = useAnimatedStyle(() => ({
         opacity: progress.value * POPUP_SCRIM_OPACITY,
     }));
@@ -608,7 +609,11 @@ const PopupBackdrop = memo(function PopupBackdrop({
                 </Animated.View>
             )}
             <Animated.View
-                style={[StyleSheet.absoluteFill, styles.scrim, animatedStyle]}
+                style={[
+                    StyleSheet.absoluteFill,
+                    { backgroundColor: theme.colors.background },
+                    animatedStyle,
+                ]}
             />
         </View>
     );
@@ -863,7 +868,6 @@ const styles = StyleSheet.create({
         zIndex: 1000,
         elevation: 1000,
     },
-    scrim: { backgroundColor: palette.background },
     dim: { backgroundColor: POPUP_BACKDROP_DIM },
     originTop: { transformOrigin: 'top' },
     originBottom: { transformOrigin: 'bottom' },

@@ -60,6 +60,8 @@ import {
 } from '../../../../features/groups/use-group';
 import { openUserProfile } from '../../../../features/users/profile-navigation';
 import { Check, Contact, Search } from 'lucide-react-native';
+import { useTheme, useThemedStyles } from '../../../../shared/theme';
+import type { AppTheme } from '../../../../shared/theme';
 
 /**
  * Add members (`/group-settings/:chatId/add-members`).
@@ -91,6 +93,7 @@ function parseChatId(value: string | string[] | undefined): number | null {
 }
 
 export default function AddMembersScreen(): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     const params = useLocalSearchParams<AddMembersRouteParams>();
     const chatId = parseChatId(params.chatId);
 
@@ -109,6 +112,8 @@ export default function AddMembersScreen(): React.ReactElement {
 }
 
 function AddMembers({ chatId }: { chatId: number }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const infoQuery = useGroupInfo(chatId);
     const info = infoQuery.data;
     const allowed = info?.capabilities.canAddMembers === true;
@@ -149,9 +154,9 @@ function AddMembers({ chatId }: { chatId: number }): React.ReactElement {
                 <View style={styles.centered}>
                     <ActivityIndicator
                         size="large"
-                        color={palette.primary[500]}
+                        color={theme.accent}
                     />
-                    <Text style={styles.caption}>Loading group…</Text>
+                    <AppText style={styles.caption}>Loading group…</AppText>
                 </View>
             </View>
         );
@@ -218,6 +223,8 @@ function ContactsPicker(props: {
     onMissingId: (anchor: PopupRect | null) => void;
     onSubmit: (userIds: number[]) => Promise<AddMembersResult>;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const contactsQuery = useContacts();
     const memberIdsQuery = useGroupMemberIdSet(props.chatId);
     const [search, setSearch] = useState('');
@@ -324,7 +331,7 @@ function ContactsPicker(props: {
                     value={search}
                     onChangeText={setSearch}
                     placeholder="Search contacts"
-                    placeholderTextColor={palette.neutral[500]}
+                    placeholderTextColor={theme.colors.textSecondary}
                     autoCorrect={false}
                     returnKeyType="search"
                     accessibilityLabel="Search contacts"
@@ -333,7 +340,7 @@ function ContactsPicker(props: {
                 <View style={styles.searchIcon}>
                     <Search
                         size={18}
-                        color={palette.primary[300]}
+                        color={theme.accent}
                         strokeWidth={2}
                     />
                 </View>
@@ -350,18 +357,18 @@ function ContactsPicker(props: {
                         <View style={styles.stateCard}>
                             <ActivityIndicator
                                 size="small"
-                                color={palette.primary[500]}
+                                color={theme.accent}
                             />
-                            <Text style={styles.stateDetail}>
+                            <AppText style={styles.stateDetail}>
                                 Loading contacts…
-                            </Text>
+                            </AppText>
                         </View>
                     ) : loadError !== null ? (
                         <View style={styles.stateCard}>
-                            <Text style={styles.stateTitle}>
+                            <AppText style={styles.stateTitle}>
                                 Could not load contacts
-                            </Text>
-                            <Text style={styles.stateDetail}>{loadError}</Text>
+                            </AppText>
+                            <AppText style={styles.stateDetail}>{loadError}</AppText>
                             <Pressable
                                 accessibilityRole="button"
                                 accessibilityLabel="Retry loading contacts"
@@ -371,42 +378,42 @@ function ContactsPicker(props: {
                                     void memberIdsQuery.refetch();
                                 }}
                             >
-                                <Text style={styles.retryText}>Retry</Text>
+                                <AppText style={styles.retryText}>Retry</AppText>
                             </Pressable>
                         </View>
                     ) : contactsQuery.contacts.length === 0 ? (
                         <View style={styles.stateCard}>
                             <Contact
                                 size={26}
-                                color={palette.primary[300]}
+                                color={theme.accent}
                                 strokeWidth={1.8}
                             />
-                            <Text style={styles.stateTitle}>
+                            <AppText style={styles.stateTitle}>
                                 No saved contacts yet
-                            </Text>
-                            <Text style={styles.stateDetail}>
+                            </AppText>
+                            <AppText style={styles.stateDetail}>
                                 Add people in the Contacts tab first, then come
                                 back here.
-                            </Text>
+                            </AppText>
                         </View>
                     ) : (
                         <View style={styles.stateCard}>
-                            <Text style={styles.stateTitle}>
+                            <AppText style={styles.stateTitle}>
                                 No contacts found
-                            </Text>
-                            <Text style={styles.stateDetail}>
+                            </AppText>
+                            <AppText style={styles.stateDetail}>
                                 Try another name or username.
-                            </Text>
+                            </AppText>
                         </View>
                     )
                 }
             />
 
             <View style={styles.footer}>
-                <Text style={styles.selectionLabel}>
+                <AppText style={styles.selectionLabel}>
                     {selectedCountLabel(selectedCount) ??
                         'Select people to add'}
-                </Text>
+                </AppText>
                 <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={
@@ -430,12 +437,12 @@ function ContactsPicker(props: {
                     {submitting || props.busy ? (
                         <ActivityIndicator
                             size="small"
-                            color={palette.text.onAccent}
+                            color={theme.colors.accentText}
                         />
                     ) : (
-                        <Text style={styles.primaryButtonText}>
+                        <AppText style={styles.primaryButtonText}>
                             {selectedCount > 0 ? `Add ${selectedCount}` : 'Add'}
-                        </Text>
+                        </AppText>
                     )}
                 </Pressable>
             </View>
@@ -452,6 +459,8 @@ function ContactRow(props: {
     onPress: () => void;
     onMissingId: (anchor: PopupRect | null) => void;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const { option } = props;
     const isDisabled = option.isMember || props.disabled;
     const idRef = useRef<ViewInstance | null>(null);
@@ -507,9 +516,9 @@ function ContactRow(props: {
                     {option.displayName}
                 </SafeText>
                 {option.username !== null && option.username !== '' && (
-                    <Text style={styles.rowMeta} numberOfLines={1}>
+                    <AppText style={styles.rowMeta} numberOfLines={1}>
                         @{option.username}
-                    </Text>
+                    </AppText>
                 )}
                 <Pressable
                     ref={idRef}
@@ -532,7 +541,7 @@ function ContactRow(props: {
                     ]}
                     onPress={handleIdPress}
                 >
-                    <Text
+                    <AppText
                         style={[
                             styles.idText,
                             publicId === null && styles.idTextMissing,
@@ -540,15 +549,15 @@ function ContactRow(props: {
                         numberOfLines={1}
                     >
                         {publicId !== null ? `ID ${publicId}` : 'No public ID'}
-                    </Text>
+                    </AppText>
                 </Pressable>
                 {option.isMember && (
-                    <Text style={styles.memberLabel}>Already in group</Text>
+                    <AppText style={styles.memberLabel}>Already in group</AppText>
                 )}
             </View>
             {option.isMember ? (
                 <View style={styles.memberBadge}>
-                    <Text style={styles.memberBadgeText}>Member</Text>
+                    <AppText style={styles.memberBadgeText}>Member</AppText>
                 </View>
             ) : (
                 <View
@@ -560,7 +569,7 @@ function ContactRow(props: {
                     {props.selected && (
                         <Check
                             size={15}
-                            color={palette.text.onAccent}
+                            color={theme.colors.accentText}
                             strokeWidth={3}
                         />
                     )}
@@ -588,6 +597,7 @@ function MissingIdHint(props: {
     hint: MissingIdHintState;
     onHide: (id: number) => void;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     const insets = useSafeAreaInsets();
     const window = useWindowDimensions();
     const reducedMotion = useReducedMotion();
@@ -670,15 +680,16 @@ function MissingIdHint(props: {
                     animatedStyle,
                 ]}
             >
-                <Text style={styles.hintText}>
+                <AppText style={styles.hintText}>
                     {"This user doesn't have a public ID."}
-                </Text>
+                </AppText>
             </Animated.View>
         </View>
     );
 }
 
 function TopBar(): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.topBar}>
             <Pressable
@@ -687,11 +698,11 @@ function TopBar(): React.ReactElement {
                 style={styles.backButton}
                 onPress={(): void => router.back()}
             >
-                <Text style={styles.backText}>‹</Text>
+                <AppText style={styles.backText}>‹</AppText>
             </Pressable>
-            <Text style={styles.topBarTitle} numberOfLines={1}>
+            <AppText style={styles.topBarTitle} numberOfLines={1}>
                 Add members
-            </Text>
+            </AppText>
             <View style={styles.topBarSpacer} />
         </View>
     );
@@ -702,10 +713,11 @@ function StateBlock(props: {
     detail: string;
     onRetry?: () => void;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.centered}>
             <AppText variant="title">{props.title}</AppText>
-            <Text style={styles.stateDetail}>{props.detail}</Text>
+            <AppText style={styles.stateDetail}>{props.detail}</AppText>
             {props.onRetry !== undefined && (
                 <Pressable
                     accessibilityRole="button"
@@ -713,7 +725,7 @@ function StateBlock(props: {
                     style={styles.retryButton}
                     onPress={props.onRetry}
                 >
-                    <Text style={styles.retryText}>Retry</Text>
+                    <AppText style={styles.retryText}>Retry</AppText>
                 </Pressable>
             )}
             <Pressable
@@ -722,7 +734,7 @@ function StateBlock(props: {
                 style={styles.backLink}
                 onPress={(): void => router.back()}
             >
-                <Text style={styles.backLinkText}>Go back</Text>
+                <AppText style={styles.backLinkText}>Go back</AppText>
             </Pressable>
         </View>
     );
@@ -761,6 +773,7 @@ function describeInfoError(error: Error | null): string {
 }
 
 function reportResult(result: AddMembersResult): void {
+    const theme = useTheme();
     if (result.added.length === 0 && result.failed.length === 0) return;
     const failures: readonly AddMemberFailure[] = result.failed;
     if (failures.length === 0) {
@@ -774,8 +787,9 @@ function reportResult(result: AddMembersResult): void {
     toast.show(addMembersFeedback(result), { tone: 'danger' });
 }
 
-const styles = StyleSheet.create({
-    root: { flex: 1, backgroundColor: palette.background },
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+    root: { flex: 1, backgroundColor: 'transparent' },
     contactsRoot: { flex: 1 },
     topBar: {
         flexDirection: 'row',
@@ -784,8 +798,8 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.xs,
         paddingTop: 22,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: palette.border.subtle,
-        backgroundColor: palette.surface,
+        borderBottomColor: theme.colors.border,
+        backgroundColor: theme.colors.glassSurface,
     },
     backButton: {
         width: 44,
@@ -793,16 +807,16 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    backText: { fontSize: 32, lineHeight: 34, color: palette.neutral[900] },
+    backText: { fontSize: 32, lineHeight: 34, color: theme.colors.text },
     topBarTitle: {
         flex: 1,
         textAlign: 'center',
         fontSize: 16,
         fontWeight: '700',
-        color: palette.neutral[900],
+        color: theme.colors.text,
     },
     topBarSpacer: { width: 44 },
-    caption: { ...typography.caption, color: palette.text.muted },
+    caption: { ...theme.type.caption, color: theme.colors.textMuted },
     searchRow: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -813,13 +827,13 @@ const styles = StyleSheet.create({
         flex: 1,
         minHeight: 46,
         borderRadius: radii.md,
-        backgroundColor: palette.surface,
+        backgroundColor: theme.colors.glassSurface,
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.border.strong,
+        borderColor: theme.colors.borderStrong,
         paddingHorizontal: spacing.sm,
         paddingRight: 44,
         fontSize: 16,
-        color: palette.neutral[900],
+        color: theme.colors.text,
     },
     searchIcon: {
         position: 'absolute',
@@ -835,29 +849,29 @@ const styles = StyleSheet.create({
         marginTop: spacing.md,
         padding: spacing.lg,
         borderRadius: radii.md,
-        backgroundColor: palette.surface,
+        backgroundColor: theme.colors.glassSurface,
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
     },
     stateTitle: {
         fontSize: 16,
         fontWeight: '600',
-        color: palette.neutral[900],
+        color: theme.colors.text,
         textAlign: 'center',
     },
     stateDetail: {
-        ...typography.caption,
-        color: palette.text.secondary,
+        ...theme.type.caption,
+        color: theme.colors.textSecondary,
         textAlign: 'center',
     },
     rowBody: { flex: 1, minWidth: 0, gap: 2 },
     rowName: {
         fontSize: 16,
         fontWeight: '600',
-        color: palette.neutral[900],
+        color: theme.colors.text,
     },
-    rowNameMuted: { color: palette.neutral[500] },
-    rowMeta: { ...typography.caption, color: palette.text.secondary },
+    rowNameMuted: { color: theme.colors.textSecondary },
+    rowMeta: { ...theme.type.caption, color: theme.colors.textSecondary },
     idChip: {
         alignSelf: 'flex-start',
         flexDirection: 'row',
@@ -868,23 +882,23 @@ const styles = StyleSheet.create({
         paddingVertical: 2,
         borderRadius: radii.full,
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.border.accent,
-        backgroundColor: palette.glass.accent,
+        borderColor: theme.colors.accentBorder,
+        backgroundColor: theme.colors.glassAccent,
     },
-    idChipPressed: { backgroundColor: palette.primary[100] },
+    idChipPressed: { backgroundColor: theme.colors.accentSoft },
     idChipMissing: {
-        borderColor: palette.border.strong,
+        borderColor: theme.colors.borderStrong,
         backgroundColor: 'transparent',
     },
     idText: {
         fontSize: 11,
         fontWeight: '700',
         letterSpacing: 0.2,
-        color: palette.primary[600],
+        color: theme.accent,
     },
     idTextMissing: {
         fontWeight: '600',
-        color: palette.text.muted,
+        color: theme.colors.textMuted,
     },
     hintBubble: {
         position: 'absolute',
@@ -893,9 +907,9 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.md,
         paddingVertical: spacing.xs,
         borderRadius: radii.md,
-        backgroundColor: palette.elevated,
+        backgroundColor: theme.colors.glassElevated,
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.border.accent,
+        borderColor: theme.colors.accentBorder,
         ...shadows.glass,
     },
     hintText: {
@@ -903,12 +917,12 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         lineHeight: 17,
         textAlign: 'center',
-        color: palette.neutral[900],
+        color: theme.colors.text,
     },
     memberLabel: {
         fontSize: 11,
         fontWeight: '600',
-        color: palette.primary[600],
+        color: theme.accent,
     },
     contactsList: {
         paddingHorizontal: spacing.md,
@@ -922,9 +936,9 @@ const styles = StyleSheet.create({
         minHeight: 66,
         paddingHorizontal: spacing.xs,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: palette.border.subtle,
+        borderBottomColor: theme.colors.border,
     },
-    contactRowPressed: { backgroundColor: palette.glass.elevated },
+    contactRowPressed: { backgroundColor: theme.colors.glassElevated },
     checkbox: {
         flexShrink: 0,
         width: 26,
@@ -933,24 +947,24 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 1.5,
-        borderColor: palette.border.strong,
+        borderColor: theme.colors.borderStrong,
         backgroundColor: 'transparent',
     },
     checkboxSelected: {
-        backgroundColor: palette.primary[500],
-        borderColor: palette.primary[300],
+        backgroundColor: theme.accent,
+        borderColor: theme.accent,
     },
     memberBadge: {
         flexShrink: 0,
         borderRadius: radii.sm,
         paddingHorizontal: spacing.xs,
         paddingVertical: 3,
-        backgroundColor: palette.primary[100],
+        backgroundColor: theme.colors.accentSoft,
     },
     memberBadgeText: {
         fontSize: 11,
         fontWeight: '700',
-        color: palette.primary[700],
+        color: theme.accent,
     },
     footer: {
         flexDirection: 'row',
@@ -959,14 +973,14 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.md,
         paddingVertical: spacing.sm,
         borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: palette.border.strong,
-        backgroundColor: palette.surface,
+        borderTopColor: theme.colors.borderStrong,
+        backgroundColor: theme.colors.glassSurface,
     },
     selectionLabel: {
         flex: 1,
         fontSize: 13,
         fontWeight: '600',
-        color: palette.text.secondary,
+        color: theme.colors.textSecondary,
     },
     primaryButton: {
         minWidth: 108,
@@ -975,14 +989,14 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         paddingHorizontal: spacing.md,
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
     },
-    primaryButtonDisabled: { backgroundColor: palette.neutral[100] },
-    primaryButtonPressed: { backgroundColor: palette.primary[300] },
+    primaryButtonDisabled: { backgroundColor: theme.colors.glassElevated },
+    primaryButtonPressed: { backgroundColor: theme.accent },
     primaryButtonText: {
         fontSize: 15,
         fontWeight: '700',
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
     },
     centered: {
         flex: 1,
@@ -990,17 +1004,17 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         gap: spacing.xs,
         padding: spacing.lg,
-        backgroundColor: palette.background,
+        backgroundColor: theme.colors.background,
     },
     retryButton: {
         marginTop: spacing.xs,
         borderRadius: radii.sm,
         paddingHorizontal: spacing.md,
         paddingVertical: spacing.xs,
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
     },
     retryText: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 14,
         fontWeight: '600',
     },
@@ -1008,6 +1022,6 @@ const styles = StyleSheet.create({
     backLinkText: {
         fontSize: 14,
         fontWeight: '600',
-        color: palette.primary[600],
+        color: theme.accent,
     },
 });

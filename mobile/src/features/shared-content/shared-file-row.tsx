@@ -1,7 +1,9 @@
 import { memo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { FileText } from 'lucide-react-native';
-import { palette, radii, spacing } from '../../shared/theme';
+import { radii, spacing } from '../../shared/theme';
+import { useTheme, useThemedStyles } from '../../shared/theme/theme-provider';
+import type { AppTheme } from '../../shared/theme/theme-provider';
 import type { SharedAttachmentItemDto } from '../../core/api/dto/shared-content.dto';
 import { SafeText, UserAvatar } from '../../shared/components';
 import { formatFileSize } from '../attachments/attachment-labels';
@@ -15,15 +17,13 @@ export const SharedFileRow = memo(function SharedFileRow({
     item: SharedAttachmentItemDto;
     showSender: boolean;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const attachment = item.attachment;
     return (
         <View style={styles.row}>
             <View style={styles.icon}>
-                <FileText
-                    size={18}
-                    color={palette.primary[600]}
-                    strokeWidth={2}
-                />
+                <FileText size={18} color={theme.accent} strokeWidth={2} />
             </View>
             <View style={styles.body}>
                 {showSender && (
@@ -42,58 +42,67 @@ export const SharedFileRow = memo(function SharedFileRow({
                 <SafeText style={styles.name} lines={1}>
                     {attachment.originalName}
                 </SafeText>
-                <Text style={styles.meta}>
+                <SafeText style={styles.meta}>
                     {formatFileSize(attachment.size)}
-                </Text>
+                </SafeText>
             </View>
-            <Text style={styles.date} numberOfLines={2}>
+            <SafeText
+                style={styles.date}
+                lines={2}
+                align="content"
+                shrink={false}
+            >
                 {sharedDateLabel(item.createdAt)}
-            </Text>
+            </SafeText>
         </View>
     );
 });
 
-const styles = StyleSheet.create({
-    row: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.sm,
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.xs,
-        height: 74,
-    },
-    icon: {
-        width: 36,
-        height: 36,
-        borderRadius: radii.full,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: palette.primary[100],
-    },
-    body: { flex: 1, minWidth: 0, gap: 1 },
-    senderLine: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.xxs,
-        minWidth: 0,
-    },
-    senderName: {
-        color: palette.text.secondary,
-        fontSize: 11,
-        fontWeight: '600',
-        flexShrink: 1,
-    },
-    name: {
-        color: palette.text.primary,
-        fontSize: 14,
-        fontWeight: '600',
-    },
-    meta: { color: palette.text.muted, fontSize: 11 },
-    date: {
-        color: palette.text.muted,
-        fontSize: 10,
-        width: 74,
-        textAlign: 'right',
-        fontVariant: ['tabular-nums'],
-    },
-});
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+        row: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: spacing.sm,
+            paddingHorizontal: spacing.md,
+            paddingVertical: spacing.xs,
+            height: 74,
+        },
+        icon: {
+            width: 36,
+            height: 36,
+            borderRadius: radii.full,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: theme.colors.accentSoft,
+            borderWidth: 1,
+            borderColor: theme.colors.accentBorder,
+        },
+        body: { flex: 1, minWidth: 0, gap: 1 },
+        senderLine: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: spacing.xxs,
+            minWidth: 0,
+        },
+        senderName: {
+            ...theme.type.caption,
+            color: theme.colors.textSecondary,
+        },
+        name: {
+            ...theme.type.label,
+            color: theme.colors.text,
+        },
+        meta: {
+            ...theme.type.micro,
+            fontWeight: '400',
+            color: theme.colors.textMuted,
+        },
+        date: {
+            ...theme.type.micro,
+            color: theme.colors.textMuted,
+            width: 74,
+            textAlign: 'right',
+            fontVariant: ['tabular-nums'],
+        },
+    });

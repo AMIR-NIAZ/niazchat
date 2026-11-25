@@ -21,6 +21,7 @@ import {
     radii,
     spacing,
     typography,
+    AppText,
 } from '../../../../shared/components';
 import type {
     GroupMember,
@@ -44,6 +45,8 @@ import {
     usePromoteMember,
     useSetMemberPermissions,
 } from '../../../../features/groups/use-group';
+import { useTheme, useThemedStyles } from '../../../../shared/theme';
+import type { AppTheme } from '../../../../shared/theme';
 
 /**
  * Admin permissions editor (`/group-settings/:chatId/admin-permissions`).
@@ -112,6 +115,7 @@ const PERMISSION_SECTIONS: readonly PermissionSection[] = [
 const ACTION_BAR_HEIGHT = 76;
 
 export default function AdminPermissionsScreen(): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     const params = useLocalSearchParams<RouteParams>();
     const chatId = parsePositiveInt(params.chatId);
     const userId = parsePositiveInt(params.userId);
@@ -146,6 +150,8 @@ function AdminPermissionsPanel(props: {
     memberId: number | null;
     mode: 'edit' | 'promote';
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const { chatId, userId, mode } = props;
     const isPromote = mode === 'promote';
     const insets = useSafeAreaInsets();
@@ -463,7 +469,7 @@ function AdminPermissionsPanel(props: {
                     hasAll={permissionsQuery.data?.hasAll === true}
                 />
 
-                <Text style={styles.sectionLabel}>Presets</Text>
+                <AppText style={styles.sectionLabel}>Presets</AppText>
                 <View style={styles.presets}>
                     {PERMISSION_PRESETS.map((preset) => (
                         <Pressable
@@ -479,16 +485,16 @@ function AdminPermissionsPanel(props: {
                                 pressed && !saving && styles.presetPressed,
                             ]}
                         >
-                            <Text style={styles.presetText}>
+                            <AppText style={styles.presetText}>
                                 {preset.label}
-                            </Text>
+                            </AppText>
                         </Pressable>
                     ))}
                 </View>
 
                 {PERMISSION_SECTIONS.map((section) => (
                     <View key={section.title}>
-                        <Text style={styles.groupLabel}>{section.title}</Text>
+                        <AppText style={styles.groupLabel}>{section.title}</AppText>
                         {section.keys.map((key) => (
                             <PermissionRow
                                 key={key}
@@ -527,7 +533,7 @@ function AdminPermissionsPanel(props: {
                     ]}
                     onPress={reset}
                 >
-                    <Text style={styles.resetText}>Reset</Text>
+                    <AppText style={styles.resetText}>Reset</AppText>
                 </Pressable>
                 <Pressable
                     accessibilityRole="button"
@@ -546,12 +552,12 @@ function AdminPermissionsPanel(props: {
                     {saving ? (
                         <ActivityIndicator
                             size="small"
-                            color={palette.text.onAccent}
+                            color={theme.colors.accentText}
                         />
                     ) : (
-                        <Text style={styles.saveText}>
+                        <AppText style={styles.saveText}>
                             {isPromote ? 'Make admin' : 'Save'}
-                        </Text>
+                        </AppText>
                     )}
                 </Pressable>
             </View>
@@ -564,6 +570,7 @@ function ProfileCard(props: {
     isPromote: boolean;
     hasAll: boolean;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     const name = props.member.name || props.member.username || 'Member';
     return (
         <View style={styles.profileCard}>
@@ -578,21 +585,21 @@ function ProfileCard(props: {
                     {name}
                 </SafeText>
                 {props.member.username !== '' ? (
-                    <Text style={styles.profileUsername} numberOfLines={1}>
+                    <AppText style={styles.profileUsername} numberOfLines={1}>
                         @{props.member.username}
-                    </Text>
+                    </AppText>
                 ) : null}
                 <View style={styles.roleChip}>
-                    <Text style={styles.roleChipText}>
+                    <AppText style={styles.roleChipText}>
                         {props.isPromote ? 'New admin' : 'Admin'}
-                    </Text>
+                    </AppText>
                 </View>
             </View>
             {props.hasAll ? (
-                <Text style={styles.fullAccessNote}>
+                <AppText style={styles.fullAccessNote}>
                     This admin has full access. Saving converts it to the
                     permissions selected below.
-                </Text>
+                </AppText>
             ) : null}
         </View>
     );
@@ -605,6 +612,8 @@ function PermissionRow(props: {
     saving: boolean;
     onToggle: (key: GroupPermissionKey) => void;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const meta = PERMISSION_META[props.permissionKey];
     const implied = impliedBy(props.permissionKey, props.selected);
     const locked = implied !== null;
@@ -624,15 +633,15 @@ function PermissionRow(props: {
         <View style={styles.permissionRow}>
             <View style={styles.permissionText}>
                 <View style={styles.labelRow}>
-                    <Text style={styles.label}>{meta.en}</Text>
+                    <AppText style={styles.label}>{meta.en}</AppText>
                     {!meta.active ? (
-                        <Text style={styles.inactive}>Inactive</Text>
+                        <AppText style={styles.inactive}>Inactive</AppText>
                     ) : null}
                 </View>
-                <Text style={styles.persian}>{meta.fa}</Text>
-                <Text style={styles.description}>{meta.description}</Text>
+                <AppText style={styles.persian}>{meta.fa}</AppText>
+                <AppText style={styles.description}>{meta.description}</AppText>
                 {caption !== null ? (
-                    <Text style={styles.caption}>{caption}</Text>
+                    <AppText style={styles.caption}>{caption}</AppText>
                 ) : null}
             </View>
             <Switch
@@ -642,16 +651,17 @@ function PermissionRow(props: {
                 accessibilityState={{ checked: effective, disabled }}
                 onValueChange={(): void => props.onToggle(props.permissionKey)}
                 trackColor={{
-                    false: palette.neutral[300],
-                    true: palette.primary[500],
+                    false: theme.colors.textMuted,
+                    true: theme.accent,
                 }}
-                thumbColor={palette.neutral[0]}
+                thumbColor={theme.colors.background}
             />
         </View>
     );
 }
 
 function TopBar(props: { onBack: () => void }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.topBar}>
             <Pressable
@@ -660,17 +670,18 @@ function TopBar(props: { onBack: () => void }): React.ReactElement {
                 style={styles.backButton}
                 onPress={props.onBack}
             >
-                <Text style={styles.backText}>‹</Text>
+                <AppText style={styles.backText}>‹</AppText>
             </Pressable>
-            <Text style={styles.topBarTitle} numberOfLines={1}>
+            <AppText style={styles.topBarTitle} numberOfLines={1}>
                 Admin permissions
-            </Text>
+            </AppText>
             <View style={styles.topBarSpacer} />
         </View>
     );
 }
 
 function LoadingSkeleton(): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.skeletonWrap}>
             <View style={styles.skeletonProfile} />
@@ -689,10 +700,11 @@ function StateBlock(props: {
     detail: string;
     onRetry?: () => void;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.centered}>
-            <Text style={styles.stateTitle}>{props.title}</Text>
-            <Text style={styles.stateDetail}>{props.detail}</Text>
+            <AppText style={styles.stateTitle}>{props.title}</AppText>
+            <AppText style={styles.stateDetail}>{props.detail}</AppText>
             {props.onRetry !== undefined ? (
                 <Pressable
                     accessibilityRole="button"
@@ -700,7 +712,7 @@ function StateBlock(props: {
                     style={styles.retryButton}
                     onPress={props.onRetry}
                 >
-                    <Text style={styles.retryText}>Retry</Text>
+                    <AppText style={styles.retryText}>Retry</AppText>
                 </Pressable>
             ) : null}
             <Pressable
@@ -709,13 +721,14 @@ function StateBlock(props: {
                 style={styles.backLink}
                 onPress={(): void => router.back()}
             >
-                <Text style={styles.backLinkText}>Go back</Text>
+                <AppText style={styles.backLinkText}>Go back</AppText>
             </Pressable>
         </View>
     );
 }
 
 function describeLoadError(error: Error | null): string {
+    const theme = useTheme();
     if (error instanceof ApiError && error.statusCode === 400) {
         return 'This screen is only available for groups.';
     }
@@ -725,10 +738,11 @@ function describeLoadError(error: Error | null): string {
     return 'Could not load this group.';
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: palette.background,
+        backgroundColor: 'transparent',
     },
     topBar: {
         flexDirection: 'row',
@@ -736,8 +750,8 @@ const styles = StyleSheet.create({
         minHeight: 52,
         paddingHorizontal: spacing.xs,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: palette.border.subtle,
-        backgroundColor: palette.surface,
+        borderBottomColor: theme.colors.border,
+        backgroundColor: theme.colors.glassSurface,
     },
     backButton: {
         width: 44,
@@ -748,14 +762,14 @@ const styles = StyleSheet.create({
     backText: {
         fontSize: 32,
         lineHeight: 34,
-        color: palette.neutral[900],
+        color: theme.colors.text,
     },
     topBarTitle: {
         flex: 1,
         textAlign: 'center',
         fontSize: 16,
         fontWeight: '700',
-        color: palette.neutral[900],
+        color: theme.colors.text,
     },
     topBarSpacer: { width: 44 },
     scroll: { flex: 1 },
@@ -771,37 +785,37 @@ const styles = StyleSheet.create({
         marginBottom: spacing.sm,
         padding: spacing.md,
         borderRadius: radii.md,
-        backgroundColor: palette.surface,
+        backgroundColor: theme.colors.glassSurface,
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
     },
     profileText: { flex: 1, minWidth: 0, gap: 2 },
     profileName: {
         fontSize: 17,
         fontWeight: '700',
-        color: palette.neutral[900],
+        color: theme.colors.text,
     },
-    profileUsername: typography.caption,
+    profileUsername: theme.type.caption,
     roleChip: {
         alignSelf: 'flex-start',
         marginTop: spacing.xxs,
         borderRadius: radii.full,
         paddingHorizontal: spacing.xs,
         paddingVertical: 2,
-        backgroundColor: palette.primary[100],
+        backgroundColor: theme.colors.accentSoft,
     },
     roleChipText: {
         fontSize: 11,
         fontWeight: '700',
-        color: palette.primary[700],
+        color: theme.accent,
     },
     fullAccessNote: {
-        ...typography.caption,
+        ...theme.type.caption,
         width: '100%',
         marginTop: spacing.xxs,
     },
     sectionLabel: {
-        ...typography.caption,
+        ...theme.type.caption,
         fontWeight: '700',
         paddingHorizontal: spacing.md,
         paddingTop: spacing.xs,
@@ -818,16 +832,16 @@ const styles = StyleSheet.create({
         borderRadius: radii.full,
         paddingHorizontal: spacing.sm,
         paddingVertical: spacing.xxs,
-        backgroundColor: palette.primary[100],
+        backgroundColor: theme.colors.accentSoft,
     },
     presetPressed: { opacity: 0.7 },
     presetText: {
         fontSize: 13,
         fontWeight: '600',
-        color: palette.primary[700],
+        color: theme.accent,
     },
     groupLabel: {
-        ...typography.caption,
+        ...theme.type.caption,
         fontWeight: '700',
         textTransform: 'uppercase',
         paddingHorizontal: spacing.md,
@@ -841,9 +855,9 @@ const styles = StyleSheet.create({
         minHeight: 84,
         paddingHorizontal: spacing.md,
         paddingVertical: spacing.xs,
-        backgroundColor: palette.surface,
+        backgroundColor: theme.colors.glassSurface,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: palette.border.subtle,
+        borderBottomColor: theme.colors.border,
     },
     permissionText: { flex: 1, gap: 1 },
     labelRow: {
@@ -854,34 +868,34 @@ const styles = StyleSheet.create({
     label: {
         fontSize: 15,
         fontWeight: '600',
-        color: palette.neutral[900],
+        color: theme.colors.text,
     },
     inactive: {
         fontSize: 10,
         fontWeight: '700',
         textTransform: 'uppercase',
-        color: palette.neutral[500],
-        backgroundColor: palette.neutral[100],
+        color: theme.colors.textSecondary,
+        backgroundColor: theme.colors.glassElevated,
         borderRadius: radii.sm,
         paddingHorizontal: 6,
         paddingVertical: 1,
         overflow: 'hidden',
     },
     persian: {
-        ...typography.caption,
-        color: palette.neutral[500],
+        ...theme.type.caption,
+        color: theme.colors.textSecondary,
         writingDirection: 'rtl',
         textAlign: 'right',
         alignSelf: 'flex-start',
         width: '100%',
     },
     description: {
-        ...typography.caption,
-        color: palette.neutral[500],
+        ...theme.type.caption,
+        color: theme.colors.textSecondary,
     },
     caption: {
-        ...typography.caption,
-        color: palette.primary[700],
+        ...theme.type.caption,
+        color: theme.accent,
     },
     actionBar: {
         position: 'absolute',
@@ -895,8 +909,8 @@ const styles = StyleSheet.create({
         paddingTop: spacing.sm,
         paddingHorizontal: spacing.md,
         borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: palette.border.subtle,
-        backgroundColor: palette.surface,
+        borderTopColor: theme.colors.border,
+        backgroundColor: theme.colors.glassSurface,
     },
     reset: {
         flex: 1,
@@ -904,13 +918,13 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         borderRadius: radii.sm,
-        backgroundColor: palette.neutral[100],
+        backgroundColor: theme.colors.glassElevated,
     },
     resetPressed: { opacity: 0.75 },
     resetText: {
         fontSize: 15,
         fontWeight: '600',
-        color: palette.neutral[700],
+        color: theme.colors.text,
     },
     save: {
         flex: 2,
@@ -918,11 +932,11 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         borderRadius: radii.sm,
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
     },
     savePressed: { opacity: 0.85 },
     saveText: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 15,
         fontWeight: '700',
     },
@@ -937,11 +951,11 @@ const styles = StyleSheet.create({
     stateTitle: {
         fontSize: 16,
         fontWeight: '600',
-        color: palette.neutral[700],
+        color: theme.colors.text,
         textAlign: 'center',
     },
     stateDetail: {
-        ...typography.caption,
+        ...theme.type.caption,
         textAlign: 'center',
     },
     retryButton: {
@@ -949,10 +963,10 @@ const styles = StyleSheet.create({
         borderRadius: radii.sm,
         paddingHorizontal: spacing.md,
         paddingVertical: spacing.xs,
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
     },
     retryText: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 14,
         fontWeight: '600',
     },
@@ -960,7 +974,7 @@ const styles = StyleSheet.create({
     backLinkText: {
         fontSize: 14,
         fontWeight: '600',
-        color: palette.primary[700],
+        color: theme.accent,
     },
     skeletonWrap: {
         paddingHorizontal: spacing.md,
@@ -970,11 +984,11 @@ const styles = StyleSheet.create({
     skeletonProfile: {
         height: 96,
         borderRadius: radii.md,
-        backgroundColor: palette.surface,
+        backgroundColor: theme.colors.glassSurface,
     },
     skeletonRow: {
         borderRadius: radii.md,
-        backgroundColor: palette.surface,
+        backgroundColor: theme.colors.glassSurface,
         padding: spacing.md,
         gap: spacing.xs,
     },
@@ -982,12 +996,12 @@ const styles = StyleSheet.create({
         height: 10,
         width: '55%',
         borderRadius: 5,
-        backgroundColor: palette.neutral[100],
+        backgroundColor: theme.colors.glassElevated,
     },
     skeletonLineWide: {
         height: 12,
         width: '85%',
         borderRadius: 6,
-        backgroundColor: palette.neutral[100],
+        backgroundColor: theme.colors.glassElevated,
     },
 });

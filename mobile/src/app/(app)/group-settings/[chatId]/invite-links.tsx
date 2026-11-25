@@ -13,7 +13,9 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { Screen, palette, radii, spacing } from '../../../../shared/components';
+import { Screen, palette, radii, spacing,
+    AppText,
+} from '../../../../shared/components';
 import { dialog, toast } from '../../../../shared/dialog';
 import { purgeChatFromCaches } from '../../../../features/chats';
 import { describeInviteLinkError } from '../../../../features/groups/group-errors';
@@ -43,6 +45,8 @@ import {
     useGroupRemovedEvent,
     useGroupUpdatedEvents,
 } from '../../../../features/groups/use-group';
+import { useTheme, useThemedStyles, withAlpha } from '../../../../shared/theme';
+import type { AppTheme } from '../../../../shared/theme';
 
 /**
  * Invite links screen (`/group-settings/:chatId/invite-links`).
@@ -67,22 +71,23 @@ function parseChatId(value: string | string[] | undefined): number | null {
 }
 
 export default function InviteLinksScreen(): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     const params = useLocalSearchParams<RouteParams>();
     const chatId = parseChatId(params.chatId);
     if (chatId === null) {
         return (
             <Screen style={styles.centered} withTopInset={true}>
-                <Text style={styles.stateTitle}>Invite links unavailable</Text>
-                <Text style={styles.stateDetail}>
+                <AppText style={styles.stateTitle}>Invite links unavailable</AppText>
+                <AppText style={styles.stateDetail}>
                     This group link is not valid.
-                </Text>
+                </AppText>
                 <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Back to chats"
                     style={styles.primaryButton}
                     onPress={(): void => router.replace('/(app)')}
                 >
-                    <Text style={styles.primaryButtonText}>Back to chats</Text>
+                    <AppText style={styles.primaryButtonText}>Back to chats</AppText>
                 </Pressable>
             </Screen>
         );
@@ -91,6 +96,8 @@ export default function InviteLinksScreen(): React.ReactElement {
 }
 
 function InviteLinksPanel({ chatId }: { chatId: number }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const queryClient = useQueryClient();
     const infoQuery = useGroupInfo(chatId);
     const linksQuery = useInviteLinks(chatId);
@@ -269,10 +276,10 @@ function InviteLinksPanel({ chatId }: { chatId: number }): React.ReactElement {
 
     const listHeader = (
         <View>
-            <Text style={styles.intro}>
+            <AppText style={styles.intro}>
                 Anyone with an active link can join this group. Links can expire
                 or stop working after a number of uses.
-            </Text>
+            </AppText>
             <View style={styles.createRow}>
                 <Pressable
                     accessibilityRole="button"
@@ -289,21 +296,21 @@ function InviteLinksPanel({ chatId }: { chatId: number }): React.ReactElement {
                         pressed && styles.primaryButtonPressed,
                     ]}
                 >
-                    <Text style={styles.primaryButtonText}>Create link</Text>
+                    <AppText style={styles.primaryButtonText}>Create link</AppText>
                 </Pressable>
-                <Text style={styles.countText}>
+                <AppText style={styles.countText}>
                     {activeCount} / {maxActive} active
-                </Text>
+                </AppText>
             </View>
             {atLimit && (
-                <Text style={styles.limitNote}>
+                <AppText style={styles.limitNote}>
                     Too many active links. Revoke one first.
-                </Text>
+                </AppText>
             )}
             {notice !== null && (
-                <Text style={styles.notice} accessibilityLiveRegion="polite">
+                <AppText style={styles.notice} accessibilityLiveRegion="polite">
                     {notice}
-                </Text>
+                </AppText>
             )}
             {linksQuery.isError && page !== undefined && (
                 <Pressable
@@ -313,9 +320,9 @@ function InviteLinksPanel({ chatId }: { chatId: number }): React.ReactElement {
                         void linksQuery.refetch();
                     }}
                 >
-                    <Text style={styles.inlineError}>
+                    <AppText style={styles.inlineError}>
                         Could not refresh. Tap to retry.
-                    </Text>
+                    </AppText>
                 </Pressable>
             )}
         </View>
@@ -329,11 +336,11 @@ function InviteLinksPanel({ chatId }: { chatId: number }): React.ReactElement {
                 style={styles.backButton}
                 onPress={(): void => router.back()}
             >
-                <Text style={styles.backText}>‹</Text>
+                <AppText style={styles.backText}>‹</AppText>
             </Pressable>
-            <Text style={styles.topBarTitle} numberOfLines={1}>
+            <AppText style={styles.topBarTitle} numberOfLines={1}>
                 Invite links
-            </Text>
+            </AppText>
             <View style={styles.topBarSpacer} />
         </View>
     );
@@ -352,12 +359,12 @@ function InviteLinksPanel({ chatId }: { chatId: number }): React.ReactElement {
                         <LoadingSkeleton />
                     ) : linksQuery.isError ? (
                         <View style={styles.listState}>
-                            <Text style={styles.stateTitle}>
+                            <AppText style={styles.stateTitle}>
                                 Could not load invite links
-                            </Text>
-                            <Text style={styles.stateDetail}>
+                            </AppText>
+                            <AppText style={styles.stateDetail}>
                                 {describeInviteLinkError(linksQuery.error)}
-                            </Text>
+                            </AppText>
                             <Pressable
                                 accessibilityRole="button"
                                 accessibilityLabel="Retry loading invite links"
@@ -366,19 +373,19 @@ function InviteLinksPanel({ chatId }: { chatId: number }): React.ReactElement {
                                     void linksQuery.refetch();
                                 }}
                             >
-                                <Text style={styles.primaryButtonText}>
+                                <AppText style={styles.primaryButtonText}>
                                     Retry
-                                </Text>
+                                </AppText>
                             </Pressable>
                         </View>
                     ) : (
                         <View style={styles.listState}>
-                            <Text style={styles.stateTitle}>
+                            <AppText style={styles.stateTitle}>
                                 No invite links yet
-                            </Text>
-                            <Text style={styles.stateDetail}>
+                            </AppText>
+                            <AppText style={styles.stateDetail}>
                                 Create one to let people join.
-                            </Text>
+                            </AppText>
                         </View>
                     )
                 }
@@ -389,9 +396,9 @@ function InviteLinksPanel({ chatId }: { chatId: number }): React.ReactElement {
                     return (
                         <View>
                             {firstInactive && (
-                                <Text style={styles.sectionTitle}>
+                                <AppText style={styles.sectionTitle}>
                                     Inactive
-                                </Text>
+                                </AppText>
                             )}
                             <InviteLinkCard
                                 link={item}
@@ -425,7 +432,7 @@ function InviteLinksPanel({ chatId }: { chatId: number }): React.ReactElement {
                             void linksQuery.refetch();
                             void infoQuery.refetch();
                         }}
-                        tintColor={palette.primary[500]}
+                        tintColor={theme.accent}
                     />
                 }
             />
@@ -459,6 +466,7 @@ function InviteLinkCard(props: {
     onShare: () => void;
     onRevoke: () => void;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     const { link } = props;
     const active = link.status === 'active';
     return (
@@ -472,19 +480,19 @@ function InviteLinkCard(props: {
                         active && styles.statusBadgeActive,
                     ]}
                 >
-                    <Text
+                    <AppText
                         style={[
                             styles.statusText,
                             active && styles.statusTextActive,
                         ]}
                     >
                         {inviteStatusLabel(link.status)}
-                    </Text>
+                    </AppText>
                 </View>
-                <Text style={styles.usesText}>{inviteUsesLabel(link)}</Text>
+                <AppText style={styles.usesText}>{inviteUsesLabel(link)}</AppText>
             </View>
 
-            <Text
+            <AppText
                 style={styles.url}
                 numberOfLines={1}
                 ellipsizeMode="middle"
@@ -493,13 +501,13 @@ function InviteLinkCard(props: {
                 onPress={props.onOpen}
             >
                 {inviteLinkUrl(link.code)}
-            </Text>
-            <Text style={styles.meta} numberOfLines={1}>
+            </AppText>
+            <AppText style={styles.meta} numberOfLines={1}>
                 {inviteCreatedByLabel(link, props.now)}
-            </Text>
-            <Text style={styles.meta} numberOfLines={1}>
+            </AppText>
+            <AppText style={styles.meta} numberOfLines={1}>
                 {inviteExpiryLabel(link.expiresAt, props.now)}
-            </Text>
+            </AppText>
 
             {active && (
                 <View style={styles.actions}>
@@ -522,7 +530,7 @@ function InviteLinkCard(props: {
                     />
                 </View>
             )}
-            {props.copied && <Text style={styles.copiedText}>Link copied</Text>}
+            {props.copied && <AppText style={styles.copiedText}>Link copied</AppText>}
         </View>
     );
 }
@@ -534,6 +542,7 @@ function CardAction(props: {
     destructive?: boolean;
     disabled?: boolean;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <Pressable
             accessibilityRole="button"
@@ -546,14 +555,14 @@ function CardAction(props: {
                 pressed && styles.cardActionPressed,
             ]}
         >
-            <Text
+            <AppText
                 style={[
                     styles.cardActionText,
                     props.destructive === true && styles.cardActionDestructive,
                 ]}
             >
                 {props.label}
-            </Text>
+            </AppText>
         </Pressable>
     );
 }
@@ -568,6 +577,8 @@ function CreateInviteLinkSheet(props: {
     onClose: () => void;
     onSubmit: () => void;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     return (
         <Modal
             visible={props.visible}
@@ -577,13 +588,13 @@ function CreateInviteLinkSheet(props: {
         >
             <View style={styles.sheetBackdrop}>
                 <View style={styles.sheet}>
-                    <Text style={styles.sheetTitle}>Create invite link</Text>
-                    <Text style={styles.sheetHint}>
+                    <AppText style={styles.sheetTitle}>Create invite link</AppText>
+                    <AppText style={styles.sheetHint}>
                         The link works until it is revoked, expires or reaches
                         its usage limit.
-                    </Text>
+                    </AppText>
 
-                    <Text style={styles.sheetLabel}>Expiry</Text>
+                    <AppText style={styles.sheetLabel}>Expiry</AppText>
                     <ChoiceRow
                         choices={INVITE_EXPIRY_CHOICES}
                         value={props.expiry}
@@ -591,7 +602,7 @@ function CreateInviteLinkSheet(props: {
                         onChange={props.onChangeExpiry}
                     />
 
-                    <Text style={styles.sheetLabel}>Usage limit</Text>
+                    <AppText style={styles.sheetLabel}>Usage limit</AppText>
                     <ChoiceRow
                         choices={INVITE_MAX_USES_CHOICES}
                         value={props.maxUses}
@@ -607,9 +618,9 @@ function CreateInviteLinkSheet(props: {
                             onPress={props.onClose}
                             style={styles.secondaryButton}
                         >
-                            <Text style={styles.secondaryButtonText}>
+                            <AppText style={styles.secondaryButtonText}>
                                 Cancel
-                            </Text>
+                            </AppText>
                         </Pressable>
                         <Pressable
                             accessibilityRole="button"
@@ -627,12 +638,12 @@ function CreateInviteLinkSheet(props: {
                             {props.busy ? (
                                 <ActivityIndicator
                                     size="small"
-                                    color={palette.text.onAccent}
+                                    color={theme.colors.accentText}
                                 />
                             ) : (
-                                <Text style={styles.primaryButtonText}>
+                                <AppText style={styles.primaryButtonText}>
                                     Create
-                                </Text>
+                                </AppText>
                             )}
                         </Pressable>
                     </View>
@@ -648,6 +659,7 @@ function ChoiceRow(props: {
     disabled: boolean;
     onChange: (value: number | null) => void;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.chipRow}>
             {props.choices.map((choice) => {
@@ -665,14 +677,14 @@ function ChoiceRow(props: {
                         onPress={(): void => props.onChange(choice.value)}
                         style={[styles.chip, selected && styles.chipSelected]}
                     >
-                        <Text
+                        <AppText
                             style={[
                                 styles.chipText,
                                 selected && styles.chipTextSelected,
                             ]}
                         >
                             {choice.label}
-                        </Text>
+                        </AppText>
                     </Pressable>
                 );
             })}
@@ -681,6 +693,8 @@ function ChoiceRow(props: {
 }
 
 function LoadingSkeleton(): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.skeletonWrap}>
             {[0, 1, 2].map((index) => (
@@ -694,10 +708,11 @@ function LoadingSkeleton(): React.ReactElement {
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: palette.background,
+        backgroundColor: 'transparent',
     },
     topBar: {
         flexDirection: 'row',
@@ -705,8 +720,8 @@ const styles = StyleSheet.create({
         minHeight: 52,
         paddingHorizontal: spacing.xs,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: palette.neutral[100],
-        backgroundColor: palette.elevated,
+        borderBottomColor: theme.colors.border,
+        backgroundColor: theme.colors.glassElevated,
     },
     backButton: {
         width: 44,
@@ -717,14 +732,14 @@ const styles = StyleSheet.create({
     backText: {
         fontSize: 32,
         lineHeight: 34,
-        color: palette.neutral[900],
+        color: theme.colors.text,
     },
     topBarTitle: {
         flex: 1,
         textAlign: 'center',
         fontSize: 16,
         fontWeight: '700',
-        color: palette.neutral[900],
+        color: theme.colors.text,
     },
     topBarSpacer: { width: 44 },
     listContent: {
@@ -733,7 +748,7 @@ const styles = StyleSheet.create({
     intro: {
         paddingHorizontal: spacing.md,
         paddingTop: spacing.md,
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
         fontSize: 14,
         lineHeight: 20,
     },
@@ -746,32 +761,32 @@ const styles = StyleSheet.create({
         paddingBottom: spacing.xs,
     },
     countText: {
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
         fontSize: 13,
     },
     limitNote: {
         paddingHorizontal: spacing.md,
         paddingBottom: spacing.xs,
-        color: palette.semantic.danger,
+        color: theme.colors.danger,
         fontSize: 13,
     },
     notice: {
         paddingHorizontal: spacing.md,
         paddingVertical: spacing.xxs,
-        color: palette.semantic.success,
+        color: theme.colors.success,
         fontSize: 13,
     },
     inlineError: {
         paddingHorizontal: spacing.md,
         paddingVertical: spacing.xxs,
-        color: palette.semantic.danger,
+        color: theme.colors.danger,
         fontSize: 13,
     },
     sectionTitle: {
         paddingHorizontal: spacing.md,
         paddingTop: spacing.md,
         paddingBottom: spacing.xs,
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
         fontSize: 13,
         fontWeight: '700',
         textTransform: 'uppercase',
@@ -781,13 +796,13 @@ const styles = StyleSheet.create({
         marginBottom: spacing.sm,
         padding: spacing.md,
         borderRadius: radii.md,
-        backgroundColor: palette.elevated,
+        backgroundColor: theme.colors.glassElevated,
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
         gap: spacing.xxs,
     },
     cardHighlighted: {
-        borderColor: palette.primary[500],
+        borderColor: theme.accent,
         borderWidth: 2,
     },
     cardTop: {
@@ -800,32 +815,32 @@ const styles = StyleSheet.create({
         borderRadius: radii.sm,
         paddingHorizontal: spacing.xs,
         paddingVertical: 2,
-        backgroundColor: palette.neutral[100],
+        backgroundColor: theme.colors.glassElevated,
     },
     statusBadgeActive: {
-        backgroundColor: palette.semantic.success,
+        backgroundColor: theme.colors.success,
     },
     statusText: {
         fontSize: 11,
         fontWeight: '700',
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
     },
     statusTextActive: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
     },
     usesText: {
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
         fontSize: 12,
     },
     url: {
         marginTop: spacing.xxs,
-        color: palette.primary[700],
+        color: theme.accent,
         fontSize: 14,
         fontWeight: '600',
         textDecorationLine: 'underline',
     },
     meta: {
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
         fontSize: 12,
     },
     actions: {
@@ -837,22 +852,22 @@ const styles = StyleSheet.create({
     cardAction: {
         borderRadius: radii.sm,
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.primary[500],
+        borderColor: theme.accent,
         paddingHorizontal: spacing.sm,
         paddingVertical: 5,
     },
-    cardActionPressed: { backgroundColor: palette.primary[100] },
+    cardActionPressed: { backgroundColor: theme.colors.accentSoft },
     cardActionText: {
-        color: palette.primary[700],
+        color: theme.accent,
         fontSize: 13,
         fontWeight: '600',
     },
     cardActionDestructive: {
-        color: palette.semantic.danger,
+        color: theme.colors.danger,
     },
     copiedText: {
         marginTop: spacing.xxs,
-        color: palette.semantic.success,
+        color: theme.colors.success,
         fontSize: 12,
     },
     listState: {
@@ -864,10 +879,10 @@ const styles = StyleSheet.create({
     stateTitle: {
         fontSize: 16,
         fontWeight: '600',
-        color: palette.neutral[700],
+        color: theme.colors.text,
     },
     stateDetail: {
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
         textAlign: 'center',
         fontSize: 13,
     },
@@ -876,14 +891,14 @@ const styles = StyleSheet.create({
         borderRadius: radii.sm,
         paddingHorizontal: spacing.md,
         paddingVertical: spacing.xs,
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
         minWidth: 96,
         alignItems: 'center',
     },
     primaryButtonPressed: { opacity: 0.85 },
     primaryButtonDisabled: { opacity: 0.45 },
     primaryButtonText: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 14,
         fontWeight: '600',
     },
@@ -893,7 +908,7 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.xs,
     },
     secondaryButtonText: {
-        color: palette.primary[700],
+        color: theme.accent,
         fontSize: 14,
         fontWeight: '600',
     },
@@ -903,15 +918,15 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         gap: spacing.xs,
         padding: spacing.lg,
-        backgroundColor: palette.background,
+        backgroundColor: theme.colors.background,
     },
     sheetBackdrop: {
         flex: 1,
         justifyContent: 'flex-end',
-        backgroundColor: 'rgba(0,0,0,0.35)',
+        backgroundColor: withAlpha(theme.colors.background, 0.62),
     },
     sheet: {
-        backgroundColor: palette.elevated,
+        backgroundColor: theme.colors.glassElevated,
         borderTopLeftRadius: radii.md,
         borderTopRightRadius: radii.md,
         padding: spacing.md,
@@ -921,10 +936,10 @@ const styles = StyleSheet.create({
     sheetTitle: {
         fontSize: 18,
         fontWeight: '700',
-        color: palette.neutral[900],
+        color: theme.colors.text,
     },
     sheetHint: {
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
         fontSize: 13,
         lineHeight: 18,
     },
@@ -932,7 +947,7 @@ const styles = StyleSheet.create({
         marginTop: spacing.xs,
         fontSize: 13,
         fontWeight: '700',
-        color: palette.neutral[700],
+        color: theme.colors.text,
     },
     chipRow: {
         flexDirection: 'row',
@@ -943,18 +958,18 @@ const styles = StyleSheet.create({
         borderRadius: radii.full,
         paddingHorizontal: spacing.sm,
         paddingVertical: 6,
-        backgroundColor: palette.neutral[100],
+        backgroundColor: theme.colors.glassElevated,
     },
     chipSelected: {
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
     },
     chipText: {
-        color: palette.neutral[700],
+        color: theme.colors.text,
         fontSize: 13,
         fontWeight: '600',
     },
     chipTextSelected: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
     },
     sheetActions: {
         flexDirection: 'row',
@@ -973,7 +988,7 @@ const styles = StyleSheet.create({
     },
     skeletonCard: {
         borderRadius: radii.md,
-        backgroundColor: palette.elevated,
+        backgroundColor: theme.colors.glassElevated,
         padding: spacing.md,
         gap: spacing.xs,
     },
@@ -981,18 +996,18 @@ const styles = StyleSheet.create({
         height: 10,
         width: '55%',
         borderRadius: 5,
-        backgroundColor: palette.neutral[100],
+        backgroundColor: theme.colors.glassElevated,
     },
     skeletonLineWide: {
         height: 12,
         width: '85%',
         borderRadius: 6,
-        backgroundColor: palette.neutral[100],
+        backgroundColor: theme.colors.glassElevated,
     },
     skeletonLineShort: {
         height: 10,
         width: '25%',
         borderRadius: 5,
-        backgroundColor: palette.neutral[100],
+        backgroundColor: theme.colors.glassElevated,
     },
 });

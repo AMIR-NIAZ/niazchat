@@ -3,6 +3,8 @@ import { StyleSheet, View } from 'react-native';
 import { palette } from '../../shared/theme';
 import { ChatRowContent } from './chat-row-content';
 import type { ChatPreview } from './chats-model';
+import { shadows, useTheme, useThemedStyles } from '../../shared/theme';
+import type { AppTheme } from '../../shared/theme';
 
 /**
  * Lifted chat row over the popup backdrop: the same content as the live row,
@@ -21,6 +23,7 @@ export const ChatRowPreview = memo(function ChatRowPreview({
     previewText: string;
     width: number;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <View pointerEvents="none" style={[styles.card, { width }]}>
             <ChatRowContent
@@ -32,13 +35,14 @@ export const ChatRowPreview = memo(function ChatRowPreview({
     );
 });
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     card: {
-        backgroundColor: palette.elevated,
+        backgroundColor: theme.colors.glassElevated,
         borderRadius: 14,
         borderWidth: StyleSheet.hairlineWidth * 2,
-        borderColor: palette.border.strong,
-        shadowColor: '#7545B8',
+        borderColor: theme.colors.borderStrong,
+        shadowColor: shadows.floating.shadowColor,
         shadowOpacity: 0.35,
         shadowRadius: 14,
         shadowOffset: { width: 0, height: 8 },

@@ -16,6 +16,8 @@ import {
 } from '../../shared/components';
 import { useCreateGroup } from '../../features/chats';
 import { describeLookupError, getMe, getUserByUsername } from '../../features/users';
+import { useTheme, useThemedStyles } from '../../shared/theme';
+import type { AppTheme } from '../../shared/theme';
 
 /**
  * Group creation (`POST /chats/create`).
@@ -45,6 +47,8 @@ interface MemberChip {
 }
 
 export default function CreateGroupScreen(): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
   const router = useRouter();
   const createGroup = useCreateGroup();
   const [usernameInput, setUsernameInput] = useState('');
@@ -151,9 +155,9 @@ export default function CreateGroupScreen(): React.ReactElement {
         autoCapitalize="none"
         autoCorrect={false}
       />
-      <Text style={[typography.caption, styles.error]}>
+      <AppText style={[theme.type.caption, styles.error]}>
         {errors.members?.message ?? lookup.error ?? ''}
-      </Text>
+      </AppText>
 
       <Pressable
         onPress={(): void => {
@@ -161,9 +165,9 @@ export default function CreateGroupScreen(): React.ReactElement {
         }}
         style={styles.addMember}
       >
-        <Text style={styles.addMemberText}>
+        <AppText style={styles.addMemberText}>
           {lookup.pending ? 'Looking up…' : 'Lookup & add (optional)'}
-        </Text>
+        </AppText>
       </Pressable>
 
       {chips.length > 0 && (
@@ -184,7 +188,7 @@ export default function CreateGroupScreen(): React.ReactElement {
       )}
 
       {createGroup.isError && (
-        <Text style={[typography.caption, styles.error]}>{createGroup.error.message}</Text>
+        <AppText style={[theme.type.caption, styles.error]}>{createGroup.error.message}</AppText>
       )}
 
       <View style={styles.actions}>
@@ -210,26 +214,27 @@ export default function CreateGroupScreen(): React.ReactElement {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
   screen: { gap: spacing.sm, paddingHorizontal: spacing.lg },
-  error: { color: palette.semantic.danger },
+  error: { color: theme.colors.danger },
   addMember: {
     alignSelf: 'flex-start',
     borderWidth: 1,
-    borderColor: palette.primary[500],
+    borderColor: theme.accent,
     borderRadius: 8,
     paddingHorizontal: spacing.sm,
     paddingVertical: 6,
   },
-  addMemberText: { color: palette.primary[600], fontSize: 13, fontWeight: '600' },
+  addMemberText: { color: theme.accent, fontSize: 13, fontWeight: '600' },
   chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xxs },
   chip: {
     maxWidth: '100%',
-    backgroundColor: palette.primary[100],
+    backgroundColor: theme.colors.accentSoft,
     borderRadius: 999,
     paddingHorizontal: spacing.sm,
     paddingVertical: 6,
   },
-  chipText: { color: palette.primary[700], fontSize: 12 },
+  chipText: { color: theme.accent, fontSize: 12 },
   actions: { flexDirection: 'row', gap: spacing.xs, marginTop: spacing.md },
 });

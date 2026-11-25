@@ -1,8 +1,10 @@
 import { memo, useCallback } from 'react';
-import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Link2 } from 'lucide-react-native';
-import { palette, radii, spacing } from '../../shared/theme';
+import { radii, spacing } from '../../shared/theme';
+import { useTheme, useThemedStyles } from '../../shared/theme/theme-provider';
+import type { AppTheme } from '../../shared/theme/theme-provider';
 import type { SharedLinkItemDto } from '../../core/api/dto/shared-content.dto';
 import { SafeText, UserAvatar } from '../../shared/components';
 import { toast } from '../../shared/dialog';
@@ -13,6 +15,9 @@ import { sharedDateLabel } from './shared-content-model';
  * One link in the Links tab: the domain is emphasized, the message text around
  * it is a two-line snippet, and the row carries the date (plus the sender in a
  * group). Tap opens the link; long-press copies it.
+ *
+ * Colours and typography come from the active theme; the row reads it itself
+ * so it repaints while memoized.
  */
 export const SharedLinkRow = memo(function SharedLinkRow({
     item,
@@ -21,6 +26,9 @@ export const SharedLinkRow = memo(function SharedLinkRow({
     item: SharedLinkItemDto;
     showSender: boolean;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
+
     const open = useCallback((): void => {
         void Linking.openURL(item.url).catch((): void => {
             toast.show('Could not open this link.', { tone: 'danger' });
@@ -43,7 +51,7 @@ export const SharedLinkRow = memo(function SharedLinkRow({
             style={({ pressed }) => [styles.row, pressed && styles.pressed]}
         >
             <View style={styles.icon}>
-                <Link2 size={18} color={palette.primary[600]} strokeWidth={2} />
+                <Link2 size={18} color={theme.accent} strokeWidth={2} />
             </View>
             <View style={styles.body}>
                 {showSender && (
@@ -68,59 +76,63 @@ export const SharedLinkRow = memo(function SharedLinkRow({
                     </SafeText>
                 )}
             </View>
-            <Text style={styles.date} numberOfLines={2}>
+            <SafeText
+                style={styles.date}
+                lines={2}
+                align="content"
+                shrink={false}
+            >
                 {sharedDateLabel(item.createdAt)}
-            </Text>
+            </SafeText>
         </Pressable>
     );
 });
 
-const styles = StyleSheet.create({
-    row: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        gap: spacing.sm,
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.xs,
-        height: 84,
-    },
-    pressed: { opacity: 0.7 },
-    icon: {
-        width: 36,
-        height: 36,
-        borderRadius: radii.full,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: palette.primary[100],
-    },
-    body: { flex: 1, minWidth: 0, gap: 1 },
-    senderLine: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.xxs,
-        minWidth: 0,
-    },
-    senderName: {
-        color: palette.text.secondary,
-        fontSize: 11,
-        fontWeight: '600',
-        flexShrink: 1,
-    },
-    domain: {
-        color: palette.primary[700],
-        fontSize: 14,
-        fontWeight: '700',
-    },
-    snippet: {
-        color: palette.text.secondary,
-        fontSize: 12,
-        lineHeight: 16,
-    },
-    date: {
-        color: palette.text.muted,
-        fontSize: 10,
-        width: 74,
-        textAlign: 'right',
-        fontVariant: ['tabular-nums'],
-    },
-});
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+        row: {
+            flexDirection: 'row',
+            alignItems: 'flex-start',
+            gap: spacing.sm,
+            paddingHorizontal: spacing.md,
+            paddingVertical: spacing.xs,
+            height: 84,
+        },
+        pressed: { opacity: 0.7 },
+        icon: {
+            width: 36,
+            height: 36,
+            borderRadius: radii.full,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: theme.colors.accentSoft,
+            borderWidth: 1,
+            borderColor: theme.colors.accentBorder,
+        },
+        body: { flex: 1, minWidth: 0, gap: 1 },
+        senderLine: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: spacing.xxs,
+            minWidth: 0,
+        },
+        senderName: {
+            ...theme.type.caption,
+            color: theme.colors.textSecondary,
+        },
+        domain: {
+            ...theme.type.label,
+            color: theme.accent,
+        },
+        snippet: {
+            ...theme.type.caption,
+            color: theme.colors.textSecondary,
+        },
+        date: {
+            ...theme.type.micro,
+            color: theme.colors.textMuted,
+            width: 74,
+            textAlign: 'right',
+            fontVariant: ['tabular-nums'],
+        },
+    });

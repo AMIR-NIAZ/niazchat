@@ -12,7 +12,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { palette, radii, spacing, typography } from '../../shared/theme';
-import { SafeText, UserAvatar } from '../../shared/components';
+import { SafeText, UserAvatar,
+    AppText,
+} from '../../shared/components';
 import { useDebouncedValue } from '../../shared/hooks/use-debounced-value';
 import { getChatDisplay, isPrivateChat } from '../chats/chats-model';
 import { useChats } from '../chats/use-chats';
@@ -30,6 +32,8 @@ import {
     toggleTarget,
 } from './forward-helpers';
 import { forwardChatMessages } from './messages-socket-api';
+import { useTheme, useThemedStyles } from '../../shared/theme';
+import type { AppTheme } from '../../shared/theme';
 
 interface ForwardPickerProps {
     visible: boolean;
@@ -46,6 +50,8 @@ export function ForwardPicker({
     onClose,
     onFinished,
 }: ForwardPickerProps): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const insets = useSafeAreaInsets();
     const chats = useChats();
     const [query, setQuery] = useState('');
@@ -179,9 +185,9 @@ export function ForwardPicker({
                         onPress={onClose}
                         style={styles.headerButton}
                     >
-                        <Text style={styles.cancel}>Cancel</Text>
+                        <AppText style={styles.cancel}>Cancel</AppText>
                     </Pressable>
-                    <Text style={styles.title}>Forward to…</Text>
+                    <AppText style={styles.title}>Forward to…</AppText>
                     <View style={styles.headerButton} />
                 </View>
 
@@ -189,7 +195,7 @@ export function ForwardPicker({
                     value={query}
                     onChangeText={setQuery}
                     placeholder="Search chats"
-                    placeholderTextColor={palette.neutral[500]}
+                    placeholderTextColor={theme.colors.textSecondary}
                     style={styles.search}
                     accessibilityLabel="Search chats"
                 />
@@ -224,7 +230,7 @@ export function ForwardPicker({
 
                 {chats.isLoading && chats.data === undefined ? (
                     <View style={styles.center}>
-                        <ActivityIndicator color={palette.primary[500]} />
+                        <ActivityIndicator color={theme.accent} />
                     </View>
                 ) : (
                     <FlatList
@@ -233,11 +239,11 @@ export function ForwardPicker({
                         keyboardShouldPersistTaps="handled"
                         contentContainerStyle={styles.list}
                         ListEmptyComponent={
-                            <Text style={styles.empty}>
+                            <AppText style={styles.empty}>
                                 {chats.error !== null
                                     ? 'Could not load your chats.'
                                     : 'No chats match this search.'}
-                            </Text>
+                            </AppText>
                         }
                         renderItem={({ item }): React.ReactElement => {
                             const isSelected = selected.has(item.id);
@@ -274,9 +280,9 @@ export function ForwardPicker({
                                             isSelected && styles.checkOn,
                                         ]}
                                     >
-                                        <Text style={styles.checkText}>
+                                        <AppText style={styles.checkText}>
                                             {isSelected ? '✓' : ''}
-                                        </Text>
+                                        </AppText>
                                     </View>
                                     <UserAvatar
                                         userId={display.userId ?? item.id}
@@ -291,14 +297,14 @@ export function ForwardPicker({
                                         >
                                             {display.title}
                                         </SafeText>
-                                        <Text
+                                        <AppText
                                             style={styles.rowType}
                                             numberOfLines={1}
                                         >
                                             {isPrivateChat(item)
                                                 ? 'Private chat'
                                                 : 'Group chat'}
-                                        </Text>
+                                        </AppText>
                                     </View>
                                 </Pressable>
                             );
@@ -308,7 +314,7 @@ export function ForwardPicker({
 
                 {error !== null && (
                     <View style={styles.errorBox}>
-                        <Text style={styles.errorText}>{error}</Text>
+                        <AppText style={styles.errorText}>{error}</AppText>
                         {failed.length > 0 && (
                             <Pressable
                                 accessibilityRole="button"
@@ -318,9 +324,9 @@ export function ForwardPicker({
                                 }}
                                 style={styles.retry}
                             >
-                                <Text style={styles.retryText}>
+                                <AppText style={styles.retryText}>
                                     Retry failed
-                                </Text>
+                                </AppText>
                             </Pressable>
                         )}
                     </View>
@@ -328,16 +334,16 @@ export function ForwardPicker({
 
                 {failed.length > 0 && error === null && (
                     <View style={styles.errorBox}>
-                        <Text style={styles.errorTitle}>
+                        <AppText style={styles.errorTitle}>
                             Could not forward to:
-                        </Text>
+                        </AppText>
                         {results?.results
                             .filter((row) => !row.ok)
                             .map((row) => (
-                                <Text key={row.chatId} style={styles.errorText}>
+                                <AppText key={row.chatId} style={styles.errorText}>
                                     {chatLabelById(eligibleChats, row.chatId)}:{' '}
                                     {row.message}
-                                </Text>
+                                </AppText>
                             ))}
                         {failed.length > 0 && (
                             <Pressable
@@ -348,20 +354,20 @@ export function ForwardPicker({
                                 }}
                                 style={styles.retry}
                             >
-                                <Text style={styles.retryText}>
+                                <AppText style={styles.retryText}>
                                     Retry failed
-                                </Text>
+                                </AppText>
                             </Pressable>
                         )}
                     </View>
                 )}
 
                 <View style={styles.footer}>
-                    <Text style={styles.summary}>
+                    <AppText style={styles.summary}>
                         {messageIds.length} message
                         {messageIds.length === 1 ? '' : 's'} to {selected.size}{' '}
                         chat{selected.size === 1 ? '' : 's'}
-                    </Text>
+                    </AppText>
                     <Pressable
                         accessibilityRole="button"
                         accessibilityLabel="Send forwarded messages"
@@ -375,10 +381,10 @@ export function ForwardPicker({
                         {sending ? (
                             <ActivityIndicator
                                 size="small"
-                                color={palette.text.onAccent}
+                                color={theme.colors.accentText}
                             />
                         ) : (
-                            <Text style={styles.sendText}>Send</Text>
+                            <AppText style={styles.sendText}>Send</AppText>
                         )}
                     </Pressable>
                 </View>
@@ -388,12 +394,14 @@ export function ForwardPicker({
 }
 
 function chatLabelById(chats: ChatPreview[], chatId: number): string {
+    const theme = useTheme();
     const chat = chats.find((row) => row.id === chatId);
     return chat === undefined ? `Chat ${chatId}` : chatForwardLabel(chat);
 }
 
-const styles = StyleSheet.create({
-    screen: { flex: 1, backgroundColor: palette.neutral[0] },
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+    screen: { flex: 1, backgroundColor: theme.colors.background },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -402,17 +410,17 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.sm,
     },
     headerButton: { minWidth: 64 },
-    title: { ...typography.title, fontSize: 19 },
-    cancel: { color: palette.primary[600], fontSize: 15, fontWeight: '600' },
+    title: { ...theme.type.title, fontSize: 19 },
+    cancel: { color: theme.accent, fontSize: 15, fontWeight: '600' },
     search: {
         marginHorizontal: spacing.md,
         borderWidth: 1,
-        borderColor: palette.neutral[300],
+        borderColor: theme.colors.textMuted,
         borderRadius: radii.lg,
         paddingHorizontal: spacing.sm,
         paddingVertical: spacing.xs + 2,
-        color: palette.neutral[900],
-        backgroundColor: palette.neutral[50],
+        color: theme.colors.text,
+        backgroundColor: theme.colors.glassSurface,
     },
     chips: { gap: spacing.xs, padding: spacing.sm },
     chip: {
@@ -420,17 +428,17 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.sm,
         paddingVertical: spacing.xs,
         borderRadius: radii.full,
-        backgroundColor: palette.primary[100],
+        backgroundColor: theme.colors.accentSoft,
     },
     chipText: {
-        color: palette.primary[700],
+        color: theme.accent,
         fontSize: 12,
         fontWeight: '600',
     },
     center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
     list: { paddingHorizontal: spacing.md, paddingBottom: spacing.md },
     empty: {
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
         textAlign: 'center',
         paddingVertical: spacing.xl,
     },
@@ -440,47 +448,47 @@ const styles = StyleSheet.create({
         gap: spacing.sm,
         paddingVertical: spacing.sm,
         borderBottomWidth: 1,
-        borderBottomColor: palette.neutral[100],
+        borderBottomColor: theme.colors.border,
     },
-    rowPressed: { backgroundColor: palette.neutral[50] },
+    rowPressed: { backgroundColor: theme.colors.glassAccent },
     check: {
         width: 26,
         height: 26,
         borderRadius: 13,
         borderWidth: 1.5,
-        borderColor: palette.neutral[300],
+        borderColor: theme.colors.textMuted,
         alignItems: 'center',
         justifyContent: 'center',
     },
     checkOn: {
-        backgroundColor: palette.primary[500],
-        borderColor: palette.primary[500],
+        backgroundColor: theme.accent,
+        borderColor: theme.accent,
     },
     checkText: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 14,
         fontWeight: '700',
     },
     rowBody: { flex: 1, minWidth: 0 },
-    rowTitle: { color: palette.neutral[900], fontSize: 15, fontWeight: '600' },
-    rowType: { color: palette.neutral[500], fontSize: 12 },
+    rowTitle: { color: theme.colors.text, fontSize: 15, fontWeight: '600' },
+    rowType: { color: theme.colors.textSecondary, fontSize: 12 },
     errorBox: {
         marginHorizontal: spacing.md,
         marginBottom: spacing.xs,
         padding: spacing.sm,
         borderRadius: radii.sm,
-        backgroundColor: '#FDECEA',
+        backgroundColor: theme.colors.dangerSoft,
         gap: 4,
     },
     errorTitle: {
-        color: palette.semantic.danger,
+        color: theme.colors.danger,
         fontSize: 12,
         fontWeight: '700',
     },
-    errorText: { color: palette.semantic.danger, fontSize: 12 },
+    errorText: { color: theme.colors.danger, fontSize: 12 },
     retry: { alignSelf: 'flex-start', paddingVertical: 4 },
     retryText: {
-        color: palette.primary[700],
+        color: theme.accent,
         fontSize: 12,
         fontWeight: '700',
     },
@@ -492,20 +500,20 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.md,
         paddingVertical: spacing.sm,
         borderTopWidth: 1,
-        borderTopColor: palette.neutral[100],
+        borderTopColor: theme.colors.border,
     },
-    summary: { flex: 1, color: palette.neutral[700], fontSize: 13 },
+    summary: { flex: 1, color: theme.colors.text, fontSize: 13 },
     send: {
         minWidth: 86,
         paddingHorizontal: spacing.md,
         paddingVertical: spacing.sm,
         borderRadius: radii.lg,
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
         alignItems: 'center',
     },
-    sendDisabled: { backgroundColor: palette.neutral[300] },
+    sendDisabled: { backgroundColor: theme.colors.textMuted },
     sendText: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 14,
         fontWeight: '700',
     },

@@ -1,7 +1,8 @@
 import { StyleSheet, Text } from 'react-native';
+import { MAX_FONT_SCALE } from '../theme';
 import type { ReactNode } from 'react';
 import type { TextProps, TextStyle } from 'react-native';
-import { typography } from '../theme';
+import { useTheme } from '../theme';
 import {
     detectTextDirection,
     getLayoutDirection,
@@ -40,7 +41,7 @@ export type SafeTextAlign = 'layout' | 'content' | 'center';
 
 export interface SafeTextProps extends TextProps {
     /** Typography token; omit to inherit from the surrounding style. */
-    variant?: keyof typeof typography;
+    variant?: 'display' | 'title' | 'heading' | 'body' | 'label' | 'caption' | 'micro';
     /**
      * How the block is aligned. `layout` (default) follows the app's layout
      * direction, `content` follows the string's own first strong character,
@@ -104,8 +105,10 @@ export function SafeText({
     children,
     ellipsizeMode = 'tail',
     textBreakStrategy,
+    maxFontSizeMultiplier = MAX_FONT_SCALE,
     ...rest
 }: SafeTextProps): React.ReactElement {
+    const theme = useTheme();
     const raw = contentAsText(children);
     const singleLine = lines === 1;
 
@@ -150,11 +153,12 @@ export function SafeText({
     return (
         <Text
             style={[
-                variant !== undefined ? typography[variant] : null,
+                variant !== undefined ? theme.type[variant] : null,
                 layoutStyle,
                 directionStyle,
                 style,
             ]}
+            maxFontSizeMultiplier={maxFontSizeMultiplier}
             {...lineProps}
             {...(textBreakStrategy !== undefined
                 ? { textBreakStrategy }

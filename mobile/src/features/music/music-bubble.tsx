@@ -27,6 +27,9 @@ import { useAudioDownload } from '../../shared/media-cache';
 import { formatDuration } from '../attachments/duration';
 import { formatFileSize } from '../attachments/attachment-labels';
 import type { AttachmentView } from '../messages/messages-model';
+import { useTheme, useThemedStyles, withAlpha } from '../../shared/theme';
+import type { AppTheme } from '../../shared/theme';
+import { AppText } from '../../shared/components';
 
 /** Fixed row geometry: the bubble never changes height after it mounts. */
 const COVER_SIZE = 52;
@@ -82,6 +85,8 @@ export function MusicBubble({
     isStatic?: boolean;
     onLongPress?: (() => void) | undefined;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     // Primitive selectors: an unrelated row re-renders only when THIS track is
     // the active one, never when some other track's status or position moves.
     const isActiveTrack = useIsActiveTrack(attachment.id);
@@ -117,16 +122,16 @@ export function MusicBubble({
     const glyph = ((): React.ReactElement => {
         if (attachment.status === 'uploading') {
             return (
-                <Text style={styles.coverGlyph}>
+                <AppText style={styles.coverGlyph}>
                     {`${Math.round((attachment.progress ?? 0) * 100)}%`}
-                </Text>
+                </AppText>
             );
         }
         if (failed) {
             return (
                 <AlertCircle
                     size={22}
-                    color={palette.semantic.danger}
+                    color={theme.colors.danger}
                     strokeWidth={2.2}
                 />
             );
@@ -134,20 +139,20 @@ export function MusicBubble({
         if (loading) {
             if (download.state === 'downloading') {
                 return (
-                    <Text style={styles.coverGlyph}>
+                    <AppText style={styles.coverGlyph}>
                         {`${Math.round(download.progress * 100)}%`}
-                    </Text>
+                    </AppText>
                 );
             }
-            return <ActivityIndicator size="small" color="#FFFFFF" />;
+            return <ActivityIndicator size="small" color={theme.colors.accentText} />;
         }
         if (playing) {
             return (
                 <Pause
                     size={22}
-                    color="#FFFFFF"
+                    color={theme.colors.accentText}
                     strokeWidth={2.2}
-                    fill="#FFFFFF"
+                    fill={theme.colors.accentText}
                 />
             );
         }
@@ -155,13 +160,13 @@ export function MusicBubble({
             return (
                 <Play
                     size={22}
-                    color="#FFFFFF"
+                    color={theme.colors.accentText}
                     strokeWidth={2.2}
-                    fill="#FFFFFF"
+                    fill={theme.colors.accentText}
                 />
             );
         }
-        return <Download size={22} color="#FFFFFF" strokeWidth={2.2} />;
+        return <Download size={22} color={theme.colors.accentText} strokeWidth={2.2} />;
     })();
 
     const sizeLabel =
@@ -200,7 +205,7 @@ export function MusicBubble({
                     ) : (
                         <Music2
                             size={24}
-                            color="rgba(255,255,255,0.86)"
+                            color={theme.colors.accentText}
                             strokeWidth={1.8}
                         />
                     )}
@@ -211,18 +216,18 @@ export function MusicBubble({
             </Pressable>
 
             <View style={styles.meta}>
-                <Text
+                <AppText
                     style={[styles.title, mine && styles.titleMine]}
                     numberOfLines={1}
                 >
                     {attachment.title ?? attachment.name}
-                </Text>
-                <Text
+                </AppText>
+                <AppText
                     style={[styles.artist, mine && styles.artistMine]}
                     numberOfLines={1}
                 >
                     {attachment.artist ?? 'Unknown artist'}
-                </Text>
+                </AppText>
                 {/* Same reserved line in both states: the row height never
                     depends on whether this track is the active one. */}
                 <View style={styles.timeRow}>
@@ -233,12 +238,12 @@ export function MusicBubble({
                             showTotal
                         />
                     ) : (
-                        <Text
+                        <AppText
                             style={[styles.time, mine && styles.timeMine]}
                             numberOfLines={1}
                         >
                             {subtitle}
-                        </Text>
+                        </AppText>
                     )}
                 </View>
             </View>
@@ -256,7 +261,8 @@ const FILL = {
     bottom: 0,
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     card: {
         width: 252,
         // Fixed: no reflow when the track becomes active or the cover loads.
@@ -276,7 +282,7 @@ const styles = StyleSheet.create({
     cover: {
         width: '100%',
         height: '100%',
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
     },
     coverImage: {
         width: COVER_SIZE,
@@ -285,43 +291,43 @@ const styles = StyleSheet.create({
     coverFallback: {
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
     },
     coverShade: {
         ...FILL,
-        backgroundColor: 'rgba(9,7,15,0.34)',
+        backgroundColor: withAlpha(theme.colors.background, 0.34),
         alignItems: 'center',
         justifyContent: 'center',
     },
     coverGlyph: {
-        color: '#FFFFFF',
+        color: theme.colors.accentText,
         fontSize: 12,
         fontWeight: '700',
         fontVariant: ['tabular-nums'],
     },
     meta: { flex: 1, minWidth: 0, justifyContent: 'center' },
     title: {
-        color: palette.neutral[900],
+        color: theme.colors.text,
         fontSize: 14,
         lineHeight: 18,
         height: 18,
         fontWeight: '700',
     },
-    titleMine: { color: palette.text.onAccent },
+    titleMine: { color: theme.colors.accentText },
     artist: {
-        color: palette.text.secondary,
+        color: theme.colors.textSecondary,
         fontSize: 11,
         lineHeight: 14,
         height: 14,
         marginTop: 1,
     },
-    artistMine: { color: 'rgba(255,255,255,0.78)' },
+    artistMine: { color: theme.colors.bubbleOwnMuted },
     timeRow: { height: 14, justifyContent: 'center', marginTop: 1 },
     time: {
-        color: palette.text.muted,
+        color: theme.colors.textMuted,
         fontSize: 10,
         lineHeight: 13,
         fontVariant: ['tabular-nums'],
     },
-    timeMine: { color: 'rgba(255,255,255,0.72)' },
+    timeMine: { color: theme.colors.bubbleOwnMuted },
 });

@@ -1,12 +1,15 @@
 import { memo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { palette, radii } from '../theme';
+import { radii, shadows } from '../theme';
 import {
     REACTION_PILL_HEIGHT,
     REACTION_PILL_MAX_SLOTS,
     REACTION_PILL_PADDING,
     REACTION_PILL_TARGET,
 } from './popup-layout';
+import { useTheme, useThemedStyles } from '../theme';
+import type { AppTheme } from '../theme';
+import { AppText } from '../components';
 
 /**
  * The quick-reaction pill above (or below) the copy. Fixed geometry from
@@ -29,6 +32,7 @@ export const ReactionPill = memo(function ReactionPill({
     reactions: readonly ContextPopupReaction[];
     width: number;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <View
             accessibilityViewIsModal={true}
@@ -36,7 +40,7 @@ export const ReactionPill = memo(function ReactionPill({
             style={[styles.pill, { width }]}
         >
             {reactions.slice(0, REACTION_PILL_MAX_SLOTS).map((reaction) => (
-                <Text
+                <AppText
                     key={reaction.emoji}
                     accessibilityRole="button"
                     accessibilityLabel={`React with ${reaction.emoji}`}
@@ -49,24 +53,25 @@ export const ReactionPill = memo(function ReactionPill({
                     ]}
                 >
                     {reaction.emoji}
-                </Text>
+                </AppText>
             ))}
         </View>
     );
 });
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     pill: {
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: REACTION_PILL_PADDING,
         height: REACTION_PILL_HEIGHT,
         borderRadius: radii.full,
-        backgroundColor: palette.elevated,
+        backgroundColor: theme.colors.surfaceElevated,
         borderWidth: StyleSheet.hairlineWidth * 2,
-        borderColor: palette.border.strong,
+        borderColor: theme.colors.borderStrong,
         overflow: 'hidden',
-        shadowColor: '#7545B8',
+        shadowColor: shadows.floating.shadowColor,
         shadowOpacity: 0.35,
         shadowRadius: 12,
         shadowOffset: { width: 0, height: 6 },
@@ -82,8 +87,8 @@ const styles = StyleSheet.create({
     },
     selected: {
         borderWidth: 2,
-        borderColor: palette.primary[300],
-        backgroundColor: palette.primary[100],
+        borderColor: theme.accent,
+        backgroundColor: theme.colors.accentSoft,
     },
     selectedText: { lineHeight: REACTION_PILL_TARGET - 4 },
 });

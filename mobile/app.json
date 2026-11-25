@@ -6,7 +6,12 @@
     "scheme": "niazchat",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#09070F"
+    },
     "ios": {
       "supportsTablet": true
     },
@@ -43,7 +48,25 @@
       "expo-status-bar",
       "expo-video",
       "expo-asset",
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#09070F",
+          "dark": {
+            "backgroundColor": "#09070F"
+          }
+        }
+      ],
+      [
+        "expo-navigation-bar",
+        {
+          "enforceContrast": false
+        }
+      ]
     ]
   }
 }

@@ -1,7 +1,9 @@
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ban } from 'lucide-react-native';
-import { palette, radii, spacing, typography } from '../../shared/theme';
+import { radii, spacing } from '../../shared/theme';
+import { useTheme, useThemedStyles } from '../../shared/theme/theme-provider';
+import type { AppTheme } from '../../shared/theme/theme-provider';
 import { SafeText } from '../../shared/components';
 import {
     GroupMemberActions,
@@ -14,6 +16,9 @@ import type { GroupMemberAction } from './group-model';
  * Bottom sheet listing ONLY the actions the server permitted for this row.
  * No disabled rows: a member never sees the trigger, and the owner sees no
  * action on themselves or on another owner.
+ *
+ * The sheet is a themed elevated surface with scaled text, so light/dark, the
+ * accent and the chosen font/text size apply live.
  */
 export function MemberActionsSheet(props: {
     visible: boolean;
@@ -26,6 +31,8 @@ export function MemberActionsSheet(props: {
     onAction: (action: GroupMemberAction) => void;
 }): React.ReactElement {
     const insets = useSafeAreaInsets();
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const visibleActions = visibleMemberActions(props.actions);
 
     return (
@@ -68,27 +75,28 @@ export function MemberActionsSheet(props: {
                                 <View style={styles.dangerRow}>
                                     <Ban
                                         size={18}
-                                        color={palette.semantic.danger}
+                                        color={theme.colors.danger}
                                         strokeWidth={1.8}
                                     />
-                                    <Text
+                                    <SafeText
                                         style={[
                                             styles.rowLabel,
                                             styles.rowDanger,
                                         ]}
                                     >
                                         {memberActionLabel(action)}
-                                    </Text>
+                                    </SafeText>
                                 </View>
                             ) : (
-                                <Text
+                                <SafeText
                                     style={[
                                         styles.rowLabel,
-                                        action === 'remove' && styles.rowDanger,
+                                        action === 'remove' &&
+                                            styles.rowDanger,
                                     ]}
                                 >
                                     {memberActionLabel(action)}
-                                </Text>
+                                </SafeText>
                             )}
                         </Pressable>
                     ))}
@@ -96,10 +104,15 @@ export function MemberActionsSheet(props: {
                     <Pressable
                         accessibilityRole="button"
                         accessibilityLabel="Cancel"
-                        style={styles.cancel}
+                        style={({ pressed }) => [
+                            styles.cancel,
+                            pressed && styles.rowPressed,
+                        ]}
                         onPress={props.onClose}
                     >
-                        <Text style={styles.cancelText}>Cancel</Text>
+                        <SafeText style={styles.cancelText} align="center">
+                            Cancel
+                        </SafeText>
                     </Pressable>
                 </Pressable>
             </Pressable>
@@ -107,58 +120,61 @@ export function MemberActionsSheet(props: {
     );
 }
 
-const styles = StyleSheet.create({
-    backdrop: {
-        flex: 1,
-        justifyContent: 'flex-end',
-        backgroundColor: 'rgba(0,0,0,0.4)',
-    },
-    sheet: {
-        paddingTop: spacing.sm,
-        paddingHorizontal: spacing.sm,
-        borderTopLeftRadius: radii.lg,
-        borderTopRightRadius: radii.lg,
-        backgroundColor: palette.elevated,
-    },
-    title: {
-        ...typography.caption,
-        paddingHorizontal: spacing.xs,
-        paddingVertical: spacing.xs,
-    },
-    divider: {
-        height: StyleSheet.hairlineWidth,
-        marginHorizontal: spacing.xs,
-        backgroundColor: palette.neutral[100],
-    },
-    row: {
-        minHeight: 52,
-        justifyContent: 'center',
-        paddingHorizontal: spacing.xs,
-        borderRadius: radii.sm,
-    },
-    rowPressed: { backgroundColor: palette.neutral[100] },
-    rowDisabled: { opacity: 0.45 },
-    dangerRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.xs,
-    },
-    rowLabel: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: palette.neutral[900],
-    },
-    rowDanger: { color: palette.semantic.danger },
-    cancel: {
-        minHeight: 48,
-        marginTop: spacing.xxs,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderRadius: radii.sm,
-    },
-    cancelText: {
-        fontSize: 15,
-        fontWeight: '600',
-        color: palette.neutral[500],
-    },
-});
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+        backdrop: {
+            flex: 1,
+            justifyContent: 'flex-end',
+            backgroundColor: theme.colors.chatScrim,
+        },
+        sheet: {
+            paddingTop: spacing.sm,
+            paddingHorizontal: spacing.sm,
+            borderTopLeftRadius: radii.lg,
+            borderTopRightRadius: radii.lg,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            backgroundColor: theme.colors.glassElevated,
+        },
+        title: {
+            ...theme.type.caption,
+            color: theme.colors.textSecondary,
+            paddingHorizontal: spacing.xs,
+            paddingVertical: spacing.xs,
+        },
+        divider: {
+            height: StyleSheet.hairlineWidth,
+            marginHorizontal: spacing.xs,
+            backgroundColor: theme.colors.border,
+        },
+        row: {
+            minHeight: 52,
+            justifyContent: 'center',
+            paddingHorizontal: spacing.xs,
+            borderRadius: radii.sm,
+        },
+        rowPressed: { backgroundColor: theme.colors.glassAccent },
+        rowDisabled: { opacity: 0.45 },
+        dangerRow: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: spacing.xs,
+        },
+        rowLabel: {
+            ...theme.type.body,
+            fontSize: 16,
+            color: theme.colors.text,
+        },
+        rowDanger: { color: theme.colors.danger },
+        cancel: {
+            minHeight: 48,
+            marginTop: spacing.xxs,
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: radii.sm,
+        },
+        cancelText: {
+            ...theme.type.body,
+            color: theme.colors.textSecondary,
+        },
+    });

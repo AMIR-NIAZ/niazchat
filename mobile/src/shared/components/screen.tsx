@@ -1,26 +1,24 @@
 import { StyleSheet, View, ViewProps } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { palette, spacing } from '../theme';
+import { spacing } from '../theme';
 
 /**
  * Full-height, safe-area-aware container used as the root of every screen.
- * Paints the almost-black canvas plus two soft purple ambient glows so the
- * glass surfaces have something atmospheric to refract. Layout is a shared
- * concern — features compose content inside it.
+ * The canvas is fully transparent: the single app background layer behind the
+ * root navigator is the only thing painted (including its optional decorative
+ * circles), so screens never draw a second background of their own. Layout is a
+ * shared concern — features compose content inside it.
  */
 
 interface ScreenProps extends ViewProps {
     /** Pad the content away from the status bar / notch. Default: true. */
     withTopInset?: boolean;
     withBottomInset?: boolean;
-    /** Turn off the ambient purple glows (e.g. full-screen media viewers). */
-    ambient?: boolean;
 }
 
 export function Screen({
     withTopInset = true,
     withBottomInset = true,
-    ambient = true,
     style,
     children,
     ...rest
@@ -44,12 +42,6 @@ export function Screen({
             ]}
             {...rest}
         >
-            {ambient && (
-                <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-                    <View style={styles.glowTop} />
-                    <View style={styles.glowBottom} />
-                </View>
-            )}
             {children}
         </View>
     );
@@ -61,25 +53,7 @@ const styles = StyleSheet.create({
         // Explicit containing block for the absolutely positioned layers
         // (list layer, floating chrome) that screens place on top of it.
         position: 'relative',
-        backgroundColor: palette.background,
+        backgroundColor: 'transparent',
         overflow: 'hidden',
-    },
-    glowTop: {
-        position: 'absolute',
-        top: -140,
-        end: -110,
-        width: 320,
-        height: 320,
-        borderRadius: 160,
-        backgroundColor: 'rgba(117,69,184,0.22)',
-    },
-    glowBottom: {
-        position: 'absolute',
-        bottom: -180,
-        start: -130,
-        width: 360,
-        height: 360,
-        borderRadius: 180,
-        backgroundColor: 'rgba(169,112,245,0.10)',
     },
 });

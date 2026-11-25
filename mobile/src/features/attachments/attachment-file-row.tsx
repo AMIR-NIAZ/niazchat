@@ -21,6 +21,9 @@ import {
 import { NoViewerAppError } from './file-open-policy';
 import { openLocalFile } from './open-file';
 import { useUploadProgress } from './upload-progress-store';
+import { useTheme, useThemedStyles } from '../../shared/theme';
+import type { AppTheme } from '../../shared/theme';
+import { AppText } from '../../shared/components';
 
 type RowState = 'idle' | 'downloading' | 'downloaded' | 'failed';
 
@@ -57,6 +60,8 @@ export function AttachmentFileRow({
     mine: boolean;
     onLongPress?: (() => void) | undefined;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const [state, setState] = useState<RowState>('idle');
     const [progress, setProgress] = useState(0);
     const [cachedPath, setCachedPath] = useState<string | null>(null);
@@ -226,21 +231,21 @@ export function AttachmentFileRow({
             style={styles.row}
         >
             <View style={styles.iconBox}>
-                <Text style={[styles.icon, mine && styles.iconMine]}>
+                <AppText style={[styles.icon, mine && styles.iconMine]}>
                     {iconFor(attachment.name, attachment.mimeType)}
-                </Text>
+                </AppText>
                 {(downloading || uploading) && (
                     <View style={styles.iconProgress}>
                         <ActivityIndicator
                             size="small"
                             color={
-                                mine ? palette.neutral[0] : palette.primary[600]
+                                mine ? theme.colors.background : theme.accent
                             }
                         />
                     </View>
                 )}
                 {!downloading && !uploading && (
-                    <Text
+                    <AppText
                         style={[
                             styles.iconBadge,
                             mine && styles.iconBadgeMine,
@@ -252,19 +257,19 @@ export function AttachmentFileRow({
                             : state === 'failed'
                               ? '↻'
                               : '↓'}
-                    </Text>
+                    </AppText>
                 )}
             </View>
 
             <View style={styles.meta}>
-                <Text
+                <AppText
                     style={[styles.name, mine && styles.nameMine]}
                     numberOfLines={1}
                     ellipsizeMode="middle"
                 >
                     {attachment.name}
-                </Text>
-                <Text
+                </AppText>
+                <AppText
                     style={[styles.size, mine && styles.sizeMine]}
                     numberOfLines={1}
                 >
@@ -278,14 +283,14 @@ export function AttachmentFileRow({
                                   attachment.name,
                                   attachment.mimeType,
                               )} · ${formatFileSize(attachment.size)}`}
-                </Text>
+                </AppText>
                 {error !== null && (
-                    <Text
+                    <AppText
                         style={[styles.error, mine && styles.errorMine]}
                         numberOfLines={2}
                     >
                         {error}
-                    </Text>
+                    </AppText>
                 )}
                 {(downloading || uploading) && (
                     <View style={styles.track}>
@@ -312,18 +317,19 @@ export function AttachmentFileRow({
                     hitSlop={8}
                     style={styles.shareButton}
                 >
-                    <Text
+                    <AppText
                         style={[styles.shareIcon, mine && styles.shareIconMine]}
                     >
                         ↗
-                    </Text>
+                    </AppText>
                 </Pressable>
             )}
         </Pressable>
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     row: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -342,8 +348,8 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         flexShrink: 0,
     },
-    icon: { fontSize: 24, color: palette.neutral[700] },
-    iconMine: { color: palette.text.onAccent },
+    icon: { fontSize: 24, color: theme.colors.text },
+    iconMine: { color: theme.colors.accentText },
     iconProgress: {
         position: 'absolute',
         right: 2,
@@ -357,26 +363,26 @@ const styles = StyleSheet.create({
         position: 'absolute',
         right: 0,
         bottom: -1,
-        color: palette.primary[700],
+        color: theme.accent,
         fontSize: 11,
         fontWeight: '700',
     },
-    iconBadgeMine: { color: 'rgba(255,255,255,0.82)' },
-    iconBadgeFailed: { color: palette.semantic.danger },
+    iconBadgeMine: { color: theme.colors.bubbleOwnMuted },
+    iconBadgeFailed: { color: theme.colors.danger },
     meta: { flex: 1, minWidth: 0, gap: 1 },
     name: {
-        color: palette.neutral[900],
+        color: theme.colors.text,
         fontSize: 13,
         fontWeight: '600',
         textAlign: 'left',
         writingDirection: 'auto',
         flexShrink: 1,
     },
-    nameMine: { color: palette.text.onAccent },
-    size: { color: palette.neutral[500], fontSize: 11 },
-    sizeMine: { color: 'rgba(255,255,255,0.82)' },
-    error: { color: palette.semantic.danger, fontSize: 10 },
-    errorMine: { color: 'rgba(255,255,255,0.82)' },
+    nameMine: { color: theme.colors.accentText },
+    size: { color: theme.colors.textSecondary, fontSize: 11 },
+    sizeMine: { color: theme.colors.bubbleOwnMuted },
+    error: { color: theme.colors.danger, fontSize: 10 },
+    errorMine: { color: theme.colors.bubbleOwnMuted },
     shareButton: {
         width: 36,
         height: 36,
@@ -386,17 +392,17 @@ const styles = StyleSheet.create({
         flexShrink: 0,
     },
     shareIcon: {
-        color: palette.primary[600],
+        color: theme.accent,
         fontSize: 18,
         fontWeight: '700',
     },
-    shareIconMine: { color: palette.text.onAccent },
+    shareIconMine: { color: theme.colors.accentText },
     track: {
         height: 3,
         borderRadius: radii.full,
-        backgroundColor: 'rgba(255,255,255,0.35)',
+        backgroundColor: theme.colors.quoteOwn,
         overflow: 'hidden',
         marginTop: 2,
     },
-    fill: { height: '100%', backgroundColor: palette.primary[300] },
+    fill: { height: '100%', backgroundColor: theme.accent },
 });

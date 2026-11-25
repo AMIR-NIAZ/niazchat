@@ -1,11 +1,15 @@
 import { memo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import { Play } from 'lucide-react-native';
-import { palette, radii, spacing } from '../../shared/theme';
+import { radii, spacing } from '../../shared/theme';
+import { withAlpha } from '../../shared/theme/colors';
+import { useTheme, useThemedStyles } from '../../shared/theme/theme-provider';
+import type { AppTheme } from '../../shared/theme/theme-provider';
 import type { SharedAttachmentItemDto } from '../../core/api/dto/shared-content.dto';
 import { attachmentPreviewUrl, useAttachmentAuth } from '../attachments';
 import { formatDuration, hasDuration } from '../attachments/duration';
+import { SafeText } from '../../shared/components';
 
 /**
  * One row of the 3-column square grid.
@@ -14,6 +18,9 @@ import { formatDuration, hasDuration } from '../attachments/duration';
  * the same `cacheKey` lets expo-image reuse the disk cache between visits.
  * Videos show their poster plus a centered play glyph and duration badge; the
  * full file is never loaded here, only by the viewer.
+ *
+ * The tile placeholder, scrim and badge text all come from the theme, so the
+ * grid follows light/dark and the accent without repainting per item.
  */
 export const MediaGridRow = memo(function MediaGridRow({
     items,
@@ -26,6 +33,7 @@ export const MediaGridRow = memo(function MediaGridRow({
     gap: number;
     onOpen: (item: SharedAttachmentItemDto) => void;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     const { headers } = useAttachmentAuth();
     return (
         <View style={[styles.row, { gap }]}>
@@ -60,6 +68,8 @@ function MediaTile({
     headers: Record<string, string> | undefined;
     onOpen: (item: SharedAttachmentItemDto) => void;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const attachment = item.attachment;
     const isVideo = attachment.kind === 'video';
     const duration = attachment.duration;
@@ -96,16 +106,16 @@ function MediaTile({
                     <View style={styles.playCircle}>
                         <Play
                             size={16}
-                            color="#FFFFFF"
+                            color={theme.colors.text}
                             strokeWidth={2.4}
-                            fill="#FFFFFF"
+                            fill={theme.colors.text}
                         />
                     </View>
                     {hasDuration(duration) && (
                         <View style={styles.durationBadge}>
-                            <Text style={styles.durationText}>
+                            <SafeText style={styles.durationText}>
                                 {formatDuration(duration)}
-                            </Text>
+                            </SafeText>
                         </View>
                     )}
                 </View>
@@ -114,49 +124,51 @@ function MediaTile({
     );
 }
 
-const styles = StyleSheet.create({
-    row: {
-        flexDirection: 'row',
-        paddingHorizontal: spacing.sm,
-        paddingVertical: 2,
-    },
-    tile: {
-        borderRadius: radii.sm,
-        overflow: 'hidden',
-        backgroundColor: palette.neutral[100],
-    },
-    pressed: { opacity: 0.72 },
-    image: { width: '100%', height: '100%' },
-    videoOverlay: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    playCircle: {
-        width: 34,
-        height: 34,
-        borderRadius: 17,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'rgba(12, 16, 20, 0.52)',
-    },
-    durationBadge: {
-        position: 'absolute',
-        right: 5,
-        bottom: 5,
-        paddingHorizontal: 5,
-        paddingVertical: 1,
-        borderRadius: radii.sm,
-        backgroundColor: 'rgba(12, 16, 20, 0.62)',
-    },
-    durationText: {
-        color: '#FFFFFF',
-        fontSize: 10,
-        fontWeight: '600',
-        fontVariant: ['tabular-nums'],
-    },
-});
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+        row: {
+            flexDirection: 'row',
+            paddingHorizontal: spacing.sm,
+            paddingVertical: 2,
+        },
+        tile: {
+            borderRadius: radii.sm,
+            overflow: 'hidden',
+            backgroundColor: theme.colors.glassElevated,
+        },
+        pressed: { opacity: 0.72 },
+        image: { width: '100%', height: '100%' },
+        videoOverlay: {
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            alignItems: 'center',
+            justifyContent: 'center',
+        },
+        // Scrim derived from the theme background, so the overlaid glyph
+        // keeps the opposite text colour in both modes.
+        playCircle: {
+            width: 34,
+            height: 34,
+            borderRadius: 17,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: withAlpha(theme.colors.background, 0.62),
+        },
+        durationBadge: {
+            position: 'absolute',
+            right: 5,
+            bottom: 5,
+            paddingHorizontal: 5,
+            paddingVertical: 1,
+            borderRadius: radii.sm,
+            backgroundColor: withAlpha(theme.colors.background, 0.72),
+        },
+        durationText: {
+            ...theme.type.micro,
+            color: theme.colors.text,
+            fontVariant: ['tabular-nums'],
+        },
+    });

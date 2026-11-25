@@ -34,6 +34,8 @@ import {
     useGroupRemovedEvent,
     useGroupUpdatedEvents,
 } from '../../../../features/groups/use-group';
+import { useTheme, useThemedStyles } from '../../../../shared/theme';
+import type { AppTheme } from '../../../../shared/theme';
 
 /**
  * Group settings hub (`/group-settings/:chatId`).
@@ -69,6 +71,8 @@ export default function GroupSettingsScreen(): React.ReactElement {
 }
 
 function GroupSettings({ chatId }: { chatId: number }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const queryClient = useQueryClient();
     const currentUserId = useCurrentUserId();
     const infoQuery = useGroupInfo(chatId);
@@ -125,7 +129,7 @@ function GroupSettings({ chatId }: { chatId: number }): React.ReactElement {
                 <View style={styles.centered}>
                     <ActivityIndicator
                         size="large"
-                        color={palette.primary[500]}
+                        color={theme.accent}
                     />
                     <AppText variant="caption">Loading group settings…</AppText>
                 </View>
@@ -192,9 +196,9 @@ function GroupSettings({ chatId }: { chatId: number }): React.ReactElement {
                             <SafeText variant="title" lines={2}>
                                 {info.title || 'Unnamed group'}
                             </SafeText>
-                            <Text style={styles.caption}>
+                            <AppText style={styles.caption}>
                                 Choose what you want to change.
-                            </Text>
+                            </AppText>
                         </View>
                     }
                     renderItem={({
@@ -214,19 +218,19 @@ function GroupSettings({ chatId }: { chatId: number }): React.ReactElement {
                             <View style={styles.rowIcon}>
                                 <item.icon
                                     size={21}
-                                    color="#FFFFFF"
+                                    color={theme.colors.accentText}
                                     strokeWidth={1.8}
                                 />
                             </View>
                             <View style={styles.rowBody}>
-                                <Text style={styles.rowTitle}>
+                                <AppText style={styles.rowTitle}>
                                     {item.title}
-                                </Text>
-                                <Text style={styles.rowSubtitle}>
+                                </AppText>
+                                <AppText style={styles.rowSubtitle}>
                                     {item.subtitle}
-                                </Text>
+                                </AppText>
                             </View>
-                            <Text style={styles.chevron}>›</Text>
+                            <AppText style={styles.chevron}>›</AppText>
                         </Pressable>
                     )}
                 />
@@ -236,6 +240,7 @@ function GroupSettings({ chatId }: { chatId: number }): React.ReactElement {
 }
 
 function TopBar(): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.topBar}>
             <Pressable
@@ -244,11 +249,11 @@ function TopBar(): React.ReactElement {
                 style={styles.backButton}
                 onPress={(): void => router.back()}
             >
-                <Text style={styles.backText}>‹</Text>
+                <AppText style={styles.backText}>‹</AppText>
             </Pressable>
-            <Text style={styles.topBarTitle} numberOfLines={1}>
+            <AppText style={styles.topBarTitle} numberOfLines={1}>
                 Group settings
-            </Text>
+            </AppText>
             <View style={styles.topBarSpacer} />
         </View>
     );
@@ -259,6 +264,8 @@ function SettingsState(props: {
     detail: string;
     onRetry?: () => void;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.centered}>
             <AppText variant="title">{props.title}</AppText>
@@ -272,7 +279,7 @@ function SettingsState(props: {
                     style={styles.retryButton}
                     onPress={props.onRetry}
                 >
-                    <Text style={styles.retryText}>Retry</Text>
+                    <AppText style={styles.retryText}>Retry</AppText>
                 </Pressable>
             )}
             <Pressable
@@ -281,22 +288,23 @@ function SettingsState(props: {
                 style={styles.backLink}
                 onPress={(): void => router.back()}
             >
-                <Text style={styles.backLinkText}>Go back</Text>
+                <AppText style={styles.backLinkText}>Go back</AppText>
             </Pressable>
         </View>
     );
 }
 
-const styles = StyleSheet.create({
-    root: { flex: 1, backgroundColor: palette.background },
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+    root: { flex: 1, backgroundColor: 'transparent' },
     topBar: {
         flexDirection: 'row',
         alignItems: 'center',
         minHeight: 52,
         paddingHorizontal: spacing.xs,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: palette.neutral[100],
-        backgroundColor: palette.elevated,
+        borderBottomColor: theme.colors.border,
+        backgroundColor: theme.colors.glassElevated,
     },
     backButton: {
         width: 44,
@@ -304,42 +312,42 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    backText: { fontSize: 32, lineHeight: 34, color: palette.neutral[900] },
+    backText: { fontSize: 32, lineHeight: 34, color: theme.colors.text },
     topBarTitle: {
         flex: 1,
         textAlign: 'center',
         fontSize: 16,
         fontWeight: '700',
-        color: palette.neutral[900],
+        color: theme.colors.text,
     },
     topBarSpacer: { width: 44 },
     list: { paddingVertical: spacing.md },
     listHeader: { paddingHorizontal: spacing.md, paddingBottom: spacing.md },
-    caption: { ...typography.caption, marginTop: spacing.xxs },
+    caption: { ...theme.type.caption, marginTop: spacing.xxs },
     row: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: spacing.sm,
         minHeight: 64,
         paddingHorizontal: spacing.md,
-        backgroundColor: palette.elevated,
+        backgroundColor: theme.colors.glassElevated,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: palette.neutral[100],
+        borderBottomColor: theme.colors.border,
     },
-    rowPressed: { backgroundColor: palette.neutral[100] },
+    rowPressed: { backgroundColor: theme.colors.glassElevated },
     rowIcon: {
         width: 36,
         height: 36,
         borderRadius: radii.full,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: palette.primary[100],
+        backgroundColor: theme.colors.accentSoft,
     },
-    rowIconText: { fontSize: 18, color: palette.primary[700] },
+    rowIconText: { fontSize: 18, color: theme.accent },
     rowBody: { flex: 1, gap: 2 },
-    rowTitle: { fontSize: 16, fontWeight: '600', color: palette.neutral[900] },
-    rowSubtitle: typography.caption,
-    chevron: { fontSize: 26, color: palette.neutral[300] },
+    rowTitle: { fontSize: 16, fontWeight: '600', color: theme.colors.text },
+    rowSubtitle: theme.type.caption,
+    chevron: { fontSize: 26, color: theme.colors.textMuted },
     centered: {
         flex: 1,
         alignItems: 'center',
@@ -353,10 +361,10 @@ const styles = StyleSheet.create({
         borderRadius: radii.sm,
         paddingHorizontal: spacing.md,
         paddingVertical: spacing.xs,
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
     },
     retryText: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 14,
         fontWeight: '600',
     },
@@ -364,6 +372,6 @@ const styles = StyleSheet.create({
     backLinkText: {
         fontSize: 14,
         fontWeight: '600',
-        color: palette.primary[700],
+        color: theme.accent,
     },
 });

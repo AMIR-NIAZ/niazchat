@@ -63,6 +63,8 @@ import {
     describeGroupAvatarError,
     describeGroupInfoError,
 } from '../../../../features/groups/group-errors';
+import { useTheme, useThemedStyles, withAlpha } from '../../../../shared/theme';
+import type { AppTheme } from '../../../../shared/theme';
 
 /**
  * "Group info" edit screen (`/group-settings/:chatId/info`).
@@ -83,6 +85,7 @@ function parseChatId(value: string | string[] | undefined): number | null {
 }
 
 export default function GroupInfoEditScreen(): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     const params = useLocalSearchParams<GroupInfoRouteParams>();
     const chatId = parseChatId(params.chatId);
 
@@ -104,6 +107,8 @@ export default function GroupInfoEditScreen(): React.ReactElement {
 }
 
 function GroupInfoEditor({ chatId }: { chatId: number }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const queryClient = useQueryClient();
     const currentUserId = useCurrentUserId();
     const infoQuery = useGroupInfo(chatId);
@@ -377,7 +382,7 @@ function GroupInfoEditor({ chatId }: { chatId: number }): React.ReactElement {
                 <View style={styles.centered}>
                     <ActivityIndicator
                         size="large"
-                        color={palette.primary[500]}
+                        color={theme.accent}
                     />
                     <AppText variant="caption">Loading group info…</AppText>
                 </View>
@@ -408,7 +413,7 @@ function GroupInfoEditor({ chatId }: { chatId: number }): React.ReactElement {
                                 void infoQuery.refetch();
                             }}
                         >
-                            <Text style={styles.retryText}>Retry</Text>
+                            <AppText style={styles.retryText}>Retry</AppText>
                         </Pressable>
                     )}
                     <FormButton
@@ -458,72 +463,72 @@ function GroupInfoEditor({ chatId }: { chatId: number }): React.ReactElement {
                             }}
                         />
                         {limitHint !== null && (
-                            <Text style={styles.limitHint}>{limitHint}</Text>
+                            <AppText style={styles.limitHint}>{limitHint}</AppText>
                         )}
                         {photoError !== null && (
-                            <Text
+                            <AppText
                                 style={styles.errorText}
                                 accessibilityLiveRegion="polite"
                             >
                                 {photoError}
-                            </Text>
+                            </AppText>
                         )}
                     </View>
 
                     <View style={styles.field}>
-                        <Text style={styles.label}>Group name</Text>
+                        <AppText style={styles.label}>Group name</AppText>
                         <TextInput
                             value={title}
                             onChangeText={setTitle}
                             multiline={false}
                             maxLength={GROUP_TITLE_MAX_LENGTH}
                             placeholder="Group name"
-                            placeholderTextColor={palette.neutral[300]}
+                            placeholderTextColor={theme.colors.textMuted}
                             accessibilityLabel="Group name"
                             style={[
                                 styles.input,
                                 titleError !== null && styles.inputInvalid,
                             ]}
                         />
-                        <Text style={styles.counter}>
+                        <AppText style={styles.counter}>
                             {title.length}/{GROUP_TITLE_MAX_LENGTH}
-                        </Text>
+                        </AppText>
                         {titleError !== null && (
-                            <Text style={styles.errorText}>{titleError}</Text>
+                            <AppText style={styles.errorText}>{titleError}</AppText>
                         )}
                     </View>
 
                     <View style={styles.field}>
-                        <Text style={styles.label}>Description</Text>
+                        <AppText style={styles.label}>Description</AppText>
                         <TextInput
                             value={description}
                             onChangeText={setDescription}
                             multiline={true}
                             maxLength={GROUP_DESCRIPTION_MAX_LENGTH}
                             placeholder="What is this group about?"
-                            placeholderTextColor={palette.neutral[300]}
+                            placeholderTextColor={theme.colors.textMuted}
                             accessibilityLabel="Group description"
                             style={[styles.input, styles.multiline]}
                             textAlignVertical="top"
                         />
-                        <Text style={styles.counter}>
+                        <AppText style={styles.counter}>
                             {description.trim().length}/
                             {GROUP_DESCRIPTION_MAX_LENGTH}
-                        </Text>
+                        </AppText>
                         {descriptionError !== null && (
-                            <Text style={styles.errorText}>
+                            <AppText style={styles.errorText}>
                                 {descriptionError}
-                            </Text>
+                            </AppText>
                         )}
                     </View>
 
                     {saveError !== null && (
-                        <Text
+                        <AppText
                             style={styles.errorText}
                             accessibilityLiveRegion="polite"
                         >
                             {saveError}
-                        </Text>
+                        </AppText>
                     )}
 
                     <View style={styles.actions}>
@@ -531,9 +536,9 @@ function GroupInfoEditor({ chatId }: { chatId: number }): React.ReactElement {
                             <View style={styles.savingRow}>
                                 <ActivityIndicator
                                     size="small"
-                                    color={palette.primary[500]}
+                                    color={theme.accent}
                                 />
-                                <Text style={styles.caption}>Saving…</Text>
+                                <AppText style={styles.caption}>Saving…</AppText>
                             </View>
                         ) : (
                             <Pressable
@@ -559,7 +564,7 @@ function GroupInfoEditor({ chatId }: { chatId: number }): React.ReactElement {
                                     void handleSave();
                                 }}
                             >
-                                <Text style={styles.saveButtonText}>Save</Text>
+                                <AppText style={styles.saveButtonText}>Save</AppText>
                             </Pressable>
                         )}
                         <FormButton
@@ -593,6 +598,8 @@ function GroupInfoEditor({ chatId }: { chatId: number }): React.ReactElement {
 }
 
 function EditorTopBar({ onBack }: { onBack: () => void }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.topBar}>
             <Pressable
@@ -601,18 +608,19 @@ function EditorTopBar({ onBack }: { onBack: () => void }): React.ReactElement {
                 style={styles.backButton}
                 onPress={onBack}
             >
-                <Text style={styles.backText}>‹</Text>
+                <AppText style={styles.backText}>‹</AppText>
             </Pressable>
-            <Text style={styles.topBarTitle} numberOfLines={1}>
+            <AppText style={styles.topBarTitle} numberOfLines={1}>
                 Group info
-            </Text>
+            </AppText>
             <View style={styles.topBarSpacer} />
         </View>
     );
 }
 
-const styles = StyleSheet.create({
-    root: { flex: 1, backgroundColor: palette.background },
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+    root: { flex: 1, backgroundColor: 'transparent' },
     flex1: { flex: 1 },
     topBar: {
         flexDirection: 'row',
@@ -620,8 +628,8 @@ const styles = StyleSheet.create({
         minHeight: 52,
         paddingHorizontal: spacing.xs,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: palette.neutral[100],
-        backgroundColor: palette.elevated,
+        borderBottomColor: theme.colors.border,
+        backgroundColor: theme.colors.glassElevated,
     },
     backButton: {
         width: 44,
@@ -629,13 +637,13 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    backText: { fontSize: 32, lineHeight: 34, color: palette.neutral[900] },
+    backText: { fontSize: 32, lineHeight: 34, color: theme.colors.text },
     topBarTitle: {
         flex: 1,
         textAlign: 'center',
         fontSize: 16,
         fontWeight: '700',
-        color: palette.neutral[900],
+        color: theme.colors.text,
     },
     topBarSpacer: { width: 44 },
     scroll: {
@@ -648,7 +656,7 @@ const styles = StyleSheet.create({
         gap: spacing.sm,
         padding: spacing.md,
         borderRadius: radii.md,
-        backgroundColor: palette.elevated,
+        backgroundColor: theme.colors.glassElevated,
     },
     photoSpinner: {
         position: 'absolute',
@@ -659,7 +667,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         borderRadius: radii.full,
-        backgroundColor: 'rgba(0,0,0,0.35)',
+        backgroundColor: withAlpha(theme.colors.background, 0.62),
     },
     photoActions: {
         flexDirection: 'row',
@@ -672,10 +680,10 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.xs,
         borderRadius: radii.sm,
         borderWidth: 1,
-        borderColor: palette.primary[500],
+        borderColor: theme.accent,
     },
     secondaryButtonText: {
-        color: palette.primary[700],
+        color: theme.accent,
         fontSize: 14,
         fontWeight: '600',
     },
@@ -684,10 +692,10 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.xs,
         borderRadius: radii.sm,
         borderWidth: 1,
-        borderColor: palette.semantic.danger,
+        borderColor: theme.colors.danger,
     },
     dangerButtonText: {
-        color: palette.semantic.danger,
+        color: theme.colors.danger,
         fontSize: 14,
         fontWeight: '600',
     },
@@ -695,33 +703,33 @@ const styles = StyleSheet.create({
         gap: spacing.xxs,
         padding: spacing.md,
         borderRadius: radii.md,
-        backgroundColor: palette.elevated,
+        backgroundColor: theme.colors.glassElevated,
     },
     label: {
-        ...typography.caption,
-        color: palette.neutral[700],
+        ...theme.type.caption,
+        color: theme.colors.text,
         fontWeight: '600',
     },
     input: {
         borderWidth: 1,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
         borderRadius: radii.sm,
         paddingHorizontal: spacing.sm,
         paddingVertical: spacing.xs + 2,
         fontSize: 16,
-        color: palette.neutral[900],
-        backgroundColor: palette.elevated,
+        color: theme.colors.text,
+        backgroundColor: theme.colors.glassElevated,
     },
-    inputInvalid: { borderColor: palette.semantic.danger },
+    inputInvalid: { borderColor: theme.colors.danger },
     multiline: { minHeight: 110 },
     counter: {
-        ...typography.caption,
+        ...theme.type.caption,
         alignSelf: 'flex-end',
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
     },
     errorText: {
-        ...typography.caption,
-        color: palette.semantic.danger,
+        ...theme.type.caption,
+        color: theme.colors.danger,
         textAlign: 'center',
     },
     actions: { gap: spacing.xs },
@@ -729,10 +737,10 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingVertical: spacing.sm + 2,
         borderRadius: radii.sm,
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
     },
     saveButtonText: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 16,
         fontWeight: '600',
     },
@@ -743,10 +751,10 @@ const styles = StyleSheet.create({
         gap: spacing.xs,
         paddingVertical: spacing.sm,
     },
-    caption: typography.caption,
+    caption: theme.type.caption,
     limitHint: {
-        ...typography.caption,
-        color: palette.neutral[500],
+        ...theme.type.caption,
+        color: theme.colors.textSecondary,
         textAlign: 'center',
     },
     disabled: { opacity: 0.5 },
@@ -763,10 +771,10 @@ const styles = StyleSheet.create({
         borderRadius: radii.sm,
         paddingHorizontal: spacing.md,
         paddingVertical: spacing.xs,
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
     },
     retryText: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 14,
         fontWeight: '600',
     },

@@ -7,11 +7,15 @@ import {
     Text,
     View,
 } from 'react-native';
-import { SafeText, UserAvatar } from '../../shared/components';
+import { SafeText, UserAvatar,
+    AppText,
+} from '../../shared/components';
 import { palette, radii, spacing, typography } from '../../shared/theme';
 import type { ReactionGroupDto, ReactionUserDto } from '../../core/api';
 import { fetchMessageReactions } from './messages-socket-api';
 import type { ChatMessage } from './messages-model';
+import { useTheme, useThemedStyles } from '../../shared/theme';
+import type { AppTheme } from '../../shared/theme';
 
 /**
  * Reactor list for one message (`getMessageReactions`), rendered as the centered
@@ -29,6 +33,8 @@ export function MessageReactionsCard({
     currentUserId: number | null;
     onOpenUser: (user: ReactionUserDto) => void;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const messageId = message.id;
     const [groups, setGroups] = useState<ReactionGroupDto[]>([]);
     const [loading, setLoading] = useState(true);
@@ -70,20 +76,20 @@ export function MessageReactionsCard({
 
     return (
         <View style={styles.card} accessibilityViewIsModal={true}>
-            <Text style={styles.title} accessibilityRole="header">
+            <AppText style={styles.title} accessibilityRole="header">
                 {total > 0 ? `Reactions · ${total}` : 'Reactions'}
-            </Text>
+            </AppText>
             {loading ? (
                 <View style={styles.state}>
                     <ActivityIndicator
                         size="small"
-                        color={palette.primary[500]}
+                        color={theme.accent}
                     />
-                    <Text style={styles.stateText}>Loading reactions…</Text>
+                    <AppText style={styles.stateText}>Loading reactions…</AppText>
                 </View>
             ) : error !== null ? (
                 <View style={styles.state}>
-                    <Text style={styles.errorText}>{error}</Text>
+                    <AppText style={styles.errorText}>{error}</AppText>
                     <Pressable
                         accessibilityRole="button"
                         accessibilityLabel="Retry loading reactions"
@@ -92,12 +98,12 @@ export function MessageReactionsCard({
                         }
                         style={styles.retry}
                     >
-                        <Text style={styles.retryText}>Retry</Text>
+                        <AppText style={styles.retryText}>Retry</AppText>
                     </Pressable>
                 </View>
             ) : groups.length === 0 ? (
                 <View style={styles.state}>
-                    <Text style={styles.stateText}>No reactions yet</Text>
+                    <AppText style={styles.stateText}>No reactions yet</AppText>
                 </View>
             ) : (
                 <ScrollView
@@ -106,9 +112,9 @@ export function MessageReactionsCard({
                 >
                     {groups.map((group) => (
                         <View key={group.emoji} style={styles.group}>
-                            <Text style={styles.groupTitle}>
+                            <AppText style={styles.groupTitle}>
                                 {group.emoji} {group.count}
-                            </Text>
+                            </AppText>
                             {group.users.map((user) => {
                                 const self =
                                     currentUserId !== null &&
@@ -148,12 +154,12 @@ export function MessageReactionsCard({
                                             </SafeText>
                                             {user.username !== null &&
                                                 user.username !== '' && (
-                                                    <Text
+                                                    <AppText
                                                         style={styles.username}
                                                         numberOfLines={1}
                                                     >
                                                         @{user.username}
-                                                    </Text>
+                                                    </AppText>
                                                 )}
                                         </View>
                                     </Pressable>
@@ -167,25 +173,26 @@ export function MessageReactionsCard({
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     card: {
         flex: 1,
-        backgroundColor: palette.elevated,
+        backgroundColor: theme.colors.glassElevated,
         borderRadius: radii.lg,
         borderWidth: StyleSheet.hairlineWidth * 2,
-        borderColor: palette.border.strong,
+        borderColor: theme.colors.borderStrong,
         paddingVertical: spacing.md,
         paddingHorizontal: spacing.md,
     },
-    title: { ...typography.title, fontSize: 18 },
+    title: { ...theme.type.title, fontSize: 18 },
     state: {
         alignItems: 'center',
         gap: spacing.sm,
         paddingVertical: spacing.lg,
     },
-    stateText: { color: palette.text.muted, fontSize: 14 },
+    stateText: { color: theme.colors.textMuted, fontSize: 14 },
     errorText: {
-        color: palette.semantic.danger,
+        color: theme.colors.danger,
         fontSize: 14,
         textAlign: 'center',
     },
@@ -193,14 +200,14 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.md,
         paddingVertical: spacing.xs,
         borderRadius: radii.sm,
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
     },
-    retryText: { color: palette.text.onAccent, fontWeight: '700' },
+    retryText: { color: theme.colors.accentText, fontWeight: '700' },
     list: { marginTop: spacing.sm, flexGrow: 0 },
     listContent: { gap: spacing.md, paddingBottom: spacing.sm },
     group: { gap: spacing.xxs },
     groupTitle: {
-        color: palette.text.secondary,
+        color: theme.colors.textSecondary,
         fontSize: 14,
         fontWeight: '700',
     },
@@ -213,9 +220,9 @@ const styles = StyleSheet.create({
     pressed: { opacity: 0.6 },
     userText: { flexShrink: 1, minWidth: 0 },
     userName: {
-        color: palette.text.primary,
+        color: theme.colors.text,
         fontSize: 14,
         fontWeight: '600',
     },
-    username: { color: palette.text.muted, fontSize: 12 },
+    username: { color: theme.colors.textMuted, fontSize: 12 },
 });

@@ -1,6 +1,5 @@
 import { Tabs } from 'expo-router/js-tabs';
 import { PillTabBar } from '../../../shared/tab-bar';
-import { palette } from '../../../shared/components';
 
 /**
  * Tab group inside the protected stack. The group name is parenthesised, so
@@ -22,7 +21,8 @@ export default function TabsLayout(): React.ReactElement {
             tabBar={(props): React.ReactElement => <PillTabBar {...props} />}
             screenOptions={{
                 headerShown: false,
-                sceneStyle: { backgroundColor: palette.background },
+                // Transparent: the root background layer shows through.
+                sceneStyle: { backgroundColor: 'transparent' },
             }}
         >
             <Tabs.Screen name="index" />

@@ -8,6 +8,7 @@ export * from './form-button';
 export * from './user-avatar';
 export * from './avatar';
 export * from './glass-surface';
+export * from './opaque-route';
 export * from './glass-card';
 export * from './glass-header';
 export * from './glass-tab-bar';

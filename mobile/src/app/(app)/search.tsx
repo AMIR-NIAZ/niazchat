@@ -51,6 +51,8 @@ import { getMembership } from '../../features/groups/use-group-membership';
 import { toast } from '../../shared/dialog';
 import { searchUsers } from '../../features/users/users-service';
 import { ApiError } from '../../core/api';
+import { useTheme, useThemedStyles } from '../../shared/theme';
+import type { AppTheme } from '../../shared/theme';
 
 /**
  * Global search screen ("Chats" + "People") opened from the chat-list header.
@@ -83,6 +85,8 @@ function describeSearchError(error: unknown): string {
 }
 
 export default function SearchScreen(): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const queryClient = useQueryClient();
     const insets = useSafeAreaInsets();
     const reduceMotion = useReducedMotion();
@@ -295,19 +299,19 @@ export default function SearchScreen(): React.ReactElement {
                     style={styles.backButton}
                     onPress={(): void => router.back()}
                 >
-                    <Text style={styles.backText}>‹</Text>
+                    <AppText style={styles.backText}>‹</AppText>
                 </Pressable>
                 <View style={styles.field}>
                     <Search
                         size={18}
-                        color={palette.text.muted}
+                        color={theme.colors.textMuted}
                         strokeWidth={2}
                     />
                     <TextInput
                         style={styles.input}
                         placeholder="Search chats and people"
-                        placeholderTextColor={palette.text.muted}
-                        selectionColor={palette.primary[300]}
+                        placeholderTextColor={theme.colors.textMuted}
+                        selectionColor={theme.accent}
                         value={query}
                         onChangeText={setQuery}
                         autoFocus={true}
@@ -324,7 +328,7 @@ export default function SearchScreen(): React.ReactElement {
                         >
                             <X
                                 size={18}
-                                color={palette.text.secondary}
+                                color={theme.colors.textSecondary}
                                 strokeWidth={2}
                             />
                         </Pressable>
@@ -431,9 +435,9 @@ export default function SearchScreen(): React.ReactElement {
                                         }}
                                         style={styles.retryButton}
                                     >
-                                        <Text style={styles.retryText}>
+                                        <AppText style={styles.retryText}>
                                             Retry
-                                        </Text>
+                                        </AppText>
                                     </Pressable>
                                 </View>
                             ) : normalizedPeopleQuery === null ? (
@@ -513,6 +517,7 @@ function Section(props: {
     action?: { label: string; onPress: () => void } | undefined;
     children: React.ReactNode;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.section}>
             <View style={styles.sectionHead}>
@@ -526,9 +531,9 @@ function Section(props: {
                         hitSlop={6}
                         onPress={props.action.onPress}
                     >
-                        <Text style={styles.sectionAction}>
+                        <AppText style={styles.sectionAction}>
                             {props.action.label}
-                        </Text>
+                        </AppText>
                     </Pressable>
                 )}
             </View>
@@ -545,6 +550,7 @@ function ResultRow(props: {
     children: React.ReactNode;
     trailing?: React.ReactNode;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <Pressable
             accessibilityRole="button"
@@ -567,6 +573,8 @@ function RecentRow(props: {
     onRemove: () => void;
     opening: boolean;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const { entry } = props;
     return (
         <ResultRow
@@ -581,7 +589,7 @@ function RecentRow(props: {
                     {props.opening && (
                         <ActivityIndicator
                             size="small"
-                            color={palette.primary[300]}
+                            color={theme.accent}
                         />
                     )}
                     <Pressable
@@ -592,7 +600,7 @@ function RecentRow(props: {
                     >
                         <X
                             size={16}
-                            color={palette.text.muted}
+                            color={theme.colors.textMuted}
                             strokeWidth={2}
                         />
                     </Pressable>
@@ -608,13 +616,13 @@ function RecentRow(props: {
                 size={44}
             />
             <View style={styles.rowBody}>
-                <SafeText style={typography.body} lines={1}>
+                <SafeText style={theme.type.body} lines={1}>
                     {entry.name}
                 </SafeText>
                 {entry.kind === 'user' && (
-                    <Text style={typography.caption} numberOfLines={1}>
+                    <AppText style={theme.type.caption} numberOfLines={1}>
                         @{entry.username}
-                    </Text>
+                    </AppText>
                 )}
             </View>
         </ResultRow>
@@ -626,6 +634,8 @@ function ChatResultRow(props: {
     currentUserId: number | null;
     onPress: () => void;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const { chat, currentUserId } = props;
     return (
         <ResultRow
@@ -639,12 +649,12 @@ function ChatResultRow(props: {
                 size={44}
             />
             <View style={styles.rowBody}>
-                <SafeText style={typography.body} lines={1}>
+                <SafeText style={theme.type.body} lines={1}>
                     {displayTitle(chat)}
                 </SafeText>
-                <Text style={typography.caption} numberOfLines={1}>
+                <AppText style={theme.type.caption} numberOfLines={1}>
                     {chatPreviewText(chat.lastMessage, currentUserId)}
-                </Text>
+                </AppText>
             </View>
         </ResultRow>
     );
@@ -656,6 +666,8 @@ function PersonRow(props: {
     onPress: () => void;
     onLongPress: () => void;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     return (
         <ResultRow
             accessibilityLabel={`Message ${props.item.name}`}
@@ -665,7 +677,7 @@ function PersonRow(props: {
                 props.opening ? (
                     <ActivityIndicator
                         size="small"
-                        color={palette.primary[300]}
+                        color={theme.accent}
                     />
                 ) : undefined
             }
@@ -677,12 +689,12 @@ function PersonRow(props: {
                 size={44}
             />
             <View style={styles.rowBody}>
-                <SafeText style={typography.body} lines={1}>
+                <SafeText style={theme.type.body} lines={1}>
                     {props.item.name}
                 </SafeText>
-                <Text style={typography.caption} numberOfLines={1}>
+                <AppText style={theme.type.caption} numberOfLines={1}>
                     @{props.item.username}
-                </Text>
+                </AppText>
             </View>
         </ResultRow>
     );
@@ -690,6 +702,8 @@ function PersonRow(props: {
 
 /** Loading placeholder rows for the server "People" search. */
 function SkeletonRows(): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     return (
         <>
             {[0, 1, 2].map((index) => (
@@ -710,18 +724,19 @@ function SkeletonRows(): React.ReactElement {
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: palette.background,
+        backgroundColor: 'transparent',
     },
     topBar: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: spacing.xs,
         borderBottomWidth: 1,
-        borderBottomColor: palette.border.subtle,
-        backgroundColor: palette.glass.header,
+        borderBottomColor: theme.colors.border,
+        backgroundColor: theme.colors.glassHeader,
     },
     backButton: {
         width: 40,
@@ -730,7 +745,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     backText: {
-        color: palette.primary[600],
+        color: theme.accent,
         fontSize: 26,
         fontWeight: '700',
     },
@@ -742,14 +757,14 @@ const styles = StyleSheet.create({
         minHeight: 40,
         borderRadius: radii.full,
         borderWidth: 1,
-        borderColor: palette.border.subtle,
-        backgroundColor: palette.glass.elevated,
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.glassElevated,
         paddingHorizontal: spacing.sm,
     },
     input: {
         flex: 1,
-        ...typography.body,
-        color: palette.text.primary,
+        ...theme.type.body,
+        color: theme.colors.text,
         paddingVertical: spacing.xs,
     },
     results: { flex: 1 },
@@ -761,13 +776,13 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         paddingVertical: spacing.xxs,
     },
-    sectionTitle: { color: palette.text.secondary },
+    sectionTitle: { color: theme.colors.textSecondary },
     sectionAction: {
-        color: palette.primary[600],
+        color: theme.accent,
         fontSize: 13,
         fontWeight: '600',
     },
-    hint: { color: palette.text.muted, paddingVertical: spacing.xs },
+    hint: { color: theme.colors.textMuted, paddingVertical: spacing.xs },
     row: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -776,7 +791,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.xxs,
         borderRadius: radii.sm,
     },
-    rowPressed: { backgroundColor: palette.glass.highlight },
+    rowPressed: { backgroundColor: theme.colors.accentSoft },
     rowBody: { flex: 1, minWidth: 0, gap: 2 },
     rowTrailing: {
         flexDirection: 'row',
@@ -787,12 +802,12 @@ const styles = StyleSheet.create({
         width: 44,
         height: 44,
         borderRadius: radii.full / 2,
-        backgroundColor: palette.glass.highlight,
+        backgroundColor: theme.colors.accentSoft,
     },
     skeletonLine: {
         height: 10,
         borderRadius: radii.full / 2,
-        backgroundColor: palette.glass.highlight,
+        backgroundColor: theme.colors.accentSoft,
         width: 140,
     },
     skeletonLineShort: { width: 90 },
@@ -804,25 +819,25 @@ const styles = StyleSheet.create({
     },
     errorText: {
         flex: 1,
-        ...typography.caption,
-        color: palette.semantic.danger,
+        ...theme.type.caption,
+        color: theme.colors.danger,
     },
     retryButton: {
         borderWidth: 1,
-        borderColor: palette.border.strong,
+        borderColor: theme.colors.borderStrong,
         borderRadius: radii.full,
         paddingHorizontal: spacing.sm,
         paddingVertical: 4,
-        backgroundColor: palette.glass.elevated,
+        backgroundColor: theme.colors.glassElevated,
     },
     retryText: {
-        color: palette.primary[600],
+        color: theme.accent,
         fontSize: 13,
         fontWeight: '600',
     },
     noResults: {
         textAlign: 'center',
         marginTop: spacing.xl,
-        color: palette.text.secondary,
+        color: theme.colors.textSecondary,
     },
 });

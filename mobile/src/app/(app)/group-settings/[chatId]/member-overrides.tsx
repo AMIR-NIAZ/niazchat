@@ -18,6 +18,7 @@ import {
     radii,
     spacing,
     typography,
+    AppText,
 } from '../../../../shared/components';
 import type {
     MemberPermissionOverrideMap,
@@ -38,6 +39,8 @@ import {
     useResetMemberPermissionOverrides,
     useUpdateMemberPermissionOverrides,
 } from '../../../../features/groups/use-group';
+import { useTheme, useThemedStyles } from '../../../../shared/theme';
+import type { AppTheme } from '../../../../shared/theme';
 
 /**
  * Individual member override editor
@@ -70,6 +73,7 @@ function parseName(value: string | string[] | undefined): string {
 const ACTION_BAR_HEIGHT = 82;
 
 export default function MemberOverridesScreen(): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     const params = useLocalSearchParams<RouteParams>();
     const chatId = parsePositiveInt(params.chatId);
     const memberId = parsePositiveInt(params.memberId);
@@ -103,6 +107,8 @@ function MemberOverridesPanel(props: {
     memberId: number;
     memberName: string;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const { chatId, memberId, memberName } = props;
     const insets = useSafeAreaInsets();
     const infoQuery = useGroupInfo(chatId);
@@ -284,11 +290,11 @@ function MemberOverridesPanel(props: {
                 <SafeText style={styles.headerTitle} lines={2}>
                     Permissions for {memberName}
                 </SafeText>
-                <Text style={styles.headerCaption}>
+                <AppText style={styles.headerCaption}>
                     Inherit uses the group default. Allow or Deny overrides it
                     for this member only. The server applies the effective value
                     to every action.
-                </Text>
+                </AppText>
                 <View style={styles.legendRow}>
                     <LegendPill state="inherit" />
                     <LegendPill state="allow" />
@@ -297,7 +303,7 @@ function MemberOverridesPanel(props: {
 
                 {GROUP_MEMBER_PERMISSION_SECTIONS.map((section) => (
                     <View key={section.key} style={styles.section}>
-                        <Text style={styles.sectionLabel}>{section.title}</Text>
+                        <AppText style={styles.sectionLabel}>{section.title}</AppText>
                         <View style={styles.card}>
                             {section.permissions.map((key, index) => (
                                 <OverrideRow
@@ -320,12 +326,12 @@ function MemberOverridesPanel(props: {
                 ))}
 
                 <View style={styles.resetCard}>
-                    <Text style={styles.resetTitle}>
+                    <AppText style={styles.resetTitle}>
                         Reset to group defaults
-                    </Text>
-                    <Text style={styles.resetDetail}>
+                    </AppText>
+                    <AppText style={styles.resetDetail}>
                         Removes every override for this member.
-                    </Text>
+                    </AppText>
                     <Pressable
                         accessibilityRole="button"
                         accessibilityLabel="Reset to group defaults"
@@ -338,9 +344,9 @@ function MemberOverridesPanel(props: {
                             saving && styles.buttonDisabled,
                         ]}
                     >
-                        <Text style={styles.resetButtonText}>
+                        <AppText style={styles.resetButtonText}>
                             Reset all overrides
-                        </Text>
+                        </AppText>
                     </Pressable>
                 </View>
             </ScrollView>
@@ -373,7 +379,7 @@ function MemberOverridesPanel(props: {
                             pressed && dirty && !saving && styles.buttonPressed,
                         ]}
                     >
-                        <Text style={styles.secondaryText}>Discard</Text>
+                        <AppText style={styles.secondaryText}>Discard</AppText>
                     </Pressable>
                     <Pressable
                         accessibilityRole="button"
@@ -390,10 +396,10 @@ function MemberOverridesPanel(props: {
                         {saving ? (
                             <ActivityIndicator
                                 size="small"
-                                color={palette.text.onAccent}
+                                color={theme.colors.accentText}
                             />
                         ) : (
-                            <Text style={styles.primaryText}>Save changes</Text>
+                            <AppText style={styles.primaryText}>Save changes</AppText>
                         )}
                     </Pressable>
                 </View>
@@ -411,6 +417,7 @@ function OverrideRow(props: {
     divider: boolean;
     onChange: (state: MemberPermissionOverrideState) => void;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     const meta = GROUP_MEMBER_PERMISSION_META[props.permissionKey];
     const reason =
         props.value === 'inherit'
@@ -424,10 +431,10 @@ function OverrideRow(props: {
         <View style={[styles.row, props.divider && styles.rowDivider]}>
             <View style={styles.rowHeader}>
                 <View style={styles.rowBody}>
-                    <Text style={styles.rowTitle}>{meta.title}</Text>
-                    <Text style={styles.rowDescription}>
+                    <AppText style={styles.rowTitle}>{meta.title}</AppText>
+                    <AppText style={styles.rowDescription}>
                         {meta.description}
-                    </Text>
+                    </AppText>
                 </View>
                 <View
                     style={[
@@ -437,7 +444,7 @@ function OverrideRow(props: {
                             : styles.effectiveDenied,
                     ]}
                 >
-                    <Text
+                    <AppText
                         style={[
                             styles.effectiveText,
                             props.effective
@@ -446,10 +453,10 @@ function OverrideRow(props: {
                         ]}
                     >
                         {props.effective ? 'Allowed' : 'Denied'}
-                    </Text>
+                    </AppText>
                 </View>
             </View>
-            <Text style={styles.rowReason}>{reason}</Text>
+            <AppText style={styles.rowReason}>{reason}</AppText>
             <View style={styles.segmented}>
                 {MEMBER_PERMISSION_OVERRIDE_STATES.map((state) => {
                     const selected = props.value === state;
@@ -479,14 +486,14 @@ function OverrideRow(props: {
                                 props.disabled && styles.buttonDisabled,
                             ]}
                         >
-                            <Text
+                            <AppText
                                 style={[
                                     styles.segmentText,
                                     selected && styles.segmentTextSelected,
                                 ]}
                             >
                                 {memberPermissionOverrideLabel(state)}
-                            </Text>
+                            </AppText>
                         </Pressable>
                     );
                 })}
@@ -498,6 +505,7 @@ function OverrideRow(props: {
 function LegendPill(props: {
     state: MemberPermissionOverrideState;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <View
             style={[
@@ -506,9 +514,9 @@ function LegendPill(props: {
                 props.state === 'deny' && styles.legendDeny,
             ]}
         >
-            <Text style={styles.legendText}>
+            <AppText style={styles.legendText}>
                 {memberPermissionOverrideLabel(props.state)}
-            </Text>
+            </AppText>
         </View>
     );
 }
@@ -517,6 +525,7 @@ function TopBar(props: {
     memberName: string;
     onBack: () => void;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.topBar}>
             <Pressable
@@ -525,12 +534,12 @@ function TopBar(props: {
                 style={styles.backButton}
                 onPress={props.onBack}
             >
-                <Text style={styles.backText}>‹</Text>
+                <AppText style={styles.backText}>‹</AppText>
             </Pressable>
             <View style={styles.topBarTitles}>
-                <Text style={styles.topBarTitle} numberOfLines={1}>
+                <AppText style={styles.topBarTitle} numberOfLines={1}>
                     Member permissions
-                </Text>
+                </AppText>
                 <SafeText style={styles.topBarSubtitle} lines={1}>
                     {props.memberName}
                 </SafeText>
@@ -541,12 +550,14 @@ function TopBar(props: {
 }
 
 function LoadingState(props: { memberName: string }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.centered}>
-            <ActivityIndicator size="large" color={palette.primary[500]} />
-            <Text style={styles.caption}>
+            <ActivityIndicator size="large" color={theme.accent} />
+            <AppText style={styles.caption}>
                 Loading permissions for {props.memberName}…
-            </Text>
+            </AppText>
         </View>
     );
 }
@@ -556,10 +567,11 @@ function StateBlock(props: {
     detail: string;
     onRetry?: () => void;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.centered}>
-            <Text style={styles.stateTitle}>{props.title}</Text>
-            <Text style={styles.stateDetail}>{props.detail}</Text>
+            <AppText style={styles.stateTitle}>{props.title}</AppText>
+            <AppText style={styles.stateDetail}>{props.detail}</AppText>
             {props.onRetry !== undefined && (
                 <Pressable
                     accessibilityRole="button"
@@ -567,7 +579,7 @@ function StateBlock(props: {
                     style={styles.retryButton}
                     onPress={props.onRetry}
                 >
-                    <Text style={styles.retryText}>Retry</Text>
+                    <AppText style={styles.retryText}>Retry</AppText>
                 </Pressable>
             )}
             <Pressable
@@ -576,7 +588,7 @@ function StateBlock(props: {
                 style={styles.backLink}
                 onPress={(): void => router.back()}
             >
-                <Text style={styles.backLinkText}>Go back</Text>
+                <AppText style={styles.backLinkText}>Go back</AppText>
             </Pressable>
         </View>
     );
@@ -589,6 +601,7 @@ function describeError(error: unknown): string {
 }
 
 function showSaveError(error: unknown): void {
+    const theme = useTheme();
     dialog.show({
         title: 'Could not save permissions',
         message: describeError(error),
@@ -596,16 +609,17 @@ function showSaveError(error: unknown): void {
     });
 }
 
-const styles = StyleSheet.create({
-    screen: { flex: 1, backgroundColor: palette.background },
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+    screen: { flex: 1, backgroundColor: theme.colors.background },
     topBar: {
         flexDirection: 'row',
         alignItems: 'center',
         minHeight: 52,
         paddingHorizontal: spacing.xs,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: palette.border.subtle,
-        backgroundColor: palette.surface,
+        borderBottomColor: theme.colors.border,
+        backgroundColor: theme.colors.glassSurface,
     },
     backButton: {
         width: 44,
@@ -613,7 +627,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    backText: { fontSize: 32, lineHeight: 34, color: palette.neutral[900] },
+    backText: { fontSize: 32, lineHeight: 34, color: theme.colors.text },
     topBarTitles: {
         flex: 1,
         minWidth: 0,
@@ -622,12 +636,12 @@ const styles = StyleSheet.create({
     topBarTitle: {
         fontSize: 17,
         fontWeight: '700',
-        color: palette.neutral[900],
+        color: theme.colors.text,
     },
     topBarSubtitle: {
         marginTop: 1,
         fontSize: 12,
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
     },
     topBarSpacer: { width: 44 },
     scroll: { flex: 1 },
@@ -636,13 +650,13 @@ const styles = StyleSheet.create({
         paddingTop: spacing.md,
     },
     headerTitle: {
-        ...typography.title,
-        color: palette.neutral[900],
+        ...theme.type.title,
+        color: theme.colors.text,
         marginBottom: spacing.xxs,
     },
     headerCaption: {
-        ...typography.caption,
-        color: palette.neutral[500],
+        ...theme.type.caption,
+        color: theme.colors.textSecondary,
         lineHeight: 19,
     },
     legendRow: {
@@ -655,22 +669,22 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.sm,
         paddingVertical: 4,
         borderRadius: radii.full,
-        backgroundColor: palette.surface,
+        backgroundColor: theme.colors.glassSurface,
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
     },
     legendAllow: {
-        backgroundColor: 'rgba(124, 58, 237, 0.16)',
-        borderColor: palette.primary[500],
+        backgroundColor: theme.colors.accentSoft,
+        borderColor: theme.accent,
     },
     legendDeny: {
-        backgroundColor: 'rgba(248, 113, 113, 0.14)',
-        borderColor: palette.semantic.danger,
+        backgroundColor: theme.colors.dangerSoft,
+        borderColor: theme.colors.danger,
     },
     legendText: {
         fontSize: 11,
         fontWeight: '700',
-        color: palette.neutral[300],
+        color: theme.colors.textMuted,
     },
     section: { marginTop: spacing.md },
     sectionLabel: {
@@ -678,21 +692,21 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         letterSpacing: 1,
         textTransform: 'uppercase',
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
         marginBottom: spacing.xs,
         marginLeft: spacing.xxs,
     },
     card: {
         borderRadius: radii.lg,
-        backgroundColor: palette.surface,
+        backgroundColor: theme.colors.glassSurface,
         overflow: 'hidden',
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
     },
     row: { padding: spacing.md },
     rowDivider: {
         borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: palette.border.subtle,
+        borderTopColor: theme.colors.border,
     },
     rowHeader: {
         flexDirection: 'row',
@@ -703,19 +717,19 @@ const styles = StyleSheet.create({
     rowTitle: {
         fontSize: 15,
         fontWeight: '600',
-        color: palette.neutral[900],
+        color: theme.colors.text,
     },
     rowDescription: {
         marginTop: 2,
         fontSize: 12,
         lineHeight: 17,
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
     },
     rowReason: {
         marginTop: spacing.xxs,
         fontSize: 11,
         fontStyle: 'italic',
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
     },
     effectiveBadge: {
         paddingHorizontal: spacing.xs,
@@ -724,24 +738,24 @@ const styles = StyleSheet.create({
         borderWidth: StyleSheet.hairlineWidth,
     },
     effectiveAllowed: {
-        backgroundColor: 'rgba(124, 58, 237, 0.14)',
-        borderColor: 'rgba(124, 58, 237, 0.5)',
+        backgroundColor: theme.colors.accentSoft,
+        borderColor: theme.colors.accentBorder,
     },
     effectiveDenied: {
-        backgroundColor: 'rgba(248, 113, 113, 0.12)',
-        borderColor: 'rgba(248, 113, 113, 0.45)',
+        backgroundColor: theme.colors.dangerSoft,
+        borderColor: theme.colors.danger,
     },
     effectiveText: { fontSize: 10, fontWeight: '700' },
-    effectiveTextAllowed: { color: palette.primary[300] },
-    effectiveTextDenied: { color: palette.semantic.danger },
+    effectiveTextAllowed: { color: theme.accent },
+    effectiveTextDenied: { color: theme.colors.danger },
     segmented: {
         flexDirection: 'row',
         marginTop: spacing.sm,
         padding: 3,
         borderRadius: radii.md,
-        backgroundColor: palette.background,
+        backgroundColor: theme.colors.background,
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
     },
     segment: {
         flex: 1,
@@ -750,33 +764,33 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         borderRadius: radii.sm,
     },
-    segmentSelected: { backgroundColor: palette.surface },
-    segmentAllow: { backgroundColor: 'rgba(124, 58, 237, 0.22)' },
-    segmentDeny: { backgroundColor: 'rgba(248, 113, 113, 0.18)' },
+    segmentSelected: { backgroundColor: theme.colors.surface },
+    segmentAllow: { backgroundColor: theme.colors.accentSoft },
+    segmentDeny: { backgroundColor: theme.colors.dangerSoft },
     segmentPressed: { opacity: 0.7 },
     segmentText: {
         fontSize: 12,
         fontWeight: '600',
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
     },
-    segmentTextSelected: { color: palette.neutral[900] },
+    segmentTextSelected: { color: theme.colors.text },
     resetCard: {
         marginTop: spacing.lg,
         padding: spacing.md,
         borderRadius: radii.lg,
-        backgroundColor: palette.surface,
+        backgroundColor: theme.colors.glassSurface,
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
     },
     resetTitle: {
         fontSize: 15,
         fontWeight: '600',
-        color: palette.neutral[900],
+        color: theme.colors.text,
     },
     resetDetail: {
         marginTop: 2,
         fontSize: 12,
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
     },
     resetButton: {
         marginTop: spacing.sm,
@@ -785,12 +799,12 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         borderRadius: radii.md,
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.semantic.danger,
+        borderColor: theme.colors.danger,
     },
     resetButtonText: {
         fontSize: 13,
         fontWeight: '600',
-        color: palette.semantic.danger,
+        color: theme.colors.danger,
     },
     actionBar: {
         flexDirection: 'row',
@@ -798,8 +812,8 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.md,
         paddingTop: spacing.sm,
         borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: palette.border.subtle,
-        backgroundColor: palette.surface,
+        borderTopColor: theme.colors.border,
+        backgroundColor: theme.colors.glassSurface,
     },
     secondaryButton: {
         flex: 1,
@@ -808,12 +822,12 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         borderRadius: radii.md,
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
     },
     secondaryText: {
         fontSize: 14,
         fontWeight: '600',
-        color: palette.neutral[700],
+        color: theme.colors.text,
     },
     primaryButton: {
         flex: 2,
@@ -821,12 +835,12 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         borderRadius: radii.md,
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
     },
     primaryText: {
         fontSize: 14,
         fontWeight: '700',
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
     },
     buttonDisabled: { opacity: 0.45 },
     buttonPressed: { opacity: 0.8 },
@@ -839,20 +853,20 @@ const styles = StyleSheet.create({
     caption: {
         marginTop: spacing.sm,
         fontSize: 13,
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
         textAlign: 'center',
     },
     stateTitle: {
         fontSize: 17,
         fontWeight: '700',
-        color: palette.neutral[900],
+        color: theme.colors.text,
         textAlign: 'center',
     },
     stateDetail: {
         marginTop: spacing.xxs,
         fontSize: 13,
         lineHeight: 19,
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
         textAlign: 'center',
     },
     retryButton: {
@@ -860,17 +874,17 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.lg,
         paddingVertical: spacing.xs,
         borderRadius: radii.md,
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
     },
     retryText: {
         fontSize: 13,
         fontWeight: '700',
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
     },
     backLink: { marginTop: spacing.sm, padding: spacing.xs },
     backLinkText: {
         fontSize: 13,
         fontWeight: '600',
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
     },
 });

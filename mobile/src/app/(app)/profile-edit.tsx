@@ -25,6 +25,8 @@ import {
     useProfile,
     useUpdateProfile,
 } from '../../features/users';
+import { useTheme, useThemedStyles } from '../../shared/theme';
+import type { AppTheme } from '../../shared/theme';
 
 /**
  * Edit profile (`PUT /user/updateme`).
@@ -59,6 +61,8 @@ const editSchema = z.object({
 type EditFormValues = z.infer<typeof editSchema>;
 
 export default function ProfileEditScreen(): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const router = useRouter();
     const profile = useProfile();
     const updateProfile = useUpdateProfile();
@@ -101,7 +105,7 @@ export default function ProfileEditScreen(): React.ReactElement {
     if (profile.isLoading || user === null) {
         return (
             <Screen style={styles.center}>
-                <ActivityIndicator size="large" color={palette.primary[500]} />
+                <ActivityIndicator size="large" color={theme.accent} />
             </Screen>
         );
     }
@@ -188,14 +192,14 @@ export default function ProfileEditScreen(): React.ReactElement {
                     />
 
                     {submittedError !== null && (
-                        <Text style={styles.errorText}>{submittedError}</Text>
+                        <AppText style={styles.errorText}>{submittedError}</AppText>
                     )}
 
                     <View style={styles.actions}>
                         {updateProfile.isPending || profile.isLoading ? (
                             <ActivityIndicator
                                 size="small"
-                                color={palette.primary[500]}
+                                color={theme.accent}
                             />
                         ) : (
                             <>
@@ -219,12 +223,13 @@ export default function ProfileEditScreen(): React.ReactElement {
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     screen: { gap: spacing.sm, paddingHorizontal: spacing.lg },
     flex1: { flex: 1 },
     scroll: { gap: spacing.sm, paddingVertical: spacing.xs },
-    captionNote: { color: palette.neutral[500] },
+    captionNote: { color: theme.colors.textSecondary },
     actions: { flexDirection: 'row', gap: spacing.xs, marginTop: spacing.md },
-    errorText: { color: palette.semantic.danger },
+    errorText: { color: theme.colors.danger },
     center: { alignItems: 'center', justifyContent: 'center' },
 });

@@ -4,6 +4,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GlassSurface } from './glass-surface';
 import { useReducedMotion } from '../hooks/use-reduced-motion';
 import { blur, motion, palette, radii, spacing } from '../theme';
+import { useTheme, useThemedStyles } from '../theme';
+import type { AppTheme } from '../theme';
+import { AppText } from './app-text';
 
 export interface GlassTabItem {
     key: string;
@@ -35,6 +38,7 @@ export function GlassTabBar({
     onChange,
     withBottomInset = true,
 }: GlassTabBarProps): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     const insets = useSafeAreaInsets();
 
     return (
@@ -81,6 +85,8 @@ function GlassTab({
     active: boolean;
     onPress: () => void;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const progress = useRef(new Animated.Value(active ? 1 : 0)).current;
     const reduceMotion = useReducedMotion();
 
@@ -124,22 +130,23 @@ function GlassTab({
             />
             <View style={styles.tabContent}>
                 {item.glyph !== undefined && (
-                    <Text
+                    <AppText
                         style={[styles.glyph, active && styles.glyphActive]}
                         allowFontScaling={false}
                     >
                         {item.glyph}
-                    </Text>
+                    </AppText>
                 )}
-                <Text style={[styles.label, active && styles.labelActive]}>
+                <AppText style={[styles.label, active && styles.labelActive]}>
                     {item.label}
-                </Text>
+                </AppText>
             </View>
         </Pressable>
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     wrap: {
         position: 'absolute',
         left: spacing.md,
@@ -163,9 +170,9 @@ const styles = StyleSheet.create({
         right: 2,
         bottom: 2,
         borderRadius: radii.full,
-        backgroundColor: palette.glass.accent,
+        backgroundColor: theme.colors.glassAccent,
         borderWidth: 1,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
     },
     tabContent: {
         flexDirection: 'row',
@@ -174,12 +181,12 @@ const styles = StyleSheet.create({
         gap: 6,
         paddingHorizontal: spacing.xs,
     },
-    glyph: { fontSize: 16, color: palette.text.muted },
-    glyphActive: { color: palette.primary[700] },
+    glyph: { fontSize: 16, color: theme.colors.textMuted },
+    glyphActive: { color: theme.accent },
     label: {
         fontSize: 12,
         fontWeight: '600',
-        color: palette.text.muted,
+        color: theme.colors.textMuted,
     },
-    labelActive: { color: palette.highlight, fontWeight: '700' },
+    labelActive: { color: theme.accent, fontWeight: '700' },
 });

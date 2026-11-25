@@ -150,6 +150,8 @@ import type {
     ContextPopupConfig,
     PopupRect,
 } from '../../../shared/context-popup';
+import { useTheme, useThemedStyles, withAlpha } from '../../../shared/theme';
+import type { AppTheme } from '../../../shared/theme';
 
 /**
  * Conversation screen (chat list → tap → this screen).
@@ -216,6 +218,8 @@ export default function ChatDetailScreen(): React.ReactElement {
 }
 
 function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const queryClient = useQueryClient();
     const insets = useSafeAreaInsets();
     const keyboard = useAndroidKeyboardInset();
@@ -2102,7 +2106,7 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
     const headerIdentity = (
         <View style={styles.headerTitleBlock}>
             <SafeText
-                style={[typography.title, styles.headerName]}
+                style={[theme.type.title, styles.headerName]}
                 lines={1}
                 align="center"
                 maxFontSizeMultiplier={MAX_FONT_SCALE}
@@ -2304,14 +2308,14 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                             style={styles.selectionAction}
                             onPress={exitSelection}
                         >
-                            <Text style={styles.selectionCancel}>Cancel</Text>
+                            <AppText style={styles.selectionCancel}>Cancel</AppText>
                         </Pressable>
-                        <Text
+                        <AppText
                             style={styles.selectionCount}
                             accessibilityLabel={`${selectedIds.size} selected`}
                         >
                             {selectedIds.size} selected
-                        </Text>
+                        </AppText>
                         <Pressable
                             accessibilityRole="button"
                             accessibilityLabel="Forward selected messages"
@@ -2326,9 +2330,9 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                             ]}
                             onPress={(): void => setForwardOpen(true)}
                         >
-                            <Text style={styles.selectionForwardText}>
+                            <AppText style={styles.selectionForwardText}>
                                 Forward
-                            </Text>
+                            </AppText>
                         </Pressable>
                     </View>
                 ) : (
@@ -2345,12 +2349,12 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                                     style={styles.headerIconButton}
                                     onPress={(): void => router.back()}
                                 >
-                                    <Text
+                                    <AppText
                                         style={styles.backText}
                                         maxFontSizeMultiplier={MAX_FONT_SCALE}
                                     >
                                         ‹
-                                    </Text>
+                                    </AppText>
                                 </Pressable>
                                 <Pressable
                                     accessibilityRole="button"
@@ -2500,19 +2504,19 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                                             <View style={styles.olderRow}>
                                                 <ActivityIndicator
                                                     size="small"
-                                                    color={palette.primary[500]}
+                                                    color={theme.accent}
                                                 />
                                             </View>
                                         ) : conversation.loadOlderError ===
                                           NO_MORE_SAVED_MESSAGES ? (
                                             <View style={styles.olderRow}>
-                                                <Text
+                                                <AppText
                                                     style={
                                                         styles.olderRetryText
                                                     }
                                                 >
                                                     No more saved messages
-                                                </Text>
+                                                </AppText>
                                             </View>
                                         ) : conversation.loadOlderError !==
                                           null ? (
@@ -2524,14 +2528,14 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                                                     conversation.loadOlder()
                                                 }
                                             >
-                                                <Text
+                                                <AppText
                                                     style={
                                                         styles.olderRetryText
                                                     }
                                                 >
                                                     Couldn&apos;t load older
                                                     messages · Retry
-                                                </Text>
+                                                </AppText>
                                             </Pressable>
                                         ) : undefined}
                                     </>
@@ -2551,11 +2555,11 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                             >
                                 <ActivityIndicator
                                     size="small"
-                                    color={palette.primary[500]}
+                                    color={theme.accent}
                                 />
-                                <Text style={styles.jumpBannerText}>
+                                <AppText style={styles.jumpBannerText}>
                                     Looking for the message…
-                                </Text>
+                                </AppText>
                             </View>
                         )}
                     </KeyboardAvoidingView>
@@ -2587,17 +2591,17 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                     >
                         <OfflineCaption />
                         {conversation.sendError !== null && (
-                            <Text style={styles.sendError}>
+                            <AppText style={styles.sendError}>
                                 {conversation.sendError}
-                            </Text>
+                            </AppText>
                         )}
                         {conversation.reactionError !== null && (
-                            <Text style={styles.sendError}>
+                            <AppText style={styles.sendError}>
                                 {conversation.reactionError}
-                            </Text>
+                            </AppText>
                         )}
                         {jumpNotice !== null && (
-                            <Text style={styles.jumpNotice}>{jumpNotice}</Text>
+                            <AppText style={styles.jumpNotice}>{jumpNotice}</AppText>
                         )}
                     </View>
                 )}
@@ -2605,16 +2609,16 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                 {blocked && (
                     <View style={styles.blockedNotice}>
                         <View style={styles.blockedTextWrap}>
-                            <Text style={styles.blockedTitle}>
+                            <AppText style={styles.blockedTitle}>
                                 {blockedByMe
                                     ? 'You blocked this user'
                                     : "You can't send messages"}
-                            </Text>
-                            <Text style={styles.blockedDetail}>
+                            </AppText>
+                            <AppText style={styles.blockedDetail}>
                                 {blockedByMe
                                     ? 'Unblock to send and receive messages again.'
                                     : 'Messages can no longer be sent in this conversation.'}
-                            </Text>
+                            </AppText>
                         </View>
                         {blockedByMe && (
                             <Pressable
@@ -2630,9 +2634,9 @@ function ChatDetail({ chatId }: { chatId: number }): React.ReactElement {
                                 ]}
                                 onPress={requestToggleBlock}
                             >
-                                <Text style={styles.blockedAction}>
+                                <AppText style={styles.blockedAction}>
                                     Unblock
-                                </Text>
+                                </AppText>
                             </Pressable>
                         )}
                     </View>
@@ -2717,6 +2721,8 @@ interface MessageActionModalProps {
 function MessageActionModal(
     props: MessageActionModalProps,
 ): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     if (props.target === null) {
         return <View />;
     }
@@ -2751,17 +2757,17 @@ function MessageActionModal(
                             autoFocus={true}
                         />
                         {props.error !== null && (
-                            <Text
-                                style={[typography.caption, styles.modalError]}
+                            <AppText
+                                style={[theme.type.caption, styles.modalError]}
                             >
                                 {props.error}
-                            </Text>
+                            </AppText>
                         )}
                         <View style={styles.modalActions}>
                             {props.busy ? (
                                 <ActivityIndicator
                                     size="small"
-                                    color={palette.primary[500]}
+                                    color={theme.accent}
                                 />
                             ) : (
                                 <>
@@ -2794,6 +2800,7 @@ function FormButtonSmall(props: {
     intent?: 'primary' | 'danger';
     disabled?: boolean;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <Pressable
             accessibilityRole="button"
@@ -2805,15 +2812,17 @@ function FormButtonSmall(props: {
             disabled={props.disabled}
             onPress={props.onPress}
         >
-            <Text style={styles.smallButtonText}>{props.label}</Text>
+            <AppText style={styles.smallButtonText}>{props.label}</AppText>
         </Pressable>
     );
 }
 
 function LoadingBlock(): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     return (
         <Screen style={styles.center}>
-            <ActivityIndicator size="large" color={palette.primary[500]} />
+            <ActivityIndicator size="large" color={theme.accent} />
         </Screen>
     );
 }
@@ -2823,6 +2832,7 @@ function ErrorBlock(props: {
     detail: string;
     onRetry: () => void;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <Screen style={styles.center}>
             <AppText variant="title">{props.title}</AppText>
@@ -2832,13 +2842,15 @@ function ErrorBlock(props: {
                 onPress={(): void => router.back()}
                 style={styles.smallButtonGhost}
             >
-                <Text style={styles.smallButtonGhostText}>Back</Text>
+                <AppText style={styles.smallButtonGhostText}>Back</AppText>
             </Pressable>
         </Screen>
     );
 }
 
 function InvalidChat(): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     return (
         <Screen style={styles.center}>
             <AppText variant="title">Invalid chat</AppText>
@@ -2846,13 +2858,14 @@ function InvalidChat(): React.ReactElement {
                 onPress={(): void => router.replace('/(app)')}
                 style={styles.smallButtonGhost}
             >
-                <Text style={styles.smallButtonGhostText}>Back to chats</Text>
+                <AppText style={styles.smallButtonGhostText}>Back to chats</AppText>
             </Pressable>
         </Screen>
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     screen: { flex: 1 },
     center: { alignItems: 'center', justifyContent: 'center' },
     // ── Full-screen list + floating chrome ──────────────────────────────────
@@ -2893,20 +2906,20 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.xs,
         paddingHorizontal: spacing.sm,
         borderRadius: radii.lg,
-        backgroundColor: palette.glass.elevated,
+        backgroundColor: theme.colors.glassElevated,
         borderWidth: 1,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
     },
     selectionAction: { paddingHorizontal: spacing.xs, paddingVertical: 4 },
     selectionCancel: {
-        color: palette.primary[700],
+        color: theme.accent,
         fontSize: 14,
         fontWeight: '600',
     },
     selectionCount: {
         flex: 1,
         textAlign: 'center',
-        color: palette.text.primary,
+        color: theme.colors.text,
         fontSize: 14,
         fontWeight: '700',
     },
@@ -2914,11 +2927,11 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.sm,
         paddingVertical: 6,
         borderRadius: radii.sm,
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
     },
-    selectionForwardDisabled: { backgroundColor: palette.neutral[300] },
+    selectionForwardDisabled: { backgroundColor: theme.colors.textMuted },
     selectionForwardText: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 13,
         fontWeight: '700',
     },
@@ -2986,17 +2999,17 @@ const styles = StyleSheet.create({
         width: 44,
         height: 44,
         borderRadius: 22,
-        backgroundColor: palette.primary[100],
+        backgroundColor: theme.colors.accentSoft,
         alignItems: 'center',
         justifyContent: 'center',
     },
     avatarFallbackText: {
-        color: palette.primary[700],
+        color: theme.accent,
         fontSize: 18,
         fontWeight: '700',
     },
     backText: {
-        color: palette.primary[600],
+        color: theme.accent,
         fontSize: 26,
         lineHeight: 30,
         fontWeight: '700',
@@ -3011,24 +3024,24 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.xs,
         borderRadius: radii.lg,
         borderWidth: 1,
-        borderColor: palette.border.subtle,
-        backgroundColor: palette.glass.elevated,
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.glassElevated,
     },
     blockedTextWrap: { flex: 1, gap: 2 },
     blockedTitle: {
-        color: palette.text.primary,
+        color: theme.colors.text,
         fontSize: 13,
         fontWeight: '700',
     },
-    blockedDetail: { color: palette.text.muted, fontSize: 12 },
+    blockedDetail: { color: theme.colors.textMuted, fontSize: 12 },
     blockedActionButton: {
         paddingHorizontal: spacing.sm,
         paddingVertical: 6,
         borderRadius: radii.full,
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
     },
     blockedAction: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 13,
         fontWeight: '700',
     },
@@ -3043,7 +3056,7 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.xs,
     },
     olderRetryText: {
-        color: palette.primary[600],
+        color: theme.accent,
         fontSize: 13,
         fontWeight: '600',
     },
@@ -3054,17 +3067,17 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: spacing.xs,
-        backgroundColor: palette.glass.elevated,
+        backgroundColor: theme.colors.glassElevated,
         borderRadius: radii.full,
         paddingHorizontal: spacing.sm,
         paddingVertical: 6,
         borderWidth: 1,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
     },
-    jumpBannerText: { color: palette.neutral[700], fontSize: 12 },
+    jumpBannerText: { color: theme.colors.text, fontSize: 12 },
     jumpNotice: {
-        color: palette.neutral[700],
-        backgroundColor: palette.neutral[100],
+        color: theme.colors.text,
+        backgroundColor: theme.colors.glassElevated,
         borderRadius: radii.sm,
         paddingHorizontal: spacing.sm,
         paddingVertical: 6,
@@ -3080,63 +3093,63 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.lg,
     },
     emptyCaption: { textAlign: 'center' },
-    sendError: { color: palette.semantic.danger, paddingBottom: spacing.xxs },
+    sendError: { color: theme.colors.danger, paddingBottom: spacing.xxs },
     smallButtonDisabled: { opacity: 0.4 },
     modalAvoid: { flex: 1, justifyContent: 'center' },
     // modals
     modalBackdrop: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.4)',
+        backgroundColor: withAlpha(theme.colors.background, 0.62),
         alignItems: 'center',
         justifyContent: 'center',
         paddingHorizontal: spacing.lg,
     },
     modalCard: {
         width: '100%',
-        backgroundColor: palette.elevated,
+        backgroundColor: theme.colors.glassElevated,
         borderWidth: 1,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
         borderRadius: radii.md,
         padding: spacing.md,
         gap: spacing.sm,
     },
     modalInput: {
         borderWidth: 1,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
         borderRadius: radii.md,
         paddingHorizontal: spacing.sm,
         paddingVertical: spacing.xs,
         minHeight: 60,
-        color: palette.text.primary,
-        backgroundColor: palette.glass.elevated,
+        color: theme.colors.text,
+        backgroundColor: theme.colors.glassElevated,
     },
-    modalError: { color: palette.semantic.danger },
+    modalError: { color: theme.colors.danger },
     modalActions: { flexDirection: 'row', gap: spacing.xs },
     smallButton: {
         alignSelf: 'flex-start',
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
         borderRadius: radii.sm,
         paddingHorizontal: spacing.sm,
         paddingVertical: 6,
     },
-    smallButtonDanger: { backgroundColor: palette.semantic.danger },
+    smallButtonDanger: { backgroundColor: theme.colors.danger },
     smallButtonText: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 13,
         fontWeight: '600',
     },
     smallButtonGhost: {
         alignSelf: 'flex-start',
         borderWidth: 1,
-        borderColor: palette.primary[500],
+        borderColor: theme.accent,
         borderRadius: radii.sm,
         paddingHorizontal: spacing.sm,
         paddingVertical: 6,
     },
     smallButtonGhostText: {
-        color: palette.primary[600],
+        color: theme.accent,
         fontSize: 13,
         fontWeight: '600',
     },
-    feedback: { color: palette.neutral[500] },
+    feedback: { color: theme.colors.textSecondary },
 });

@@ -5,7 +5,6 @@ import {
     RefreshControl,
     SectionList,
     StyleSheet,
-    Text,
     View,
 } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
@@ -26,11 +25,11 @@ import {
     SafeText,
     Screen,
     UserAvatar,
-    palette,
     radii,
     spacing,
-    typography,
 } from '../../../shared/components';
+import { useTheme, useThemedStyles } from '../../../shared/theme';
+import type { AppTheme } from '../../../shared/theme';
 import { useTabBarInset } from '../../../shared/tab-bar';
 import { dialog, toast } from '../../../shared/dialog';
 import {
@@ -78,11 +77,17 @@ import { describeSavedContactError } from '../../../features/contacts/contacts-a
  *
  * The address book is read only after the user allows access, on this tab, and
  * the rationale card is always shown BEFORE the OS prompt.
+ *
+ * Every color comes from the active theme (accent, light/dark) and the canvas
+ * stays transparent, so the global app background shows through. Text uses the
+ * shared scaled typography, so the chosen font and text size apply live.
  */
 
 const ANIMATED_ROWS = 15;
 
 export default function ContactsScreen(): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const tabBarInset = useTabBarInset();
     const queryClient = useQueryClient();
     const popup = useContextPopup();
@@ -310,8 +315,13 @@ export default function ContactsScreen(): React.ReactElement {
                             pressed && styles.pressed,
                         ]}
                     >
-                        <Text style={styles.addGlyph}>＋</Text>
-                        <Text style={styles.addText}>Add contact</Text>
+                        <AppText
+                            style={styles.addGlyph}
+                            allowFontScaling={false}
+                        >
+                            ＋
+                        </AppText>
+                        <SafeText style={styles.addText}>Add contact</SafeText>
                     </Pressable>
                 }
             >
@@ -325,7 +335,14 @@ export default function ContactsScreen(): React.ReactElement {
                 autoCapitalize="none"
                 autoCorrect={false}
                 accessibilityLabel="Search contacts"
-                leading={<Text style={styles.searchGlyph}>⌕</Text>}
+                leading={
+                    <AppText
+                        style={styles.searchGlyph}
+                        allowFontScaling={false}
+                    >
+                        ⌕
+                    </AppText>
+                }
             />
 
             <PermissionCard access={access} />
@@ -342,7 +359,7 @@ export default function ContactsScreen(): React.ReactElement {
 
             {showErrorBanner && (
                 <View style={styles.errorBanner}>
-                    <Text style={styles.errorBannerText}>{error}</Text>
+                    <AppText style={styles.errorBannerText}>{error}</AppText>
                     <Pressable
                         accessibilityRole="button"
                         accessibilityLabel="Retry loading contacts"
@@ -352,7 +369,7 @@ export default function ContactsScreen(): React.ReactElement {
                             pressed && styles.pressed,
                         ]}
                     >
-                        <Text style={styles.linkText}>Retry</Text>
+                        <AppText style={styles.linkText}>Retry</AppText>
                     </Pressable>
                 </View>
             )}
@@ -382,15 +399,15 @@ export default function ContactsScreen(): React.ReactElement {
                         <RefreshControl
                             refreshing={isRefreshing}
                             onRefresh={refresh}
-                            tintColor={palette.primary[300]}
-                            colors={[palette.primary[500]]}
+                            tintColor={theme.accent}
+                            colors={[theme.accent]}
                         />
                     }
                     renderSectionHeader={({ section }): React.ReactElement => (
                         <View style={styles.sectionHeader}>
-                            <Text style={styles.sectionTitle}>
+                            <AppText style={styles.sectionTitle}>
                                 {section.title}
-                            </Text>
+                            </AppText>
                         </View>
                     )}
                     renderItem={({ item, index }): React.ReactElement => (
@@ -414,9 +431,9 @@ export default function ContactsScreen(): React.ReactElement {
                                         pressed && styles.pressed,
                                     ]}
                                 >
-                                    <Text style={styles.linkText}>
+                                    <AppText style={styles.linkText}>
                                         Allow contacts access
-                                    </Text>
+                                    </AppText>
                                 </Pressable>
                             )}
                             {access.state === 'limited' && (
@@ -429,9 +446,9 @@ export default function ContactsScreen(): React.ReactElement {
                                         pressed && styles.pressed,
                                     ]}
                                 >
-                                    <Text style={styles.linkText}>
+                                    <AppText style={styles.linkText}>
                                         Manage access
-                                    </Text>
+                                    </AppText>
                                 </Pressable>
                             )}
                         </View>
@@ -468,6 +485,8 @@ function PermissionCard({
 }: {
     access: ContactsAccessApi;
 }): React.ReactElement | null {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     if (access.state === 'granted' || access.state === 'limited') {
         return null;
     }
@@ -480,14 +499,18 @@ function PermissionCard({
     return (
         <View style={styles.permissionCard}>
             <View style={styles.permissionIcon}>
-                <Text style={styles.permissionIconText}>👥</Text>
+                <AppText style={styles.permissionIconText} allowFontScaling={false}>
+                    👥
+                </AppText>
             </View>
-            <Text style={styles.permissionTitle}>Find your friends</Text>
-            <Text style={styles.permissionText}>
+            <AppText variant="body" style={styles.permissionTitle}>
+                Find your friends
+            </AppText>
+            <AppText variant="caption" style={styles.permissionText}>
                 Allow access to your contacts to see which of them are already
                 on the app. Matching accounts are saved on this device; your
                 address book is never uploaded.
-            </Text>
+            </AppText>
             {blocked ? (
                 <View style={styles.permissionActions}>
                     <PrimaryButton
@@ -517,12 +540,12 @@ function PermissionCard({
                         {requesting ? (
                             <ActivityIndicator
                                 size="small"
-                                color={palette.text.onAccent}
+                                color={theme.colors.accentText}
                             />
                         ) : (
-                            <Text style={styles.allowButtonText}>
+                            <SafeText style={styles.allowButtonText}>
                                 Allow access
-                            </Text>
+                            </SafeText>
                         )}
                     </Pressable>
                     <Pressable
@@ -535,7 +558,7 @@ function PermissionCard({
                             pressed && styles.pressed,
                         ]}
                     >
-                        <Text style={styles.notNowText}>Not now</Text>
+                        <SafeText style={styles.notNowText}>Not now</SafeText>
                     </Pressable>
                 </View>
             )}
@@ -558,11 +581,14 @@ function EmptyState({
     error: string | null;
     onRetry: () => void;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     if (error !== null) {
         return (
             <View style={styles.center}>
                 <AppText variant="title">Could not load contacts</AppText>
-                <AppText style={styles.detail}>{error}</AppText>
+                <AppText variant="caption" style={styles.detail}>
+                    {error}
+                </AppText>
                 <PrimaryButton
                     label="Retry"
                     onPress={onRetry}
@@ -575,7 +601,7 @@ function EmptyState({
         return (
             <View style={styles.center}>
                 <AppText variant="title">No contacts found</AppText>
-                <AppText style={styles.detail}>
+                <AppText variant="caption" style={styles.detail}>
                     Try a different name or username.
                 </AppText>
             </View>
@@ -584,10 +610,12 @@ function EmptyState({
     return (
         <View style={styles.center}>
             <View style={styles.emptyIcon}>
-                <Text style={styles.emptyIconText}>👤</Text>
+                <AppText style={styles.emptyIconText} allowFontScaling={false}>
+                    👤
+                </AppText>
             </View>
             <AppText variant="title">No contacts yet</AppText>
-            <AppText style={styles.detail}>
+            <AppText variant="caption" style={styles.detail}>
                 Add someone by phone number, or let the app find friends
                 from your phone's contacts.
             </AppText>
@@ -608,7 +636,9 @@ function EmptyState({
                         pressed && styles.pressed,
                     ]}
                 >
-                    <Text style={styles.linkText}>Allow contacts access</Text>
+                    <AppText style={styles.linkText}>
+                        Allow contacts access
+                    </AppText>
                 </Pressable>
             )}
             {access.state === 'blocked' && (
@@ -621,7 +651,7 @@ function EmptyState({
                         pressed && styles.pressed,
                     ]}
                 >
-                    <Text style={styles.linkText}>Open settings</Text>
+                    <AppText style={styles.linkText}>Open settings</AppText>
                 </Pressable>
             )}
         </View>
@@ -641,6 +671,11 @@ interface ContactRowViewProps {
     ) => void;
 }
 
+/**
+ * Memoized row: it reads the theme itself (`useTheme`/`useThemedStyles`), so a
+ * theme, accent, font or text-size change repaints it without relying on the
+ * list's `extraData`. Props only carry data and stable callbacks.
+ */
 const ContactRowView = memo(function ContactRowView({
     row,
     index,
@@ -648,6 +683,8 @@ const ContactRowView = memo(function ContactRowView({
     onPress,
     onOpenMenu,
 }: ContactRowViewProps): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const hidden = usePopupHidden(row.key);
     const ref = useRef<ViewInstance | null>(null);
     const subtitle = contactSubtitle(row);
@@ -686,25 +723,28 @@ const ContactRowView = memo(function ContactRowView({
                     size={46}
                 />
                 <View style={styles.rowBody}>
-                    <SafeText style={typography.body} lines={1}>
+                    <SafeText
+                        style={[theme.type.chatTitle, styles.rowName]}
+                        lines={1}
+                    >
                         {row.displayName}
                     </SafeText>
                     {subtitle !== null && (
-                        <Text style={typography.caption} numberOfLines={1}>
+                        <SafeText
+                            style={[theme.type.chatPreview, styles.rowSubtitle]}
+                            lines={1}
+                        >
                             {subtitle}
-                        </Text>
+                        </SafeText>
                     )}
                 </View>
                 {row.saved && (
                     <View style={styles.badge}>
-                        <Text style={styles.badgeText}>Saved</Text>
+                        <SafeText style={styles.badgeText}>Saved</SafeText>
                     </View>
                 )}
                 {opening ? (
-                    <ActivityIndicator
-                        size="small"
-                        color={palette.primary[300]}
-                    />
+                    <ActivityIndicator size="small" color={theme.accent} />
                 ) : null}
             </Pressable>
         </Animated.View>
@@ -714,6 +754,7 @@ const ContactRowView = memo(function ContactRowView({
 // ── Skeleton ────────────────────────────────────────────────────────────────
 
 function SkeletonRows(): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.skeletonList} accessibilityLabel="Loading contacts">
             {[0, 1, 2, 3, 4, 5].map(
@@ -731,190 +772,207 @@ function SkeletonRows(): React.ReactElement {
     );
 }
 
-const styles = StyleSheet.create({
-    screen: { paddingHorizontal: spacing.md, gap: spacing.sm },
-    searchGlyph: { color: palette.text.muted, fontSize: 20 },
-    pressed: { opacity: 0.6 },
-    disabled: { opacity: 0.6 },
-    addButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.xxs,
-        paddingHorizontal: spacing.sm,
-        paddingVertical: 6,
-        borderRadius: radii.full,
-        backgroundColor: palette.primary[500],
-    },
-    addGlyph: { color: palette.text.onAccent, fontSize: 14, fontWeight: '700' },
-    addText: {
-        color: palette.text.onAccent,
-        fontSize: 12,
-        fontWeight: '700',
-    },
-    counts: { color: palette.text.muted },
-    list: { flex: 1 },
-    permissionCard: {
-        alignItems: 'center',
-        gap: spacing.xxs,
-        padding: spacing.md,
-        borderRadius: radii.lg,
-        backgroundColor: palette.glass.accent,
-        borderWidth: 1,
-        borderColor: palette.border.accent,
-    },
-    permissionIcon: {
-        width: 44,
-        height: 44,
-        borderRadius: radii.full,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: palette.primary[100],
-    },
-    permissionIconText: { fontSize: 22 },
-    permissionTitle: {
-        color: palette.text.primary,
-        fontSize: 15,
-        fontWeight: '700',
-        textAlign: 'center',
-    },
-    permissionText: {
-        color: palette.text.secondary,
-        fontSize: 12,
-        lineHeight: 18,
-        textAlign: 'center',
-    },
-    permissionActions: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.xs,
-        marginTop: spacing.xxs,
-    },
-    allowButton: {
-        minWidth: 128,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: palette.primary[500],
-        borderRadius: radii.lg,
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.xs,
-    },
-    allowButtonText: {
-        color: palette.text.onAccent,
-        fontSize: 14,
-        fontWeight: '700',
-    },
-    notNowButton: {
-        paddingHorizontal: spacing.sm,
-        paddingVertical: spacing.xs,
-        borderRadius: radii.lg,
-        borderWidth: 1,
-        borderColor: palette.border.strong,
-    },
-    notNowText: {
-        color: palette.text.secondary,
-        fontSize: 13,
-        fontWeight: '600',
-    },
-    sectionHeader: {
-        backgroundColor: palette.background,
-        paddingVertical: spacing.xxs,
-        paddingHorizontal: spacing.xxs,
-    },
-    sectionTitle: {
-        color: palette.primary[600],
-        fontSize: 12,
-        fontWeight: '700',
-        letterSpacing: 0.5,
-    },
-    row: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.sm,
-        paddingVertical: spacing.xs,
-        paddingHorizontal: spacing.xxs,
-        borderRadius: radii.md,
-    },
-    rowPressed: { backgroundColor: palette.glass.elevated },
-    rowBody: { flex: 1, minWidth: 0, gap: 2 },
-    badge: {
-        flexShrink: 0,
-        paddingHorizontal: 8,
-        paddingVertical: 3,
-        borderRadius: radii.full,
-        backgroundColor: palette.primary[100],
-        borderWidth: 1,
-        borderColor: palette.border.accent,
-    },
-    badgeText: {
-        color: palette.primary[700],
-        fontSize: 10,
-        fontWeight: '700',
-    },
-    footer: { paddingTop: spacing.sm, alignItems: 'center' },
-    allowRow: { paddingVertical: spacing.xs, paddingHorizontal: spacing.sm },
-    linkText: {
-        color: palette.primary[600],
-        fontSize: 13,
-        fontWeight: '600',
-    },
-    center: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: spacing.xs,
-        paddingHorizontal: spacing.lg,
-    },
-    detail: { textAlign: 'center', color: palette.text.secondary },
-    emptyIcon: {
-        width: 64,
-        height: 64,
-        borderRadius: radii.full,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: palette.primary[100],
-    },
-    emptyIconText: { fontSize: 30 },
-    errorBanner: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: spacing.sm,
-        padding: spacing.xs,
-        borderRadius: radii.md,
-        backgroundColor: palette.glass.elevated,
-        borderWidth: 1,
-        borderColor: palette.border.subtle,
-    },
-    errorBannerText: {
-        flex: 1,
-        color: palette.semantic.danger,
-        fontSize: 12,
-    },
-    retrySmall: { padding: spacing.xxs },
-    skeletonList: { gap: spacing.sm, paddingTop: spacing.xs },
-    skeletonRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.sm,
-        paddingVertical: spacing.xs,
-    },
-    skeletonAvatar: {
-        width: 46,
-        height: 46,
-        borderRadius: 23,
-        backgroundColor: palette.glass.elevated,
-    },
-    skeletonBody: { flex: 1, gap: 8 },
-    skeletonName: {
-        width: '45%',
-        height: 12,
-        borderRadius: 6,
-        backgroundColor: palette.glass.elevated,
-    },
-    skeletonHandle: {
-        width: '30%',
-        height: 10,
-        borderRadius: 5,
-        backgroundColor: palette.glass.elevated,
-    },
-});
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+        // Transparent canvas: the app background layer (solid, gradient,
+        // circles or an image) is the only thing painted behind the screen.
+        screen: {
+            paddingHorizontal: spacing.md,
+            gap: spacing.sm,
+        },
+        searchGlyph: { color: theme.colors.textMuted, fontSize: 20 },
+        pressed: { opacity: 0.6 },
+        disabled: { opacity: 0.6 },
+        addButton: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: spacing.xxs,
+            paddingHorizontal: spacing.sm,
+            paddingVertical: 6,
+            borderRadius: radii.full,
+            backgroundColor: theme.accent,
+            borderWidth: 1,
+            borderColor: theme.colors.accentBorder,
+        },
+        addGlyph: {
+            color: theme.colors.accentText,
+            fontSize: 14,
+            fontWeight: '700',
+        },
+        addText: {
+            ...theme.type.label,
+            fontSize: 12,
+            color: theme.colors.accentText,
+        },
+        counts: { color: theme.colors.textMuted },
+        list: { flex: 1 },
+        permissionCard: {
+            alignItems: 'center',
+            gap: spacing.xxs,
+            padding: spacing.md,
+            borderRadius: radii.lg,
+            backgroundColor: theme.colors.glassAccent,
+            borderWidth: 1,
+            borderColor: theme.colors.accentBorder,
+        },
+        permissionIcon: {
+            width: 44,
+            height: 44,
+            borderRadius: radii.full,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: theme.colors.accentSoft,
+        },
+        permissionIconText: { fontSize: 22 },
+        permissionTitle: {
+            color: theme.colors.text,
+            textAlign: 'center',
+        },
+        permissionText: {
+            color: theme.colors.textSecondary,
+            textAlign: 'center',
+        },
+        permissionActions: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: spacing.xs,
+            marginTop: spacing.xxs,
+        },
+        allowButton: {
+            minWidth: 128,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: theme.accent,
+            borderRadius: radii.lg,
+            paddingHorizontal: spacing.md,
+            paddingVertical: spacing.xs,
+            borderWidth: 1,
+            borderColor: theme.colors.accentBorder,
+        },
+        allowButtonText: {
+            ...theme.type.label,
+            fontSize: 14,
+            color: theme.colors.accentText,
+        },
+        notNowButton: {
+            paddingHorizontal: spacing.sm,
+            paddingVertical: spacing.xs,
+            borderRadius: radii.lg,
+            borderWidth: 1,
+            borderColor: theme.colors.borderStrong,
+        },
+        notNowText: {
+            ...theme.type.label,
+            color: theme.colors.textSecondary,
+        },
+        // Sticky header: semi-transparent theme surface so it stays readable
+        // over any background while rows scroll beneath it.
+        sectionHeader: {
+            backgroundColor: theme.colors.glassHeader,
+            paddingVertical: spacing.xxs,
+            paddingHorizontal: spacing.xxs,
+            borderRadius: radii.sm,
+        },
+        sectionTitle: {
+            ...theme.type.micro,
+            fontSize: 12,
+            letterSpacing: 0.5,
+            color: theme.accent,
+        },
+        row: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: spacing.sm,
+            paddingVertical: spacing.xs,
+            paddingHorizontal: spacing.xxs,
+            borderRadius: radii.md,
+            // Readable base over a photo/gradient app background.
+            backgroundColor: theme.colors.glassSurface,
+        },
+        rowPressed: { backgroundColor: theme.colors.glassElevated },
+        rowBody: { flex: 1, minWidth: 0, gap: 2 },
+        rowName: { color: theme.colors.text },
+        rowSubtitle: { color: theme.colors.textSecondary },
+        badge: {
+            flexShrink: 0,
+            paddingHorizontal: 8,
+            paddingVertical: 3,
+            borderRadius: radii.full,
+            backgroundColor: theme.colors.accentSoft,
+            borderWidth: 1,
+            borderColor: theme.colors.accentBorder,
+        },
+        badgeText: {
+            ...theme.type.micro,
+            color: theme.accent,
+        },
+        footer: { paddingTop: spacing.sm, alignItems: 'center' },
+        allowRow: { paddingVertical: spacing.xs, paddingHorizontal: spacing.sm },
+        linkText: {
+            ...theme.type.label,
+            color: theme.accent,
+        },
+        center: {
+            flex: 1,
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: spacing.xs,
+            paddingHorizontal: spacing.lg,
+        },
+        detail: {
+            textAlign: 'center',
+            color: theme.colors.textSecondary,
+        },
+        emptyIcon: {
+            width: 64,
+            height: 64,
+            borderRadius: radii.full,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: theme.colors.accentSoft,
+        },
+        emptyIconText: { fontSize: 30 },
+        errorBanner: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: spacing.sm,
+            padding: spacing.xs,
+            borderRadius: radii.md,
+            backgroundColor: theme.colors.glassElevated,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+        },
+        errorBannerText: {
+            ...theme.type.caption,
+            flex: 1,
+            color: theme.colors.danger,
+        },
+        retrySmall: { padding: spacing.xxs },
+        skeletonList: { gap: spacing.sm, paddingTop: spacing.xs },
+        skeletonRow: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: spacing.sm,
+            paddingVertical: spacing.xs,
+        },
+        skeletonAvatar: {
+            width: 46,
+            height: 46,
+            borderRadius: 23,
+            backgroundColor: theme.colors.glassElevated,
+        },
+        skeletonBody: { flex: 1, gap: 8 },
+        skeletonName: {
+            width: '45%',
+            height: 12,
+            borderRadius: 6,
+            backgroundColor: theme.colors.glassElevated,
+        },
+        skeletonHandle: {
+            width: '30%',
+            height: 10,
+            borderRadius: 5,
+            backgroundColor: theme.colors.glassElevated,
+        },
+    });

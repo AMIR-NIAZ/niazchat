@@ -22,6 +22,9 @@ import {
     shadows,
     spacing,
 } from '../../shared/theme';
+import { useTheme, useThemedStyles } from '../../shared/theme';
+import type { AppTheme } from '../../shared/theme';
+import { AppText } from '../../shared/components';
 
 /**
  * Floating "scroll to latest" control: a small glass circle with a lavender
@@ -69,6 +72,8 @@ function badgeLabel(count: number): string {
 export function ScrollToBottomButton(
     props: ScrollToBottomButtonProps,
 ): React.ReactElement | null {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const reduceMotion = useReducedMotion();
     const progress = useSharedValue(0);
     const pressScale = useSharedValue(1);
@@ -158,7 +163,7 @@ export function ScrollToBottomButton(
                         styles.press,
                         pressed && styles.pressPressed,
                     ]}
-                    android_ripple={{ color: 'rgba(220,197,255,0.12)' }}
+                    android_ripple={{ color: theme.colors.border }}
                 >
                     <GlassSurface
                         intensity={blur.strong}
@@ -169,9 +174,9 @@ export function ScrollToBottomButton(
                         <LinearGradient
                             pointerEvents="none"
                             colors={[
-                                'rgba(169,112,245,0.26)',
-                                'rgba(117,69,184,0.08)',
-                                'rgba(9,7,15,0)',
+                                theme.colors.accentSoft,
+                                theme.colors.glassAccent,
+                                'transparent',
                             ]}
                             locations={[0, 0.55, 1]}
                             start={{ x: 0, y: 0 }}
@@ -181,7 +186,7 @@ export function ScrollToBottomButton(
                         <ArrowDown
                             size={20}
                             strokeWidth={2.4}
-                            color={palette.primary[700]}
+                            color={theme.accent}
                         />
                     </GlassSurface>
                 </Pressable>
@@ -194,16 +199,17 @@ export function ScrollToBottomButton(
                     accessibilityElementsHidden={true}
                     importantForAccessibility="no-hide-descendants"
                 >
-                    <Text style={styles.badgeText} allowFontScaling={false}>
+                    <AppText style={styles.badgeText} allowFontScaling={false}>
                         {badgeLabel(props.count)}
-                    </Text>
+                    </AppText>
                 </View>
             )}
         </Animated.View>
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     wrap: {
         position: 'absolute',
         end: spacing.md,
@@ -228,13 +234,13 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
     },
     pressPressed: {
-        backgroundColor: 'rgba(220,197,255,0.06)',
+        backgroundColor: theme.colors.glassSurface,
     },
     glass: {
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
-        borderColor: palette.border.strong,
+        borderColor: theme.colors.borderStrong,
         elevation: shadows.glass.elevation,
     },
     badge: {
@@ -247,16 +253,16 @@ const styles = StyleSheet.create({
         borderRadius: radii.full,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
         borderWidth: Platform.OS === 'android' ? 1.5 : 2,
-        borderColor: palette.background,
-        shadowColor: palette.primary[500],
+        borderColor: theme.colors.background,
+        shadowColor: theme.accent,
         shadowOpacity: 0.35,
         shadowRadius: 5,
         shadowOffset: { width: 0, height: 2 },
     },
     badgeText: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 10,
         fontWeight: '700',
         lineHeight: 13,

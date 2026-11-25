@@ -7,8 +7,12 @@ import {
     View,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { palette, spacing } from '../theme';
+import { spacing } from '../theme';
+import { mixColors } from '../theme/colors';
+import { useTheme, useThemedStyles } from '../theme/theme-provider';
+import type { AppTheme } from '../theme/theme-provider';
 import type { DialogButton } from './dialog-types';
+import { AppText } from '../components';
 
 interface DialogButtonsProps {
     buttons: readonly DialogButton[];
@@ -29,6 +33,8 @@ export const DialogButtons = memo(function DialogButtons({
     busyIndex,
     onPress,
 }: DialogButtonsProps): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const stacked = buttons.length > 2;
     const busy = busyIndex !== null;
 
@@ -62,10 +68,21 @@ export const DialogButtons = memo(function DialogButtons({
                                 pointerEvents="none"
                                 colors={
                                     destructive
-                                        ? [palette.semantic.danger, '#E4566A']
+                                        ? [
+                                              theme.colors.danger,
+                                              mixColors(
+                                                  theme.colors.danger,
+                                                  '#000000',
+                                                  0.15,
+                                              ),
+                                          ]
                                         : [
-                                              palette.primary[500],
-                                              palette.primary[600],
+                                              theme.accent,
+                                              mixColors(
+                                                  theme.accent,
+                                                  theme.colors.background,
+                                                  0.22,
+                                              ),
                                           ]
                                 }
                                 start={{ x: 0, y: 0 }}
@@ -78,12 +95,12 @@ export const DialogButtons = memo(function DialogButtons({
                                 size="small"
                                 color={
                                     cancel
-                                        ? palette.text.primary
-                                        : palette.text.onAccent
+                                        ? theme.colors.text
+                                        : theme.colors.accentText
                                 }
                             />
                         ) : (
-                            <Text
+                            <AppText
                                 style={[
                                     styles.label,
                                     cancel
@@ -93,7 +110,7 @@ export const DialogButtons = memo(function DialogButtons({
                                 numberOfLines={2}
                             >
                                 {button.text}
-                            </Text>
+                            </AppText>
                         )}
                     </Pressable>
                 );
@@ -102,39 +119,40 @@ export const DialogButtons = memo(function DialogButtons({
     );
 });
 
-const styles = StyleSheet.create({
-    row: {
-        flexDirection: 'row',
-        gap: spacing.xs,
-        width: '100%',
-    },
-    column: { flexDirection: 'column' },
-    grow: { flex: 1 },
-    full: { width: '100%' },
-    button: {
-        minHeight: 48,
-        borderRadius: 16,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: spacing.md,
-        overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.10)',
-    },
-    cancel: {
-        backgroundColor: 'rgba(220,197,255,0.06)',
-        borderColor: palette.border.strong,
-    },
-    pressed: {
-        transform: [{ scale: 0.97 }],
-        opacity: 0.92,
-    },
-    dimmed: { opacity: 0.45 },
-    label: {
-        fontSize: 15,
-        fontWeight: '700',
-        textAlign: 'center',
-    },
-    filledLabel: { color: palette.text.onAccent },
-    cancelLabel: { color: palette.text.primary },
-});
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+        row: {
+            flexDirection: 'row',
+            gap: spacing.xs,
+            width: '100%',
+        },
+        column: { flexDirection: 'column' },
+        grow: { flex: 1 },
+        full: { width: '100%' },
+        button: {
+            minHeight: 48,
+            borderRadius: 16,
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingHorizontal: spacing.md,
+            overflow: 'hidden',
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+        },
+        cancel: {
+            backgroundColor: theme.colors.glassSurface,
+            borderColor: theme.colors.borderStrong,
+        },
+        pressed: {
+            transform: [{ scale: 0.97 }],
+            opacity: 0.92,
+        },
+        dimmed: { opacity: 0.45 },
+        label: {
+            ...theme.type.label,
+            fontSize: 15,
+            textAlign: 'center',
+        },
+        filledLabel: { color: theme.colors.accentText },
+        cancelLabel: { color: theme.colors.text },
+    });

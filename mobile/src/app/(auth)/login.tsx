@@ -16,6 +16,8 @@ import {
     sendOtpSchema,
     type SendOtpFormValues,
 } from '../../features/auth/validators';
+import { useTheme, useThemedStyles } from '../../shared/theme';
+import type { AppTheme } from '../../shared/theme';
 
 /**
  * Step 1 of OTP sign-in: `POST /auth/send-otp`.
@@ -23,6 +25,8 @@ import {
  */
 
 export default function LoginScreen(): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const { requestOtp, requesting } = useAuthFlow();
     const sessionNotice = useAuthStore((state) => state.sessionNotice);
     const [submitError, setSubmitError] = useState<string | null>(null);
@@ -99,7 +103,7 @@ export default function LoginScreen(): React.ReactElement {
                     {requesting ? (
                         <ActivityIndicator
                             size="small"
-                            color={palette.primary[300]}
+                            color={theme.accent}
                         />
                     ) : (
                         <FormButton
@@ -115,7 +119,8 @@ export default function LoginScreen(): React.ReactElement {
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     screen: {
         gap: spacing.lg,
         paddingHorizontal: spacing.lg,
@@ -128,21 +133,21 @@ const styles = StyleSheet.create({
         borderRadius: 22,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: palette.glass.accent,
+        backgroundColor: theme.colors.glassAccent,
         borderWidth: 1,
-        borderColor: palette.border.accent,
+        borderColor: theme.colors.accentBorder,
         marginBottom: spacing.sm,
     },
-    logoText: { color: palette.highlight, fontSize: 28 },
-    tagline: { color: palette.text.muted, textAlign: 'center' },
-    hint: { color: palette.text.secondary, lineHeight: 18 },
+    logoText: { color: theme.accent, fontSize: 28 },
+    tagline: { color: theme.colors.textMuted, textAlign: 'center' },
+    hint: { color: theme.colors.textSecondary, lineHeight: 18 },
     notice: {
-        color: palette.primary[700],
-        backgroundColor: palette.glass.accent,
+        color: theme.accent,
+        backgroundColor: theme.colors.glassAccent,
         borderRadius: 8,
         paddingHorizontal: spacing.sm,
         paddingVertical: spacing.xxs,
     },
-    error: { color: palette.semantic.danger },
+    error: { color: theme.colors.danger },
     actions: { marginTop: spacing.xs },
 });

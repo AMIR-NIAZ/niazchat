@@ -3,7 +3,6 @@ import {
     ActivityIndicator,
     Pressable,
     StyleSheet,
-    Text,
     TextInput,
     View,
 } from 'react-native';
@@ -13,12 +12,12 @@ import {
     AppText,
     SafeText,
     UserAvatar,
-    palette,
     radii,
     spacing,
-    typography,
     OfflineCaption,
 } from '../../../shared/components';
+import { useTheme, useThemedStyles } from '../../../shared/theme';
+import type { AppTheme } from '../../../shared/theme';
 import { useAfterModalClose } from '../../../shared/hooks/use-after-modal-close';
 import { useDebouncedValue } from '../../../shared/hooks/use-debounced-value';
 import { dialog, toast } from '../../../shared/dialog';
@@ -98,6 +97,8 @@ export default function GroupScreen(): React.ReactElement {
 }
 
 function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const queryClient = useQueryClient();
     const currentUserId = useCurrentUserId();
     const infoQuery = useGroupInfo(chatId);
@@ -367,14 +368,14 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
                 </SafeText>
                 {info.description !== null &&
                     info.description.trim() !== '' && (
-                        <Text style={styles.description}>
+                        <SafeText lines={0} style={styles.description}>
                             {info.description}
-                        </Text>
+                        </SafeText>
                     )}
-                <Text style={styles.meta}>
+                <AppText variant="caption" style={styles.meta}>
                     {info.membersCount} member
                     {info.membersCount === 1 ? '' : 's'}
-                </Text>
+                </AppText>
             </View>
 
             {groupHasPhotoGallery(viewerAvatars.length) && (
@@ -404,19 +405,19 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
             node: (
                 <View>
                     {notice !== null && (
-                        <Text
+                        <AppText
                             style={styles.notice}
                             accessibilityLiveRegion="polite"
                         >
                             {notice}
-                        </Text>
+                        </AppText>
                     )}
                     <View style={styles.membersToolbar}>
                         <TextInput
                             value={searchInput}
                             onChangeText={setSearchInput}
                             placeholder="Search members"
-                            placeholderTextColor={palette.neutral[500]}
+                            placeholderTextColor={theme.colors.textMuted}
                             autoCorrect={false}
                             returnKeyType="search"
                             accessibilityLabel="Search members"
@@ -443,10 +444,12 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
                             >
                                 <UserPlus
                                     size={16}
-                                    color={palette.primary[300]}
+                                    color={theme.accent}
                                     strokeWidth={2}
                                 />
-                                <Text style={styles.addMembersText}>Add</Text>
+                                <SafeText style={styles.addMembersText}>
+                                    Add
+                                </SafeText>
                             </Pressable>
                         )}
                     </View>
@@ -487,10 +490,7 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
             key: 'members-loading',
             node: (
                 <View style={styles.listState}>
-                    <ActivityIndicator
-                        size="small"
-                        color={palette.primary[500]}
-                    />
+                    <ActivityIndicator size="small" color={theme.accent} />
                 </View>
             ),
         });
@@ -500,10 +500,12 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
             key: 'members-error',
             node: (
                 <View style={styles.listState}>
-                    <Text style={styles.stateTitle}>
+                    <AppText variant="heading" style={styles.stateTitle}>
                         Could not load members
-                    </Text>
-                    <Text style={styles.stateDetail}>{listError}</Text>
+                    </AppText>
+                    <AppText variant="caption" style={styles.stateDetail}>
+                        {listError}
+                    </AppText>
                     <Pressable
                         accessibilityRole="button"
                         accessibilityLabel="Retry loading members"
@@ -512,7 +514,7 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
                             void membersQuery.refetch();
                         }}
                     >
-                        <Text style={styles.retryText}>Retry</Text>
+                        <SafeText style={styles.retryText}>Retry</SafeText>
                     </Pressable>
                 </View>
             ),
@@ -523,7 +525,9 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
             key: 'members-empty',
             node: (
                 <View style={styles.listState}>
-                    <Text style={styles.stateTitle}>No members found</Text>
+                    <AppText variant="heading" style={styles.stateTitle}>
+                        No members found
+                    </AppText>
                 </View>
             ),
         });
@@ -540,7 +544,9 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
                         void membersQuery.fetchNextPage();
                     }}
                 >
-                    <Text style={styles.loadMoreText}>Load more members</Text>
+                    <SafeText style={styles.loadMoreText} align="center">
+                        Load more members
+                    </SafeText>
                 </Pressable>
             ),
         });
@@ -568,11 +574,17 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
                     style={styles.backButton}
                     onPress={(): void => router.back()}
                 >
-                    <Text style={styles.backText}>‹</Text>
+                    <SafeText style={styles.backText} align="center">
+                        ‹
+                    </SafeText>
                 </Pressable>
-                <Text style={styles.topBarTitle} numberOfLines={1}>
+                <SafeText
+                    style={styles.topBarTitle}
+                    lines={1}
+                    align="center"
+                >
                     Group info
-                </Text>
+                </SafeText>
                 {canOpenGroupSettings(info.myRole) ? (
                     <Pressable
                         accessibilityRole="button"
@@ -580,7 +592,11 @@ function GroupPanel({ chatId }: { chatId: number }): React.ReactElement {
                         style={styles.iconButton}
                         onPress={openSettings}
                     >
-                        <Settings size={21} color="#FFFFFF" strokeWidth={1.8} />
+                        <Settings
+                            size={21}
+                            color={theme.colors.text}
+                            strokeWidth={1.8}
+                        />
                     </Pressable>
                 ) : (
                     <View style={styles.topBarSpacer} />
@@ -685,6 +701,8 @@ function MemberRow(props: {
     onOpenProfile: () => void;
     onOpenActions: () => void;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const member = props.member;
     const badge = roleBadgeLabel(member.role);
     const actionsVisible = hasMemberActions(member.actions) && !props.pending;
@@ -724,15 +742,15 @@ function MemberRow(props: {
                     {name}
                 </SafeText>
                 {member.username !== '' && (
-                    <Text style={styles.rowUsername} numberOfLines={1}>
+                    <SafeText style={styles.rowUsername} lines={1}>
                         @{member.username}
-                    </Text>
+                    </SafeText>
                 )}
                 {permissionSummary(member.role, member.permissions) !==
                     null && (
-                    <Text style={styles.rowUsername} numberOfLines={1}>
+                    <SafeText style={styles.rowUsername} lines={1}>
                         {permissionSummary(member.role, member.permissions)}
-                    </Text>
+                    </SafeText>
                 )}
             </View>
             {badge !== null && (
@@ -742,22 +760,19 @@ function MemberRow(props: {
                         badge === 'Owner' && styles.ownerBadge,
                     ]}
                 >
-                    <Text
+                    <SafeText
                         style={[
                             styles.badgeText,
                             badge === 'Owner' && styles.ownerBadgeText,
                         ]}
                     >
                         {badge}
-                    </Text>
+                    </SafeText>
                 </View>
             )}
             {props.pending ? (
                 <View style={styles.actionButton}>
-                    <ActivityIndicator
-                        size="small"
-                        color={palette.primary[500]}
-                    />
+                    <ActivityIndicator size="small" color={theme.accent} />
                 </View>
             ) : actionsVisible ? (
                 <Pressable
@@ -769,7 +784,9 @@ function MemberRow(props: {
                     ]}
                     onPress={props.onOpenActions}
                 >
-                    <Text style={styles.actionGlyph}>⋯</Text>
+                    <SafeText style={styles.actionGlyph} align="center">
+                        ⋯
+                    </SafeText>
                 </Pressable>
             ) : null}
         </Pressable>
@@ -777,9 +794,11 @@ function MemberRow(props: {
 }
 
 function LoadingBlock({ label }: { label: string }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.centered}>
-            <ActivityIndicator size="large" color={palette.primary[500]} />
+            <ActivityIndicator size="large" color={theme.accent} />
             <AppText variant="caption" style={styles.centeredCaption}>
                 {label}
             </AppText>
@@ -792,6 +811,7 @@ function InvalidGroup(props: {
     reason: string;
     onRetry?: () => void;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.centered}>
             <AppText variant="title">
@@ -807,7 +827,7 @@ function InvalidGroup(props: {
                     style={styles.retryButton}
                     onPress={props.onRetry}
                 >
-                    <Text style={styles.retryText}>Retry</Text>
+                    <SafeText style={styles.retryText}>Retry</SafeText>
                 </Pressable>
             )}
             <Pressable
@@ -816,242 +836,250 @@ function InvalidGroup(props: {
                 style={styles.backLink}
                 onPress={(): void => router.back()}
             >
-                <Text style={styles.backLinkText}>Go back</Text>
+                <SafeText style={styles.backLinkText}>Go back</SafeText>
             </Pressable>
         </View>
     );
 }
 
-const styles = StyleSheet.create({
-    root: {
-        flex: 1,
-        backgroundColor: palette.background,
-    },
-    topBar: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        minHeight: 52,
-        paddingHorizontal: spacing.xs,
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: palette.border.subtle,
-        backgroundColor: palette.surface,
-        paddingTop: 22,
-    },
-    backButton: {
-        width: 44,
-        height: 44,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    backText: {
-        fontSize: 32,
-        lineHeight: 34,
-        color: palette.neutral[900],
-    },
-    topBarTitle: {
-        flex: 1,
-        textAlign: 'center',
-        fontSize: 16,
-        fontWeight: '700',
-        color: palette.neutral[900],
-    },
-    topBarSpacer: { width: 44 },
-    iconButton: {
-        width: 44,
-        height: 44,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderRadius: radii.full,
-    },
-    gearGlyph: {
-        fontSize: 20,
-        lineHeight: 24,
-        color: palette.neutral[700],
-    },
-    loadMoreButton: {
-        alignSelf: 'center',
-        marginVertical: spacing.sm,
-        borderWidth: 1,
-        borderColor: palette.primary[500],
-        borderRadius: radii.sm,
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.xxs,
-    },
-    loadMoreText: {
-        color: palette.primary[600],
-        fontSize: 13,
-        fontWeight: '600',
-    },
-    identityBlock: {
-        alignItems: 'center',
-        gap: spacing.xs,
-        paddingVertical: spacing.lg,
-        paddingHorizontal: spacing.md,
-        backgroundColor: palette.surface,
-    },
-    galleryBlock: {
-        paddingVertical: spacing.sm,
-        backgroundColor: palette.surface,
-        borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: palette.border.subtle,
-    },
-    title: {
-        ...typography.title,
-        alignSelf: 'stretch',
-        textAlign: 'center',
-        marginTop: spacing.xs,
-    },
-    meta: {
-        ...typography.body,
-        color: palette.neutral[500],
-    },
-    ownerLine: {
-        ...typography.caption,
-        textAlign: 'center',
-    },
-    description: {
-        ...typography.body,
-        textAlign: 'center',
-        paddingHorizontal: spacing.md,
-    },
-    membersToolbar: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.sm,
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.sm,
-        backgroundColor: palette.surface,
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: palette.border.subtle,
-    },
-    addMembersButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        minHeight: 34,
-        paddingHorizontal: spacing.sm,
-        borderRadius: radii.full,
-        backgroundColor: palette.primary[100],
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.border.accent,
-    },
-    addMembersText: {
-        fontSize: 13,
-        fontWeight: '700',
-        color: palette.primary[300],
-    },
-    search: {
-        flex: 1,
-        minHeight: 44,
-        borderRadius: radii.md,
-        backgroundColor: palette.surface,
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.border.subtle,
-        paddingHorizontal: spacing.sm,
-        fontSize: 15,
-        color: palette.neutral[900],
-    },
-    notice: {
-        ...typography.caption,
-        color: palette.semantic.success,
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.xxs,
-    },
-    row: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.sm,
-        minHeight: 64,
-        paddingHorizontal: spacing.md,
-        backgroundColor: palette.surface,
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: palette.border.subtle,
-    },
-    rowPressed: { backgroundColor: palette.glass.elevated },
-    rowBody: { flex: 1, minWidth: 0, gap: 2 },
-    rowName: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: palette.neutral[900],
-    },
-    rowUsername: { ...typography.caption },
-    onlineDot: {
-        position: 'absolute',
-        right: 0,
-        bottom: 0,
-        width: 11,
-        height: 11,
-        borderRadius: radii.full,
-        backgroundColor: palette.semantic.success,
-        borderWidth: 2,
-        borderColor: palette.neutral[0],
-    },
-    badge: {
-        flexShrink: 0,
-        borderRadius: radii.sm,
-        paddingHorizontal: spacing.xs,
-        paddingVertical: 2,
-        backgroundColor: palette.glass.elevated,
-    },
-    ownerBadge: { backgroundColor: palette.primary[100] },
-    badgeText: {
-        fontSize: 11,
-        fontWeight: '700',
-        color: palette.neutral[700],
-    },
-    ownerBadgeText: { color: palette.primary[700] },
-    actionButton: {
-        width: 44,
-        height: 44,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderRadius: radii.full,
-    },
-    actionGlyph: {
-        fontSize: 22,
-        lineHeight: 24,
-        color: palette.neutral[700],
-    },
-    listState: {
-        alignItems: 'center',
-        gap: spacing.xs,
-        paddingVertical: spacing.xl,
-        paddingHorizontal: spacing.lg,
-    },
-    stateTitle: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: palette.neutral[700],
-    },
-    stateDetail: {
-        ...typography.caption,
-        textAlign: 'center',
-    },
-    centered: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: spacing.xs,
-        padding: spacing.lg,
-        backgroundColor: palette.background,
-    },
-    centeredCaption: { textAlign: 'center' },
-    retryButton: {
-        marginTop: spacing.xs,
-        borderRadius: radii.sm,
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.xs,
-        backgroundColor: palette.primary[500],
-    },
-    retryText: {
-        color: palette.text.onAccent,
-        fontSize: 14,
-        fontWeight: '600',
-    },
-    backLink: { padding: spacing.sm },
-    backLinkText: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: palette.primary[700],
-    },
-});
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+        // Transparent canvas: the global background layer shows through.
+        root: { flex: 1 },
+        // Semi-transparent theme surface, readable over any background.
+        topBar: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            minHeight: 52,
+            paddingHorizontal: spacing.xs,
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: theme.colors.border,
+            backgroundColor: theme.colors.glassHeader,
+            paddingTop: 22,
+        },
+        backButton: {
+            width: 44,
+            height: 44,
+            alignItems: 'center',
+            justifyContent: 'center',
+        },
+        backText: {
+            ...theme.type.title,
+            fontSize: 32,
+            lineHeight: 34,
+            color: theme.colors.text,
+        },
+        topBarTitle: {
+            ...theme.type.heading,
+            flex: 1,
+            fontSize: 16,
+            textAlign: 'center',
+            color: theme.colors.text,
+        },
+        topBarSpacer: { width: 44 },
+        iconButton: {
+            width: 44,
+            height: 44,
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: radii.full,
+        },
+        gearGlyph: {
+            fontSize: 20,
+            lineHeight: 24,
+            color: theme.colors.textSecondary,
+        },
+        loadMoreButton: {
+            alignSelf: 'center',
+            marginVertical: spacing.sm,
+            borderWidth: 1,
+            borderColor: theme.colors.accentBorder,
+            borderRadius: radii.sm,
+            paddingHorizontal: spacing.md,
+            paddingVertical: spacing.xxs,
+        },
+        loadMoreText: {
+            ...theme.type.label,
+            color: theme.accent,
+            textAlign: 'center',
+        },
+        identityBlock: {
+            alignItems: 'center',
+            gap: spacing.xs,
+            paddingVertical: spacing.lg,
+            paddingHorizontal: spacing.md,
+        },
+        galleryBlock: {
+            paddingVertical: spacing.sm,
+            borderTopWidth: StyleSheet.hairlineWidth,
+            borderTopColor: theme.colors.border,
+        },
+        title: {
+            ...theme.type.title,
+            alignSelf: 'stretch',
+            textAlign: 'center',
+            marginTop: spacing.xs,
+        },
+        meta: {
+            ...theme.type.caption,
+            color: theme.colors.textSecondary,
+        },
+        ownerLine: {
+            ...theme.type.caption,
+            textAlign: 'center',
+        },
+        description: {
+            ...theme.type.body,
+            color: theme.colors.textSecondary,
+            textAlign: 'center',
+            paddingHorizontal: spacing.md,
+        },
+        // Sticky-ish member toolbar: translucent surface, readable over any
+        // background while rows scroll beneath it.
+        membersToolbar: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: spacing.sm,
+            paddingHorizontal: spacing.md,
+            paddingVertical: spacing.sm,
+            backgroundColor: theme.colors.glassHeader,
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: theme.colors.border,
+        },
+        addMembersButton: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            minHeight: 34,
+            paddingHorizontal: spacing.sm,
+            borderRadius: radii.full,
+            backgroundColor: theme.colors.accentSoft,
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: theme.colors.accentBorder,
+        },
+        addMembersText: {
+            ...theme.type.label,
+            color: theme.accent,
+        },
+        search: {
+            flex: 1,
+            minHeight: 44,
+            borderRadius: radii.md,
+            backgroundColor: theme.colors.glassSurface,
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: theme.colors.border,
+            paddingHorizontal: spacing.sm,
+            ...theme.type.body,
+            color: theme.colors.text,
+        },
+        notice: {
+            ...theme.type.caption,
+            color: theme.colors.success,
+            paddingHorizontal: spacing.md,
+            paddingVertical: spacing.xxs,
+        },
+        row: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: spacing.sm,
+            minHeight: 64,
+            paddingHorizontal: spacing.md,
+            backgroundColor: theme.colors.glassSurface,
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: theme.colors.border,
+        },
+        rowPressed: { backgroundColor: theme.colors.glassElevated },
+        rowBody: { flex: 1, minWidth: 0, gap: 2 },
+        rowName: {
+            ...theme.type.heading,
+            fontSize: 16,
+            color: theme.colors.text,
+        },
+        rowUsername: {
+            ...theme.type.caption,
+            color: theme.colors.textSecondary,
+        },
+        onlineDot: {
+            position: 'absolute',
+            right: 0,
+            bottom: 0,
+            width: 11,
+            height: 11,
+            borderRadius: radii.full,
+            backgroundColor: theme.colors.success,
+            borderWidth: 2,
+            borderColor: theme.colors.background,
+        },
+        badge: {
+            flexShrink: 0,
+            borderRadius: radii.sm,
+            paddingHorizontal: spacing.xs,
+            paddingVertical: 2,
+            backgroundColor: theme.colors.glassElevated,
+        },
+        ownerBadge: { backgroundColor: theme.colors.accentSoft },
+        badgeText: {
+            ...theme.type.micro,
+            fontSize: 11,
+            color: theme.colors.textSecondary,
+        },
+        ownerBadgeText: { color: theme.accent },
+        actionButton: {
+            width: 44,
+            height: 44,
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: radii.full,
+        },
+        actionGlyph: {
+            ...theme.type.heading,
+            fontSize: 22,
+            lineHeight: 24,
+            color: theme.colors.textSecondary,
+        },
+        listState: {
+            alignItems: 'center',
+            gap: spacing.xs,
+            paddingVertical: spacing.xl,
+            paddingHorizontal: spacing.lg,
+        },
+        stateTitle: {
+            ...theme.type.heading,
+            fontSize: 16,
+            color: theme.colors.text,
+            textAlign: 'center',
+        },
+        stateDetail: {
+            ...theme.type.caption,
+            color: theme.colors.textSecondary,
+            textAlign: 'center',
+        },
+        centered: {
+            flex: 1,
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: spacing.xs,
+            padding: spacing.lg,
+        },
+        centeredCaption: {
+            textAlign: 'center',
+            color: theme.colors.textSecondary,
+        },
+        retryButton: {
+            marginTop: spacing.xs,
+            borderRadius: radii.sm,
+            paddingHorizontal: spacing.md,
+            paddingVertical: spacing.xs,
+            backgroundColor: theme.accent,
+        },
+        retryText: {
+            ...theme.type.label,
+            color: theme.colors.accentText,
+            textAlign: 'center',
+        },
+        backLink: { padding: spacing.sm },
+        backLinkText: {
+            ...theme.type.label,
+            color: theme.accent,
+        },
+    });

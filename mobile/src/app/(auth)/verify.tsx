@@ -18,6 +18,8 @@ import {
     verifyOtpSchema,
     type VerifyOtpFormValues,
 } from '../../features/auth/validators';
+import { useTheme, useThemedStyles } from '../../shared/theme';
+import type { AppTheme } from '../../shared/theme';
 
 /**
  * Step 2 of OTP sign-in: `POST /auth/verify-otp`.
@@ -29,6 +31,8 @@ import {
 type VerifyRouteParams = { phone?: string | string[] };
 
 export default function VerifyScreen(): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const params = useLocalSearchParams<VerifyRouteParams>();
     const phone: string = typeof params.phone === 'string' ? params.phone : '';
     const validPhone = phoneSchema.safeParse(phone).success;
@@ -133,7 +137,7 @@ export default function VerifyScreen(): React.ReactElement {
                     {verifying ? (
                         <ActivityIndicator
                             size="small"
-                            color={palette.primary[300]}
+                            color={theme.accent}
                         />
                     ) : (
                         <>
@@ -158,14 +162,15 @@ export default function VerifyScreen(): React.ReactElement {
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     screen: {
         gap: spacing.md,
         paddingHorizontal: spacing.lg,
         justifyContent: 'center',
     },
-    hint: { color: palette.text.secondary, lineHeight: 18 },
-    error: { color: palette.semantic.danger },
-    notice: { color: palette.semantic.success },
+    hint: { color: theme.colors.textSecondary, lineHeight: 18 },
+    error: { color: theme.colors.danger },
+    notice: { color: theme.colors.success },
     actions: { marginTop: spacing.xs, gap: spacing.xs },
 });

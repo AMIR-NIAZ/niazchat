@@ -9,7 +9,9 @@ import {
     View,
 } from 'react-native';
 import Reanimated from 'react-native-reanimated';
-import { SafeText, UserAvatar } from '../../shared/components';
+import { SafeText, UserAvatar,
+    AppText,
+} from '../../shared/components';
 import { palette, radii, spacing } from '../../shared/theme';
 import { LONG_PRESS_DELAY_MS } from '../../shared/long-press';
 import { measureInWindow, usePopupHidden } from '../../shared/context-popup';
@@ -39,6 +41,8 @@ import type { MentionSegment } from './mentions';
 import { childPressBlocksMenu, resolveBubblePress } from './bubble-press';
 import { Check, CheckCheck, Clock3 } from 'lucide-react-native';
 import { MessageHighlight } from './message-highlight';
+import { useTheme, useThemedStyles } from '../../shared/theme';
+import type { AppTheme } from '../../shared/theme';
 /**
  * A single message bubble. Mine → primary, right-aligned; others → white,
  * left-aligned with the sender name shown in group chats. Pending/failed
@@ -138,6 +142,8 @@ function quoteSnippet(reply: ReplyPreview): string {
 }
 
 export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const {
         message,
         mine,
@@ -392,7 +398,7 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                                 {replyName}
                             </SafeText>
                         )}
-                        <Text
+                        <AppText
                             style={[
                                 styles.quoteText,
                                 mine && styles.quoteTextMine,
@@ -405,7 +411,7 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                                 : reply !== null
                                   ? quoteSnippet(reply)
                                   : ''}
-                        </Text>
+                        </AppText>
                     </View>
                 </Pressable>
             )}
@@ -517,14 +523,14 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                 </View>
             )}
             {failedAttachmentReason !== null && (
-                <Text
+                <AppText
                     style={[styles.uploadError, mine && styles.uploadErrorMine]}
                 >
                     {failedAttachmentReason}
-                </Text>
+                </AppText>
             )}
             {message.content !== null && message.content !== '' && (
-                <Text
+                <AppText
                     style={[
                         styles.content,
                         mine && styles.contentMine,
@@ -533,11 +539,11 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                 >
                     {contentSegments.map((segment, index) => {
                         if (segment.type === 'text') {
-                            return <Text key={index}>{segment.text}</Text>;
+                            return <AppText key={index}>{segment.text}</AppText>;
                         }
                         if (segment.type === 'link') {
                             return (
-                                <Text
+                                <AppText
                                     key={index}
                                     accessibilityRole="link"
                                     accessibilityLabel={segment.url}
@@ -555,11 +561,11 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                                     }
                                 >
                                     {segment.text}
-                                </Text>
+                                </AppText>
                             );
                         }
                         return (
-                            <Text
+                            <AppText
                                 key={index}
                                 accessibilityRole="link"
                                 accessibilityLabel={`Open ${segment.username}'s profile`}
@@ -616,10 +622,10 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                                 }
                             >
                                 {segment.text}
-                            </Text>
+                            </AppText>
                         );
                     })}
-                </Text>
+                </AppText>
             )}
             {message.reactions.length > 0 && (
                 <ReactionChips
@@ -641,14 +647,14 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                                 onPress={(): void => onRetryPending(message)}
                                 style={styles.pendingButton}
                             >
-                                <Text
+                                <AppText
                                     style={[
                                         styles.pendingButtonText,
                                         mine && styles.pendingButtonTextMine,
                                     ]}
                                 >
                                     Retry
-                                </Text>
+                                </AppText>
                             </Pressable>
                         )}
                     {failed &&
@@ -660,14 +666,14 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                                 onPress={(): void => onRemovePending(message)}
                                 style={styles.pendingButton}
                             >
-                                <Text
+                                <AppText
                                     style={[
                                         styles.pendingButtonText,
                                         mine && styles.pendingButtonTextMine,
                                     ]}
                                 >
                                     Remove
-                                </Text>
+                                </AppText>
                             </Pressable>
                         )}
                     {uploadingAttachments && onCancelPending !== undefined && (
@@ -677,25 +683,25 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                             onPress={(): void => onCancelPending(message)}
                             style={styles.pendingButton}
                         >
-                            <Text
+                            <AppText
                                 style={[
                                     styles.pendingButtonText,
                                     mine && styles.pendingButtonTextMine,
                                 ]}
                             >
                                 Cancel
-                            </Text>
+                            </AppText>
                         </Pressable>
                     )}
                 </View>
             )}
             <View style={[styles.metaRow, mine && styles.metaRowMine]}>
-                <Text style={[styles.meta, mine && styles.metaMine]}>
+                <AppText style={[styles.meta, mine && styles.metaMine]}>
                     {formatMessageTime(message.createdAtIso)}
                     {message.isEdited ? ' · edited' : ''}
                     {isSending ? ' · sending' : ''}
                     {showFailedHint ? ' · not sent' : ''}
-                </Text>
+                </AppText>
 
                 {mine && !showFailedHint && (
                     <View
@@ -709,14 +715,14 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
                         style={styles.ticks}
                     >
                         {isSending ? (
-                            <Clock3 size={13} color={palette.text.secondary} />
+                            <Clock3 size={13} color={theme.colors.textSecondary} />
                         ) : seenByOthers ? (
                             <CheckCheck
                                 size={15}
-                                color={palette.text.onAccent}
+                                color={theme.colors.accentText}
                             />
                         ) : (
-                            <Check size={15} color={palette.text.onAccent} />
+                            <Check size={15} color={theme.colors.accentText} />
                         )}
                     </View>
                 )}
@@ -772,7 +778,7 @@ export function MessageBubble(props: MessageBubbleProps): React.ReactElement {
             <View
                 style={[styles.selectionCheck, selected && styles.selectionOn]}
             >
-                <Text style={styles.selectionMark}>{selected ? '✓' : ''}</Text>
+                <AppText style={styles.selectionMark}>{selected ? '✓' : ''}</AppText>
             </View>
             <View style={styles.selectionBody}>{bubbleBody}</View>
         </View>
@@ -848,6 +854,7 @@ interface ReactionChipsProps {
  * The whole row scales in once when a new chip appears (native driver).
  */
 function ReactionChips(props: ReactionChipsProps): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     const { message, mine, isStatic = false, onToggle, onOpen } = props;
     const scale = useRef(new Animated.Value(1)).current;
     const [reduceMotion, setReduceMotion] = useState(false);
@@ -921,7 +928,7 @@ function ReactionChips(props: ReactionChipsProps): React.ReactElement {
                             pressed && styles.pressed,
                         ]}
                     >
-                        <Text
+                        <AppText
                             style={[
                                 styles.reactionText,
                                 mine
@@ -935,7 +942,7 @@ function ReactionChips(props: ReactionChipsProps): React.ReactElement {
                         >
                             {reaction.emoji}
                             {` ${reaction.count}`}
-                        </Text>
+                        </AppText>
                     </Pressable>
                 );
             })}
@@ -945,10 +952,11 @@ function ReactionChips(props: ReactionChipsProps): React.ReactElement {
 
 /** Divider shown where the user's unread messages start (when the chat opens). */
 export function UnreadDivider(): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.unreadRow}>
             <View style={styles.unreadLine} />
-            <Text style={styles.unreadLabel}>New messages</Text>
+            <AppText style={styles.unreadLabel}>New messages</AppText>
             <View style={styles.unreadLine} />
         </View>
     );
@@ -960,10 +968,11 @@ export function DateSeparator({
 }: {
     label: string;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.separatorRow}>
             <View style={styles.separatorLine} />
-            <Text style={styles.separatorLabel}>{label}</Text>
+            <AppText style={styles.separatorLabel}>{label}</AppText>
             <View style={styles.separatorLine} />
         </View>
     );
@@ -980,6 +989,8 @@ function StaticVoiceRow({
     attachment: AttachmentView;
     mine: boolean;
 }): React.ReactElement {
+    const theme = useTheme();
+    const staticStyles = useThemedStyles(createStaticStyles);
     const waveform = attachment.waveform ?? attachment.localWaveform ?? null;
     const bars =
         Array.isArray(waveform) && waveform.length === 64 ? waveform : null;
@@ -994,14 +1005,14 @@ function StaticVoiceRow({
                         : staticStyles.voiceButtonTheirs,
                 ]}
             >
-                <Text
+                <AppText
                     style={[
                         staticStyles.voiceGlyph,
                         mine && staticStyles.onAccentText,
                     ]}
                 >
                     ▶
-                </Text>
+                </AppText>
             </View>
             <View style={staticStyles.waveform}>
                 {Array.from({ length: 64 }, (_, index) => (
@@ -1015,23 +1026,23 @@ function StaticVoiceRow({
                                         ? 5
                                         : 4 + (bars[index] ?? 0) * 0.22,
                                 backgroundColor: mine
-                                    ? 'rgba(255,255,255,0.45)'
-                                    : palette.neutral[300],
+                                    ? theme.colors.bubbleOwnMuted
+                                    : theme.colors.textMuted,
                             },
                         ]}
                     />
                 ))}
             </View>
-            <Text
+            <AppText
                 style={[staticStyles.speed, mine && staticStyles.onAccentText]}
             >
                 1x
-            </Text>
-            <Text
+            </AppText>
+            <AppText
                 style={[staticStyles.time, mine && staticStyles.onAccentText]}
             >
                 {formatDuration(duration)}
-            </Text>
+            </AppText>
         </View>
     );
 }
@@ -1044,18 +1055,20 @@ function StaticFileRow({
     attachment: AttachmentView;
     mine: boolean;
 }): React.ReactElement {
+    const theme = useTheme();
+    const staticStyles = useThemedStyles(createStaticStyles);
     return (
         <View style={staticStyles.fileRow}>
-            <Text
+            <AppText
                 style={[
                     staticStyles.fileIcon,
                     mine && staticStyles.onAccentText,
                 ]}
             >
                 📎
-            </Text>
+            </AppText>
             <View style={staticStyles.fileBody}>
-                <Text
+                <AppText
                     style={[
                         staticStyles.fileName,
                         mine && staticStyles.onAccentText,
@@ -1064,8 +1077,8 @@ function StaticFileRow({
                     ellipsizeMode="middle"
                 >
                     {attachment.name}
-                </Text>
-                <Text
+                </AppText>
+                <AppText
                     style={[
                         staticStyles.fileMeta,
                         mine && staticStyles.fileMetaMine,
@@ -1074,13 +1087,14 @@ function StaticFileRow({
                 >
                     {fileTypeLabel(attachment.name, attachment.mimeType)} ·{' '}
                     {formatFileSize(attachment.size)}
-                </Text>
+                </AppText>
             </View>
         </View>
     );
 }
 
-const staticStyles = StyleSheet.create({
+const createStaticStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     voiceRow: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -1093,10 +1107,10 @@ const staticStyles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    voiceButtonMine: { backgroundColor: 'rgba(255,255,255,0.16)' },
-    voiceButtonTheirs: { backgroundColor: palette.primary[100] },
-    voiceGlyph: { color: palette.primary[600], fontSize: 13 },
-    onAccentText: { color: palette.text.onAccent },
+    voiceButtonMine: { backgroundColor: theme.colors.quoteOwn },
+    voiceButtonTheirs: { backgroundColor: theme.colors.accentSoft },
+    voiceGlyph: { color: theme.accent, fontSize: 13 },
+    onAccentText: { color: theme.colors.accentText },
     waveform: {
         flex: 1,
         minWidth: 96,
@@ -1107,13 +1121,13 @@ const staticStyles = StyleSheet.create({
     },
     bar: { width: 2, borderRadius: 2 },
     speed: {
-        color: palette.primary[700],
+        color: theme.accent,
         fontSize: 10,
         fontWeight: '700',
         paddingHorizontal: 4,
     },
     time: {
-        color: palette.text.muted,
+        color: theme.colors.textMuted,
         fontSize: 10,
         minWidth: 30,
         textAlign: 'right',
@@ -1125,18 +1139,19 @@ const staticStyles = StyleSheet.create({
         paddingVertical: spacing.xs,
         paddingHorizontal: spacing.xs,
     },
-    fileIcon: { fontSize: 20, color: palette.primary[700] },
+    fileIcon: { fontSize: 20, color: theme.accent },
     fileBody: { flex: 1, minWidth: 0, gap: 1 },
     fileName: {
-        color: palette.text.primary,
+        color: theme.colors.text,
         fontSize: 13,
         fontWeight: '600',
     },
-    fileMeta: { color: palette.text.muted, fontSize: 11 },
-    fileMetaMine: { color: 'rgba(255,255,255,0.82)' },
+    fileMeta: { color: theme.colors.textMuted, fontSize: 11 },
+    fileMetaMine: { color: theme.colors.bubbleOwnMuted },
 });
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     row: {
         alignSelf: 'flex-start',
         maxWidth: '85%',
@@ -1156,29 +1171,29 @@ const styles = StyleSheet.create({
         borderRadius: radii.lg,
         paddingHorizontal: spacing.sm,
         paddingVertical: spacing.xs,
-        backgroundColor: palette.elevated,
-        borderColor: palette.border.subtle,
+        backgroundColor: theme.colors.glassElevated,
+        borderColor: theme.colors.border,
         borderWidth: 1,
     },
     mine: {
-        backgroundColor: palette.primary[500],
-        borderColor: palette.border.accent,
+        backgroundColor: theme.accent,
+        borderColor: theme.colors.accentBorder,
         borderBottomRightRadius: 4,
     },
     theirs: { borderBottomLeftRadius: 4 },
     failed: { opacity: 0.65 },
     pressed: { opacity: 0.6 },
     selectedBubble: {
-        borderColor: palette.primary[600],
+        borderColor: theme.accent,
         borderWidth: 2,
     },
     forwardHeader: { marginBottom: 3 },
     forwardText: {
-        color: palette.primary[700],
+        color: theme.accent,
         fontSize: 11,
         fontWeight: '700',
     },
-    forwardTextMine: { color: 'rgba(255,255,255,0.85)' },
+    forwardTextMine: { color: theme.colors.bubbleOwnMuted },
     selectionRow: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -1191,24 +1206,24 @@ const styles = StyleSheet.create({
         height: 24,
         borderRadius: 12,
         borderWidth: 1.5,
-        borderColor: palette.border.strong,
+        borderColor: theme.colors.borderStrong,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: palette.glass.elevated,
+        backgroundColor: theme.colors.glassElevated,
     },
     selectionOn: {
-        backgroundColor: palette.primary[500],
-        borderColor: palette.primary[500],
+        backgroundColor: theme.accent,
+        borderColor: theme.accent,
     },
     selectionMark: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 13,
         fontWeight: '700',
     },
     senderName: {
         fontSize: 12,
         fontWeight: '600',
-        color: palette.primary[700],
+        color: theme.accent,
         marginBottom: 2,
     },
     // quoted reply block
@@ -1219,11 +1234,11 @@ const styles = StyleSheet.create({
         marginBottom: spacing.xxs,
         maxWidth: '100%',
     },
-    quoteTheirs: { backgroundColor: palette.neutral[50] },
-    quoteMine: { backgroundColor: 'rgba(255,255,255,0.18)' },
+    quoteTheirs: { backgroundColor: theme.colors.surface },
+    quoteMine: { backgroundColor: theme.colors.quoteOwn },
     quoteBar: { width: 3 },
-    quoteBarTheirs: { backgroundColor: palette.primary[500] },
-    quoteBarMine: { backgroundColor: palette.primary[100] },
+    quoteBarTheirs: { backgroundColor: theme.accent },
+    quoteBarMine: { backgroundColor: theme.colors.accentSoft },
     quoteBody: {
         flexShrink: 1,
         minWidth: 0,
@@ -1231,34 +1246,34 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.xxs,
     },
     quoteName: {
-        color: palette.primary[700],
+        color: theme.accent,
         fontSize: 11,
         fontWeight: '700',
     },
-    quoteNameMine: { color: 'rgba(255,255,255,0.9)' },
-    quoteText: { color: palette.text.secondary, fontSize: 12 },
-    quoteTextMine: { color: 'rgba(255,255,255,0.88)' },
+    quoteNameMine: { color: theme.colors.bubbleOwnText },
+    quoteText: { color: theme.colors.textSecondary, fontSize: 12 },
+    quoteTextMine: { color: theme.colors.bubbleOwnMuted },
     quoteDeleted: { fontStyle: 'italic' },
-    content: { color: palette.text.primary, fontSize: 15 },
-    contentMine: { color: palette.text.onAccent },
+    content: { color: theme.colors.text, fontSize: 15 },
+    contentMine: { color: theme.colors.accentText },
     link: {
-        color: palette.primary[700],
+        color: theme.accent,
         textDecorationLine: 'underline',
     },
     linkMine: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         textDecorationLine: 'underline',
     },
     // Mentions use the standard link blue on neutral bubbles and a lighter
     // blue on the purple own-bubble surface (both pass 4.5:1). The app is
     // dark-only; underline matches the existing message-link style.
     mention: {
-        color: palette.link.base,
+        color: theme.colors.link,
         fontWeight: '600',
         textDecorationLine: 'underline',
     },
     mentionMine: {
-        color: palette.link.onAccent,
+        color: theme.colors.linkOnOwn,
     },
     mentionPressed: {
         opacity: 0.6,
@@ -1279,46 +1294,46 @@ const styles = StyleSheet.create({
         paddingVertical: 2,
     },
     reactionMine: {
-        backgroundColor: 'rgba(255,255,255,0.18)',
-        borderColor: 'rgba(255,255,255,0.28)',
+        backgroundColor: theme.colors.quoteOwn,
+        borderColor: theme.colors.quoteOwn,
     },
     reactionMineSelected: {
-        backgroundColor: palette.primary[100],
-        borderColor: palette.neutral[0],
+        backgroundColor: theme.colors.accentSoft,
+        borderColor: theme.colors.background,
     },
     reactionTheirs: {
-        backgroundColor: palette.neutral[100],
-        borderColor: palette.neutral[100],
+        backgroundColor: theme.colors.glassElevated,
+        borderColor: theme.colors.border,
     },
     reactionTheirsSelected: {
-        backgroundColor: palette.primary[500],
-        borderColor: palette.primary[600],
+        backgroundColor: theme.accent,
+        borderColor: theme.accent,
     },
     reactionText: { fontSize: 12, fontWeight: '600' },
-    reactionTextMine: { color: palette.text.onAccent },
-    reactionTextMineSelected: { color: palette.highlight },
-    reactionTextTheirs: { color: palette.text.secondary },
-    reactionTextTheirsSelected: { color: palette.text.onAccent },
+    reactionTextMine: { color: theme.colors.accentText },
+    reactionTextMineSelected: { color: theme.accent },
+    reactionTextTheirs: { color: theme.colors.textSecondary },
+    reactionTextTheirsSelected: { color: theme.colors.accentText },
     uploadError: {
-        color: palette.semantic.danger,
+        color: theme.colors.danger,
         fontSize: 11,
         marginTop: 2,
     },
-    uploadErrorMine: { color: 'rgba(255,255,255,0.8)' },
+    uploadErrorMine: { color: theme.colors.bubbleOwnMuted },
     attachmentsWrap: { maxWidth: 260, width: '100%' },
     filesBlock: {
         borderRadius: radii.sm,
         overflow: 'hidden',
         marginTop: spacing.xxs,
     },
-    filesBlockMine: { backgroundColor: 'rgba(255,255,255,0.16)' },
-    filesBlockTheirs: { backgroundColor: palette.neutral[50] },
+    filesBlockMine: { backgroundColor: theme.colors.quoteOwn },
+    filesBlockTheirs: { backgroundColor: theme.colors.surface },
     fileDivider: {
         height: StyleSheet.hairlineWidth,
-        backgroundColor: palette.neutral[100],
+        backgroundColor: theme.colors.glassElevated,
         marginHorizontal: spacing.xs,
     },
-    fileDividerMine: { backgroundColor: 'rgba(255,255,255,0.28)' },
+    fileDividerMine: { backgroundColor: theme.colors.quoteOwn },
     pendingActions: {
         flexDirection: 'row',
         justifyContent: 'flex-end',
@@ -1329,31 +1344,31 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.xs,
         paddingVertical: 2,
         borderRadius: radii.sm,
-        backgroundColor: 'rgba(28, 32, 36, 0.12)',
+        backgroundColor: theme.colors.quoteOther,
     },
     pendingButtonText: {
-        color: palette.neutral[700],
+        color: theme.colors.text,
         fontSize: 11,
         fontWeight: '700',
     },
-    pendingButtonTextMine: { color: palette.text.onAccent },
+    pendingButtonTextMine: { color: theme.colors.accentText },
     meta: {
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
         fontSize: 10,
         textAlign: 'right',
         marginTop: 2,
     },
-    metaMine: { color: 'rgba(255,255,255,0.72)' },
-    ticksSeen: { color: palette.text.onAccent, fontWeight: '700' },
+    metaMine: { color: theme.colors.bubbleOwnMuted },
+    ticksSeen: { color: theme.colors.accentText, fontWeight: '700' },
     unreadRow: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: spacing.xs,
         marginVertical: spacing.sm,
     },
-    unreadLine: { flex: 1, height: 1, backgroundColor: palette.border.strong },
+    unreadLine: { flex: 1, height: 1, backgroundColor: theme.colors.borderStrong },
     unreadLabel: {
-        color: palette.primary[600],
+        color: theme.accent,
         fontSize: 12,
         fontWeight: '600',
     },
@@ -1366,9 +1381,9 @@ const styles = StyleSheet.create({
     separatorLine: {
         flex: 1,
         height: 1,
-        backgroundColor: palette.neutral[100],
+        backgroundColor: theme.colors.glassElevated,
     },
-    separatorLabel: { color: palette.neutral[500], fontSize: 12 },
+    separatorLabel: { color: theme.colors.textSecondary, fontSize: 12 },
     metaRow: {
         flexDirection: 'row',
         alignItems: 'center',

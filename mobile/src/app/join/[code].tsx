@@ -33,6 +33,8 @@ import {
     useJoinInvite,
 } from '../../features/groups/use-invite-links';
 import { setPendingInviteCode } from '../../features/groups/pending-invite';
+import { useTheme, useThemedStyles } from '../../shared/theme';
+import type { AppTheme } from '../../shared/theme';
 
 /**
  * Join screen (`/join/:code`) — outside the protected group so a deep link can
@@ -49,6 +51,8 @@ function parseCode(value: string | string[] | undefined): string {
 }
 
 export default function JoinScreen(): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const params = useLocalSearchParams<RouteParams>();
     const code = parseCode(params.code);
     const status = useAuthStore((state) => state.status);
@@ -62,7 +66,7 @@ export default function JoinScreen(): React.ReactElement {
     if (status === 'restoring' || status === 'guest') {
         return (
             <Screen style={styles.centered} withTopInset={true}>
-                <ActivityIndicator size="large" color={palette.primary[500]} />
+                <ActivityIndicator size="large" color={theme.accent} />
             </Screen>
         );
     }
@@ -77,6 +81,8 @@ export default function JoinScreen(): React.ReactElement {
 }
 
 function JoinPanel({ code }: { code: string }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const queryClient = useQueryClient();
     const previewQuery = useInvitePreview(code);
     const joinInvite = useJoinInvite(code);
@@ -166,9 +172,9 @@ function JoinPanel({ code }: { code: string }): React.ReactElement {
                     style={styles.backButton}
                     onPress={(): void => router.replace('/(app)')}
                 >
-                    <Text style={styles.backText}>‹</Text>
+                    <AppText style={styles.backText}>‹</AppText>
                 </Pressable>
-                <Text style={styles.topBarTitle}>Join group</Text>
+                <AppText style={styles.topBarTitle}>Join group</AppText>
                 <View style={styles.topBarSpacer} />
             </View>
 
@@ -178,37 +184,37 @@ function JoinPanel({ code }: { code: string }): React.ReactElement {
                 <View style={styles.centered}>
                     <ActivityIndicator
                         size="large"
-                        color={palette.primary[500]}
+                        color={theme.accent}
                     />
                     <AppText variant="caption">Opening invite link…</AppText>
                 </View>
             ) : banned ? (
                 <View style={styles.centered}>
-                    <Text style={styles.stateTitle}>
+                    <AppText style={styles.stateTitle}>
                         You can't join this group
-                    </Text>
-                    <Text style={styles.stateDetail}>
+                    </AppText>
+                    <AppText style={styles.stateDetail}>
                         Ask an admin to unban you before you try again.
-                    </Text>
+                    </AppText>
                     <Pressable
                         accessibilityRole="button"
                         accessibilityLabel="Back to chats"
                         style={styles.primaryButton}
                         onPress={(): void => router.replace('/(app)')}
                     >
-                        <Text style={styles.primaryButtonText}>
+                        <AppText style={styles.primaryButtonText}>
                             Back to chats
-                        </Text>
+                        </AppText>
                     </Pressable>
                 </View>
             ) : previewQuery.isError || preview === undefined ? (
                 <View style={styles.centered}>
-                    <Text style={styles.stateTitle}>
+                    <AppText style={styles.stateTitle}>
                         This invite link is invalid or has expired
-                    </Text>
-                    <Text style={styles.stateDetail}>
+                    </AppText>
+                    <AppText style={styles.stateDetail}>
                         {describeInviteJoinError(previewQuery.error)}
-                    </Text>
+                    </AppText>
                     <Pressable
                         accessibilityRole="button"
                         accessibilityLabel="Retry opening invite link"
@@ -217,7 +223,7 @@ function JoinPanel({ code }: { code: string }): React.ReactElement {
                             void previewQuery.refetch();
                         }}
                     >
-                        <Text style={styles.primaryButtonText}>Retry</Text>
+                        <AppText style={styles.primaryButtonText}>Retry</AppText>
                     </Pressable>
                     <Pressable
                         accessibilityRole="button"
@@ -225,7 +231,7 @@ function JoinPanel({ code }: { code: string }): React.ReactElement {
                         style={styles.linkButton}
                         onPress={(): void => router.replace('/(app)')}
                     >
-                        <Text style={styles.linkButtonText}>Back to chats</Text>
+                        <AppText style={styles.linkButtonText}>Back to chats</AppText>
                     </Pressable>
                 </View>
             ) : (
@@ -256,6 +262,8 @@ function JoinPreviewCard(props: {
     error: string | null;
     onJoin: () => void;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const { preview } = props;
     const memberLabel = `${preview.membersCount} member${
         preview.membersCount === 1 ? '' : 's'
@@ -275,22 +283,22 @@ function JoinPreviewCard(props: {
                 </SafeText>
                 {preview.description !== null &&
                     preview.description.trim() !== '' && (
-                        <Text style={styles.groupDescription}>
+                        <AppText style={styles.groupDescription}>
                             {preview.description}
-                        </Text>
+                        </AppText>
                     )}
-                <Text style={styles.memberCount}>{memberLabel}</Text>
-                <Text style={styles.inviteHint}>
+                <AppText style={styles.memberCount}>{memberLabel}</AppText>
+                <AppText style={styles.inviteHint}>
                     You were invited to join this group on niazchat.
-                </Text>
+                </AppText>
 
                 {props.error !== null && (
-                    <Text
+                    <AppText
                         style={styles.errorText}
                         accessibilityLiveRegion="polite"
                     >
                         {props.error}
-                    </Text>
+                    </AppText>
                 )}
 
                 <Pressable
@@ -309,10 +317,10 @@ function JoinPreviewCard(props: {
                     {props.busy ? (
                         <ActivityIndicator
                             size="small"
-                            color={palette.text.onAccent}
+                            color={theme.colors.accentText}
                         />
                     ) : (
-                        <Text style={styles.primaryButtonText}>Join group</Text>
+                        <AppText style={styles.primaryButtonText}>Join group</AppText>
                     )}
                 </Pressable>
             </View>
@@ -321,27 +329,30 @@ function JoinPreviewCard(props: {
 }
 
 function InvalidInvite({ message }: { message: string }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     return (
         <Screen style={styles.screen} withTopInset={true}>
             <View style={styles.centered}>
-                <Text style={styles.stateTitle}>{message}</Text>
+                <AppText style={styles.stateTitle}>{message}</AppText>
                 <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Back to chats"
                     style={styles.primaryButton}
                     onPress={(): void => router.replace('/(app)')}
                 >
-                    <Text style={styles.primaryButtonText}>Back to chats</Text>
+                    <AppText style={styles.primaryButtonText}>Back to chats</AppText>
                 </Pressable>
             </View>
         </Screen>
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: palette.background,
+        backgroundColor: 'transparent',
     },
     centered: {
         flex: 1,
@@ -356,8 +367,8 @@ const styles = StyleSheet.create({
         minHeight: 52,
         paddingHorizontal: spacing.xs,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: palette.neutral[100],
-        backgroundColor: palette.elevated,
+        borderBottomColor: theme.colors.border,
+        backgroundColor: theme.colors.glassElevated,
     },
     backButton: {
         width: 44,
@@ -368,14 +379,14 @@ const styles = StyleSheet.create({
     backText: {
         fontSize: 32,
         lineHeight: 34,
-        color: palette.neutral[900],
+        color: theme.colors.text,
     },
     topBarTitle: {
         flex: 1,
         textAlign: 'center',
         fontSize: 16,
         fontWeight: '700',
-        color: palette.neutral[900],
+        color: theme.colors.text,
     },
     topBarSpacer: { width: 44 },
     cardWrap: {
@@ -388,9 +399,9 @@ const styles = StyleSheet.create({
         gap: spacing.xs,
         padding: spacing.lg,
         borderRadius: radii.md,
-        backgroundColor: palette.elevated,
+        backgroundColor: theme.colors.glassElevated,
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
     },
     groupTitle: {
         alignSelf: 'stretch',
@@ -398,39 +409,39 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         fontSize: 22,
         fontWeight: '700',
-        color: palette.neutral[900],
+        color: theme.colors.text,
     },
     groupDescription: {
         textAlign: 'center',
         fontSize: 14,
         lineHeight: 20,
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
     },
     memberCount: {
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
         fontSize: 14,
         fontWeight: '600',
     },
     inviteHint: {
         marginTop: spacing.xxs,
         textAlign: 'center',
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
         fontSize: 13,
     },
     stateTitle: {
         textAlign: 'center',
         fontSize: 17,
         fontWeight: '600',
-        color: palette.neutral[700],
+        color: theme.colors.text,
     },
     stateDetail: {
         textAlign: 'center',
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
         fontSize: 13,
     },
     errorText: {
         textAlign: 'center',
-        color: palette.semantic.danger,
+        color: theme.colors.danger,
         fontSize: 13,
     },
     primaryButton: {
@@ -440,19 +451,19 @@ const styles = StyleSheet.create({
         minHeight: 44,
         borderRadius: radii.sm,
         paddingHorizontal: spacing.lg,
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
     },
     primaryButtonPressed: { opacity: 0.85 },
     primaryButtonDisabled: { opacity: 0.45 },
     wideButton: { alignSelf: 'stretch' },
     primaryButtonText: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 15,
         fontWeight: '600',
     },
     linkButton: { padding: spacing.sm },
     linkButtonText: {
-        color: palette.primary[700],
+        color: theme.accent,
         fontSize: 14,
         fontWeight: '600',
     },

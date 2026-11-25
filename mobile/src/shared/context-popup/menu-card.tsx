@@ -1,6 +1,9 @@
 import React, { memo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { palette, shadows } from '../theme';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { shadows } from '../theme';
+import { AppText } from '../components/app-text';
+import { useTheme, useThemedStyles } from '../theme/theme-provider';
+import type { AppTheme } from '../theme/theme-provider';
 import { MENU_PADDING, MENU_ROW_HEIGHT } from './popup-layout';
 import { LucideIcon } from 'lucide-react-native';
 
@@ -11,7 +14,8 @@ import { LucideIcon } from 'lucide-react-native';
  *
  * The size is fixed by `popup-layout.ts` constants, so the host can place the
  * card before it is rendered. Memoized: the popup must never rebuild it while
- * the animation runs.
+ * the animation runs. It reads the theme itself, so an accent or light/dark
+ * change repaints the menu immediately.
  */
 
 export interface ContextMenuItem {
@@ -34,6 +38,8 @@ export const ContextMenuCard = memo(function ContextMenuCard({
     items: readonly ContextMenuItem[];
     accessibilityLabel?: string | undefined;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     return (
         <View
             accessibilityViewIsModal={true}
@@ -62,11 +68,14 @@ export const ContextMenuCard = memo(function ContextMenuCard({
                                 {React.createElement(item.icon, {
                                     size: 20,
                                     strokeWidth: 1.8,
-                                    color: item.destructive === true ? '#FF453A' : '#FFFFFF',
+                                    color:
+                                        item.destructive === true
+                                            ? theme.colors.danger
+                                            : theme.colors.text,
                                 })}
                             </View>
                         )}
-                        <Text
+                        <AppText
                             style={[
                                 styles.label,
                                 item.destructive === true && styles.labelDanger,
@@ -74,11 +83,11 @@ export const ContextMenuCard = memo(function ContextMenuCard({
                             numberOfLines={1}
                         >
                             {item.label}
-                        </Text>
+                        </AppText>
                         {item.hint !== undefined && (
-                            <Text style={styles.hint} numberOfLines={1}>
+                            <AppText style={styles.hint} numberOfLines={1}>
                                 {item.hint}
-                            </Text>
+                            </AppText>
                         )}
                     </Pressable>
                 </View>
@@ -87,50 +96,47 @@ export const ContextMenuCard = memo(function ContextMenuCard({
     );
 });
 
-const styles = StyleSheet.create({
-    card: {
-        borderRadius: 15,
-        paddingVertical: MENU_PADDING / 2,
-        backgroundColor: palette.elevated,
-        borderWidth: StyleSheet.hairlineWidth * 2,
-        borderColor: palette.border.strong,
-        ...shadows.floating,
-        shadowOpacity: 0.32,
-        shadowRadius: 14,
-        elevation: 10,
-        overflow: 'hidden',
-    },
-    row: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 10,
-        height: MENU_ROW_HEIGHT,
-        paddingHorizontal: 14,
-    },
-    pressed: { backgroundColor: palette.primary[100] },
-    disabled: { opacity: 0.45 },
-    icon: {
-        width: 22,
-        fontSize: 15,
-        textAlign: 'center',
-        color: palette.primary[600],
-    },
-    iconDanger: { color: palette.semantic.danger },
-    label: {
-        flex: 1,
-        fontSize: 15,
-        fontWeight: '600',
-        color: palette.text.primary,
-    },
-    hint: {
-        fontSize: 11,
-        fontWeight: '500',
-        color: palette.text.muted,
-    },
-    labelDanger: { color: palette.semantic.danger },
-    separator: {
-        height: StyleSheet.hairlineWidth,
-        backgroundColor: palette.border.subtle,
-        marginStart: 14,
-    },
-});
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+        card: {
+            borderRadius: 15,
+            paddingVertical: MENU_PADDING / 2,
+            backgroundColor: theme.colors.surfaceElevated,
+            borderWidth: StyleSheet.hairlineWidth * 2,
+            borderColor: theme.colors.borderStrong,
+            ...shadows.floating,
+            shadowOpacity: 0.32,
+            shadowRadius: 14,
+            elevation: 10,
+            overflow: 'hidden',
+        },
+        row: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 10,
+            height: MENU_ROW_HEIGHT,
+            paddingHorizontal: 14,
+        },
+        pressed: { backgroundColor: theme.colors.glassAccent },
+        disabled: { opacity: 0.45 },
+        icon: {
+            width: 22,
+            textAlign: 'center',
+        },
+        label: {
+            ...theme.type.label,
+            flex: 1,
+            fontSize: 15,
+            color: theme.colors.text,
+        },
+        hint: {
+            ...theme.type.micro,
+            color: theme.colors.textMuted,
+        },
+        labelDanger: { color: theme.colors.danger },
+        separator: {
+            height: StyleSheet.hairlineWidth,
+            backgroundColor: theme.colors.border,
+            marginStart: 14,
+        },
+    });

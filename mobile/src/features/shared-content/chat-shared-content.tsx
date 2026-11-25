@@ -6,15 +6,16 @@ import {
     RefreshControl,
     ScrollView,
     StyleSheet,
-    Text,
     useWindowDimensions,
     View,
 } from 'react-native';
 import type { ReactNode } from 'react';
 import type { ListRenderItemInfo } from 'react-native';
 import { FileText, ImageOff, Link2, Mic, Music2 } from 'lucide-react-native';
-import { palette, radii, spacing } from '../../shared/theme';
-import { AppText } from '../../shared/components';
+import { radii, spacing } from '../../shared/theme';
+import { useTheme, useThemedStyles } from '../../shared/theme/theme-provider';
+import type { AppTheme } from '../../shared/theme/theme-provider';
+import { AppText, SafeText } from '../../shared/components';
 import type {
     SharedAttachmentItemDto,
     SharedContentType,
@@ -107,6 +108,8 @@ export function ChatSharedContent({
     /** Group profiles only: the leading, default-selected Members tab. */
     members?: MembersTabConfig;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const id = chatId ?? 0;
     const listRef = useRef<FlatList<ListRow>>(null);
     const { width } = useWindowDimensions();
@@ -343,7 +346,9 @@ export function ChatSharedContent({
             if (row.kind === 'month') {
                 return (
                     <View style={styles.monthRow}>
-                        <Text style={styles.monthLabel}>{row.label}</Text>
+                        <SafeText style={styles.monthLabel}>
+                            {row.label}
+                        </SafeText>
                     </View>
                 );
             }
@@ -434,7 +439,8 @@ export function ChatSharedContent({
                                   !(activeQuery?.isFetchingNextPage ?? false)
                         }
                         onRefresh={refresh}
-                        tintColor={palette.primary[500]}
+                        tintColor={theme.accent}
+                        colors={[theme.accent]}
                     />
                 }
                 onEndReached={(): void => {
@@ -464,7 +470,7 @@ export function ChatSharedContent({
                         <View style={styles.footer}>
                             <ActivityIndicator
                                 size="small"
-                                color={palette.primary[500]}
+                                color={theme.accent}
                             />
                         </View>
                     ) : (
@@ -492,12 +498,14 @@ function SharedContentState({
     error: string | null;
     onRetry: () => void;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const tab = tabDefinition(type);
     const Icon = EMPTY_ICONS[type];
     if (loading) {
         return (
             <View style={styles.state}>
-                <ActivityIndicator size="small" color={palette.primary[500]} />
+                <ActivityIndicator size="small" color={theme.accent} />
             </View>
         );
     }
@@ -516,7 +524,7 @@ function SharedContentState({
                         pressed && styles.pressed,
                     ]}
                 >
-                    <Text style={styles.retryText}>Retry</Text>
+                    <SafeText style={styles.retryText}>Retry</SafeText>
                 </Pressable>
             </View>
         );
@@ -524,9 +532,15 @@ function SharedContentState({
     return (
         <View style={styles.state}>
             <View style={styles.emptyIcon}>
-                <Icon size={26} color={palette.text.muted} strokeWidth={1.7} />
+                <Icon
+                    size={26}
+                    color={theme.colors.textMuted}
+                    strokeWidth={1.7}
+                />
             </View>
-            <Text style={styles.stateTitle}>{tab.emptyTitle}</Text>
+            <SafeText style={styles.stateTitle} align="center">
+                {tab.emptyTitle}
+            </SafeText>
             <AppText variant="caption" style={styles.stateText}>
                 {tab.emptyHint}
             </AppText>
@@ -537,57 +551,62 @@ function SharedContentState({
 /** The five tabs, exported for screens that render their own tab strip. */
 export { SHARED_TABS };
 
-const styles = StyleSheet.create({
-    root: { flex: 1 },
-    content: { paddingBottom: spacing.xl },
-    monthRow: {
-        height: MONTH_ROW_HEIGHT,
-        justifyContent: 'center',
-        paddingHorizontal: spacing.md,
-        backgroundColor: palette.background,
-    },
-    monthLabel: {
-        color: palette.text.secondary,
-        fontSize: 12,
-        fontWeight: '700',
-        letterSpacing: 0.3,
-    },
-    state: {
-        height: STATE_ROW_HEIGHT,
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: spacing.xs,
-        paddingHorizontal: spacing.lg,
-    },
-    emptyIcon: {
-        width: 56,
-        height: 56,
-        borderRadius: radii.full,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: palette.primary[100],
-    },
-    stateTitle: {
-        color: palette.text.primary,
-        fontSize: 15,
-        fontWeight: '700',
-        textAlign: 'center',
-    },
-    stateText: { textAlign: 'center', color: palette.text.secondary },
-    retry: {
-        marginTop: spacing.xxs,
-        borderWidth: 1,
-        borderColor: palette.primary[500],
-        borderRadius: radii.sm,
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.xxs,
-    },
-    pressed: { opacity: 0.6 },
-    retryText: {
-        color: palette.primary[600],
-        fontSize: 13,
-        fontWeight: '600',
-    },
-    footer: { paddingVertical: spacing.md, alignItems: 'center' },
-    footerSpacer: { height: spacing.md },
-});
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+        // Transparent list canvas: the global background layer shows through.
+        root: { flex: 1 },
+        content: { paddingBottom: spacing.xl },
+        monthRow: {
+            height: MONTH_ROW_HEIGHT,
+            justifyContent: 'center',
+            paddingHorizontal: spacing.md,
+            // Sticky month label: translucent theme surface so the app
+            // background shows through while the text keeps its contrast.
+            backgroundColor: theme.colors.glassHeader,
+        },
+        monthLabel: {
+            ...theme.type.caption,
+            color: theme.colors.textSecondary,
+            letterSpacing: 0.3,
+        },
+        state: {
+            height: STATE_ROW_HEIGHT,
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: spacing.xs,
+            paddingHorizontal: spacing.lg,
+        },
+        emptyIcon: {
+            width: 56,
+            height: 56,
+            borderRadius: radii.full,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: theme.colors.accentSoft,
+        },
+        stateTitle: {
+            ...theme.type.body,
+            color: theme.colors.text,
+            textAlign: 'center',
+        },
+        stateText: {
+            ...theme.type.caption,
+            textAlign: 'center',
+            color: theme.colors.textSecondary,
+        },
+        retry: {
+            marginTop: spacing.xxs,
+            borderWidth: 1,
+            borderColor: theme.colors.accentBorder,
+            borderRadius: radii.sm,
+            paddingHorizontal: spacing.md,
+            paddingVertical: spacing.xxs,
+        },
+        pressed: { opacity: 0.6 },
+        retryText: {
+            ...theme.type.label,
+            color: theme.accent,
+        },
+        footer: { paddingVertical: spacing.md, alignItems: 'center' },
+        footerSpacer: { height: spacing.md },
+    });

@@ -1,6 +1,9 @@
 import { useEffect, useRef } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { palette, radii, spacing } from '../../shared/theme';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { radii, spacing } from '../../shared/theme';
+import { useThemedStyles } from '../../shared/theme/theme-provider';
+import type { AppTheme } from '../../shared/theme/theme-provider';
+import { SafeText } from '../../shared/components';
 import type { SharedProfileTab } from './shared-content-model';
 
 export interface ProfileTabItem {
@@ -16,6 +19,10 @@ export interface ProfileTabItem {
  * the active tab's rows scroll beneath it. The bar scrolls horizontally when
  * the labels do not fit (group profiles add a sixth tab), and keeps the active
  * tab in view.
+ *
+ * The bar is a translucent theme surface (never opaque), the active pill and
+ * underline use the accent, and labels use the scaled typography so the chosen
+ * font and text size apply.
  */
 export function SharedContentTabs({
     activeTab,
@@ -26,6 +33,7 @@ export function SharedContentTabs({
     tabs: readonly ProfileTabItem[];
     onChange: (type: SharedProfileTab) => void;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
     const tabOffsets = useRef<Record<string, { x: number; width: number }>>({});
 
@@ -67,14 +75,21 @@ export function SharedContentTabs({
                                 pressed && styles.tabPressed,
                             ]}
                         >
-                            <Text
+                            <SafeText
                                 style={[
                                     styles.label,
                                     active && styles.labelActive,
                                 ]}
+                                align="center"
                             >
                                 {tab.label}
-                            </Text>
+                            </SafeText>
+                            <View
+                                style={[
+                                    styles.indicator,
+                                    active && styles.indicatorActive,
+                                ]}
+                            />
                         </Pressable>
                     );
                 })}
@@ -83,30 +98,41 @@ export function SharedContentTabs({
     );
 }
 
-const styles = StyleSheet.create({
-    bar: {
-        backgroundColor: palette.surface,
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: palette.border.subtle,
-        borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: palette.border.subtle,
-    },
-    content: {
-        paddingHorizontal: spacing.sm,
-        paddingVertical: spacing.xxs,
-        gap: spacing.xxs,
-    },
-    tab: {
-        paddingHorizontal: spacing.sm,
-        paddingVertical: spacing.xs,
-        borderRadius: radii.full,
-    },
-    tabActive: { backgroundColor: palette.primary[100] },
-    tabPressed: { opacity: 0.65 },
-    label: {
-        color: palette.text.secondary,
-        fontSize: 13,
-        fontWeight: '600',
-    },
-    labelActive: { color: palette.primary[700] },
-});
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+        // Translucent: the global app background shows through the sticky bar.
+        bar: {
+            backgroundColor: theme.colors.glassHeader,
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: theme.colors.border,
+            borderTopWidth: StyleSheet.hairlineWidth,
+            borderTopColor: theme.colors.border,
+        },
+        content: {
+            paddingHorizontal: spacing.sm,
+            paddingVertical: spacing.xxs,
+            gap: spacing.xxs,
+        },
+        tab: {
+            paddingHorizontal: spacing.sm,
+            paddingVertical: spacing.xs,
+            borderRadius: radii.full,
+            alignItems: 'center',
+            justifyContent: 'center',
+        },
+        tabActive: { backgroundColor: theme.colors.accentSoft },
+        tabPressed: { opacity: 0.65 },
+        label: {
+            ...theme.type.label,
+            color: theme.colors.textSecondary,
+        },
+        labelActive: { color: theme.accent },
+        indicator: {
+            marginTop: 4,
+            height: 2,
+            alignSelf: 'stretch',
+            borderRadius: 1,
+            backgroundColor: 'transparent',
+        },
+        indicatorActive: { backgroundColor: theme.accent },
+    });

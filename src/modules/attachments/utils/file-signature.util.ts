@@ -101,11 +101,14 @@ export function detectAudioMimeType(buffer: Buffer): string | null {
         const brand = ascii(8, 12);
         if (brand === 'M4A ' || brand === 'M4B ') return 'audio/mp4';
         // isom/mp42 may still be audio-only; the caller verifies the streams.
-        return brand === 'isom' || brand.startsWith('mp4')
-            ? 'audio/mp4'
-            : null;
+        return brand === 'isom' || brand.startsWith('mp4') ? 'audio/mp4' : null;
     }
-    if (buffer[0] === 0x1a && buffer[1] === 0x45 && buffer[2] === 0xdf && buffer[3] === 0xa3) {
+    if (
+        buffer[0] === 0x1a &&
+        buffer[1] === 0x45 &&
+        buffer[2] === 0xdf &&
+        buffer[3] === 0xa3
+    ) {
         // EBML (webm/matroska): audio or video, decided by the probe.
         return 'audio/webm';
     }

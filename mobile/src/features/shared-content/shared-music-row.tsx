@@ -1,14 +1,11 @@
 import { memo } from 'react';
-import {
-    ActivityIndicator,
-    Pressable,
-    StyleSheet,
-    Text,
-    View,
-} from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import { Music2, Pause, Play } from 'lucide-react-native';
-import { palette, radii, spacing } from '../../shared/theme';
+import { radii, spacing } from '../../shared/theme';
+import { withAlpha } from '../../shared/theme/colors';
+import { useTheme, useThemedStyles } from '../../shared/theme/theme-provider';
+import type { AppTheme } from '../../shared/theme/theme-provider';
 import type { SharedAttachmentItemDto } from '../../core/api/dto/shared-content.dto';
 import { SafeText, UserAvatar } from '../../shared/components';
 import {
@@ -49,6 +46,7 @@ export function musicTrackOf(
  *
  * Reuses the global music player: only one track plays app-wide, the mini bar
  * and full sheet keep working, and the row reads the shared play/pause state.
+ * The cover placeholder, overlay and meta text come from the theme.
  */
 export const SharedMusicRow = memo(function SharedMusicRow({
     item,
@@ -61,6 +59,8 @@ export const SharedMusicRow = memo(function SharedMusicRow({
     queue: MusicTrack[];
     showSender: boolean;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const attachment = item.attachment;
     const { headers } = useAttachmentAuth();
     const active = useIsActiveTrack(attachment.id);
@@ -109,24 +109,31 @@ export const SharedMusicRow = memo(function SharedMusicRow({
                             transition={120}
                         />
                     ) : (
-                        <Music2 size={20} color="#FFFFFF" strokeWidth={1.8} />
+                        <Music2
+                            size={20}
+                            color={theme.colors.accentText}
+                            strokeWidth={1.8}
+                        />
                     )}
                     <View style={styles.coverShade} pointerEvents="none">
                         {loading ? (
-                            <ActivityIndicator size="small" color="#FFFFFF" />
+                            <ActivityIndicator
+                                size="small"
+                                color={theme.colors.accentText}
+                            />
                         ) : playing ? (
                             <Pause
                                 size={16}
-                                color="#FFFFFF"
+                                color={theme.colors.accentText}
                                 strokeWidth={2.2}
-                                fill="#FFFFFF"
+                                fill={theme.colors.accentText}
                             />
                         ) : (
                             <Play
                                 size={16}
-                                color="#FFFFFF"
+                                color={theme.colors.accentText}
                                 strokeWidth={2.2}
-                                fill="#FFFFFF"
+                                fill={theme.colors.accentText}
                             />
                         )}
                     </View>
@@ -155,14 +162,14 @@ export const SharedMusicRow = memo(function SharedMusicRow({
                 </View>
 
                 <View style={styles.meta}>
-                    <Text style={styles.time}>
+                    <SafeText style={styles.time} align="center">
                         {hasDuration(attachment.durationSeconds)
                             ? formatDuration(attachment.durationSeconds)
                             : ''}
-                    </Text>
-                    <Text style={styles.date} numberOfLines={1}>
+                    </SafeText>
+                    <SafeText style={styles.date} lines={1} align="center">
                         {sharedDateLabel(item.createdAt)}
-                    </Text>
+                    </SafeText>
                 </View>
             </View>
             {/* Reserved even when inactive: the row height never changes. */}
@@ -173,62 +180,67 @@ export const SharedMusicRow = memo(function SharedMusicRow({
     );
 });
 
-const styles = StyleSheet.create({
-    wrapper: { paddingHorizontal: spacing.md, height: 100 },
-    row: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.sm,
-        paddingVertical: spacing.xs,
-        height: 82,
-    },
-    coverButton: {
-        width: 46,
-        height: 46,
-        borderRadius: radii.md,
-        overflow: 'hidden',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: palette.primary[500],
-    },
-    pressed: { opacity: 0.7 },
-    cover: { width: '100%', height: '100%' },
-    coverShade: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'rgba(9,7,15,0.32)',
-    },
-    body: { flex: 1, minWidth: 0, gap: 1 },
-    senderLine: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.xxs,
-        minWidth: 0,
-    },
-    senderName: {
-        color: palette.text.secondary,
-        fontSize: 11,
-        fontWeight: '600',
-        flexShrink: 1,
-    },
-    title: {
-        color: palette.text.primary,
-        fontSize: 14,
-        fontWeight: '700',
-    },
-    subtitle: { color: palette.text.secondary, fontSize: 11 },
-    meta: { alignItems: 'flex-end', width: 92 },
-    time: {
-        color: palette.text.primary,
-        fontSize: 11,
-        fontWeight: '600',
-        fontVariant: ['tabular-nums'],
-    },
-    date: { color: palette.text.muted, fontSize: 10, marginTop: 2 },
-    scrub: { height: 18, justifyContent: 'center' },
-});
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+        wrapper: { paddingHorizontal: spacing.md, height: 100 },
+        row: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: spacing.sm,
+            paddingVertical: spacing.xs,
+            height: 82,
+        },
+        coverButton: {
+            width: 46,
+            height: 46,
+            borderRadius: radii.md,
+            overflow: 'hidden',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: theme.accent,
+        },
+        pressed: { opacity: 0.7 },
+        cover: { width: '100%', height: '100%' },
+        coverShade: {
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: withAlpha(theme.accent, 0.32),
+        },
+        body: { flex: 1, minWidth: 0, gap: 1 },
+        senderLine: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: spacing.xxs,
+            minWidth: 0,
+        },
+        senderName: {
+            ...theme.type.caption,
+            color: theme.colors.textSecondary,
+        },
+        title: {
+            ...theme.type.label,
+            color: theme.colors.text,
+        },
+        subtitle: {
+            ...theme.type.micro,
+            fontWeight: '400',
+            color: theme.colors.textSecondary,
+        },
+        meta: { alignItems: 'flex-end', width: 92 },
+        time: {
+            ...theme.type.caption,
+            color: theme.colors.text,
+            fontVariant: ['tabular-nums'],
+        },
+        date: {
+            ...theme.type.micro,
+            color: theme.colors.textMuted,
+            marginTop: 2,
+        },
+        scrub: { height: 18, justifyContent: 'center' },
+    });

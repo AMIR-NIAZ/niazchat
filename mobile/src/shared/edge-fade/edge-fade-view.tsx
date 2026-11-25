@@ -12,7 +12,7 @@ import { buildMaskStops } from './mask-stops';
  * rejects. The component is a normal View-like host component at runtime, so
  * the cast only repairs the type surface.
  */
-const MaskedViewSafe = MaskedView as unknown as React.ComponentType<{
+export const MaskedViewSafe = MaskedView as unknown as React.ComponentType<{
     style?: StyleProp<ViewStyle>;
     maskElement?: React.ReactElement;
     children?: React.ReactNode;

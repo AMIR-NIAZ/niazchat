@@ -22,6 +22,9 @@ import {
 import { formatDuration, hasDuration } from './duration';
 import { VideoDownloadControl } from './video-download-control';
 import { VideoPosterSurface } from './video-poster';
+import { useTheme, useThemedStyles, withAlpha } from '../../shared/theme';
+import type { AppTheme } from '../../shared/theme';
+import { AppText } from '../../shared/components';
 
 export { formatDuration, hasDuration };
 
@@ -58,6 +61,7 @@ export function AttachmentGrid({
     onLongPress,
     static: isStatic = false,
 }: AttachmentGridProps): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     const { headers, refresh } = useAttachmentAuth();
     const visible = attachments.slice(0, 4);
     const extra = attachments.length - visible.length;
@@ -130,6 +134,8 @@ function MediaTile({
     onLongPress,
     static: isStatic = false,
 }: MediaTileProps): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const tileRef = useRef<ViewInstance | null>(null);
     const [reload, setReload] = useState(0);
     const [failed, setFailed] = useState(false);
@@ -214,10 +220,10 @@ function MediaTile({
                     {reloading ? (
                         <ActivityIndicator
                             size="small"
-                            color={palette.text.onAccent}
+                            color={theme.colors.accentText}
                         />
                     ) : (
-                        <Text style={styles.retryText}>Tap to retry</Text>
+                        <AppText style={styles.retryText}>Tap to retry</AppText>
                     )}
                 </View>
             )}
@@ -237,14 +243,14 @@ function MediaTile({
             )}
             {attachment.status === 'failed' && (
                 <View style={styles.centerOverlay}>
-                    <Text style={styles.retryText} numberOfLines={2}>
+                    <AppText style={styles.retryText} numberOfLines={2}>
                         {attachment.error ?? 'Upload failed'}
-                    </Text>
+                    </AppText>
                 </View>
             )}
             {overlay !== null && (
                 <View style={styles.countOverlay}>
-                    <Text style={styles.countText}>{overlay}</Text>
+                    <AppText style={styles.countText}>{overlay}</AppText>
                 </View>
             )}
         </Pressable>
@@ -253,10 +259,12 @@ function MediaTile({
 
 /** Called by the hook when an attachment is cancelled (no cache left behind). */
 export function resetAttachmentProgress(key: string): void {
+    const theme = useTheme();
     clearUploadProgress(key);
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     grid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
@@ -266,7 +274,7 @@ const styles = StyleSheet.create({
     tile: {
         borderRadius: radii.sm,
         overflow: 'hidden',
-        backgroundColor: palette.neutral[100],
+        backgroundColor: theme.colors.glassElevated,
     },
     image: { width: '100%', height: '100%' },
     centerOverlay: {
@@ -277,10 +285,10 @@ const styles = StyleSheet.create({
         bottom: 0,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(28, 32, 36, 0.45)',
+        backgroundColor: withAlpha(theme.colors.background, 0.45),
     },
     retryText: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 11,
         fontWeight: '600',
     },
@@ -290,17 +298,17 @@ const styles = StyleSheet.create({
         right: 0,
         bottom: 0,
         padding: spacing.xxs,
-        backgroundColor: 'rgba(28, 32, 36, 0.35)',
+        backgroundColor: withAlpha(theme.colors.background, 0.35),
     },
     progressTrack: {
         height: 3,
         borderRadius: radii.full,
-        backgroundColor: 'rgba(255, 255, 255, 0.4)',
+        backgroundColor: theme.colors.bubbleOwnMuted,
         overflow: 'hidden',
     },
     progressFill: {
         height: '100%',
-        backgroundColor: palette.primary[300],
+        backgroundColor: theme.accent,
     },
     countOverlay: {
         position: 'absolute',
@@ -310,10 +318,10 @@ const styles = StyleSheet.create({
         bottom: 0,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(28, 32, 36, 0.55)',
+        backgroundColor: withAlpha(theme.colors.background, 0.55),
     },
     countText: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 20,
         fontWeight: '700',
     },

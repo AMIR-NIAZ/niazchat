@@ -9,20 +9,20 @@ import Animated, {
     withTiming,
 } from 'react-native-reanimated';
 import { useReducedMotion } from '../../shared/hooks/use-reduced-motion';
-import { palette, radii } from '../../shared/theme';
+import { useTheme } from '../../shared/theme';
 
 /**
  * Shared jump-target highlight for reply and pinned-message navigation.
  *
- * A translucent lavender wash is painted over the bubble's own surface (never
- * a border/outline): it fades in, gives one soft pulse and fades out before the
+ * A translucent accent wash is painted over the bubble's own surface (never a
+ * border/outline): it fades in, gives one soft pulse and fades out before the
  * screen's highlight window ends. The overlay is absolutely positioned and
  * ignores touches, so it can never change the bubble's size, padding or radius.
  */
 
 /** Peak overlay opacity: visible on both bubble colors, never washes text out. */
 const PEAK_OPACITY = 0.16;
-/** Matches the asymmetric tail radius in `message-bubble.styles`. */
+/** Matches the asymmetric tail radius in `message-bubble` styles. */
 const TAIL_RADIUS = 4;
 
 interface MessageHighlightProps {
@@ -35,7 +35,9 @@ export function MessageHighlight({
     mine,
 }: MessageHighlightProps): React.ReactElement {
     const reduceMotion = useReducedMotion();
+    const theme = useTheme();
     const progress = useSharedValue(0);
+    const radius = theme.radius.bubble;
 
     useEffect((): (() => void) => {
         if (reduceMotion) {
@@ -79,28 +81,15 @@ export function MessageHighlight({
             importantForAccessibility="no-hide-descendants"
             style={[
                 StyleSheet.absoluteFill,
-                styles.overlay,
-                mine ? styles.mine : styles.theirs,
+                {
+                    backgroundColor: theme.accent,
+                    borderTopLeftRadius: radius,
+                    borderTopRightRadius: radius,
+                    borderBottomLeftRadius: mine ? radius : TAIL_RADIUS,
+                    borderBottomRightRadius: mine ? TAIL_RADIUS : radius,
+                },
                 animatedStyle,
             ]}
         />
     );
 }
-
-const styles = StyleSheet.create({
-    overlay: {
-        backgroundColor: palette.accent,
-    },
-    mine: {
-        borderTopLeftRadius: radii.lg,
-        borderTopRightRadius: radii.lg,
-        borderBottomLeftRadius: radii.lg,
-        borderBottomRightRadius: TAIL_RADIUS,
-    },
-    theirs: {
-        borderTopLeftRadius: radii.lg,
-        borderTopRightRadius: radii.lg,
-        borderBottomLeftRadius: TAIL_RADIUS,
-        borderBottomRightRadius: radii.lg,
-    },
-});

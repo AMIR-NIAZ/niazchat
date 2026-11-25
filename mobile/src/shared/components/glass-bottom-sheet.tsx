@@ -7,14 +7,16 @@ import {
     Platform,
     Pressable,
     StyleSheet,
-    Text,
     View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GlassSurface } from './glass-surface';
+import { AppText } from './app-text';
 import { useAndroidKeyboardInset } from '../hooks/use-android-keyboard-inset';
 import { useReducedMotion } from '../hooks/use-reduced-motion';
-import { blur, motion, palette, radii, spacing, typography } from '../theme';
+import { blur, motion, radii, spacing } from '../theme';
+import { useThemedStyles, withAlpha } from '../theme/theme-provider';
+import type { AppTheme } from '../theme/theme-provider';
 
 interface GlassBottomSheetProps {
     visible: boolean;
@@ -41,6 +43,7 @@ export function GlassBottomSheet({
     dismissOnBackdrop = true,
 }: GlassBottomSheetProps): React.ReactElement {
     const insets = useSafeAreaInsets();
+    const styles = useThemedStyles(createStyles);
     const reduceMotion = useReducedMotion();
     const progress = useRef(new Animated.Value(visible ? 1 : 0)).current;
     const [mounted, setMounted] = useState(visible);
@@ -152,7 +155,9 @@ export function GlassBottomSheet({
                         >
                             <View style={styles.grabber} />
                             {title !== undefined && (
-                                <Text style={styles.title}>{title}</Text>
+                                <AppText variant="heading" style={styles.title}>
+                                    {title}
+                                </AppText>
                             )}
                             {children}
                         </GlassSurface>
@@ -163,31 +168,31 @@ export function GlassBottomSheet({
     );
 }
 
-const styles = StyleSheet.create({
-    root: { flex: 1 },
-    sheetArea: { flex: 1, justifyContent: 'flex-end' },
-    backdrop: {
-        flex: 1,
-        backgroundColor: 'rgba(4,2,9,0.62)',
-    },
-    sheetWrap: {
-        paddingHorizontal: spacing.xs,
-        // With the keyboard open the sheet may be taller than the space left;
-        // cap it so the inner ScrollView can scroll instead of clipping.
-        maxHeight: '100%',
-    },
-    sheet: { padding: spacing.md, gap: spacing.sm, maxHeight: '100%' },
-    grabber: {
-        alignSelf: 'center',
-        width: 42,
-        height: 4,
-        borderRadius: radii.full,
-        backgroundColor: palette.border.strong,
-        marginBottom: spacing.xxs,
-    },
-    title: {
-        ...typography.heading,
-        textAlign: 'center',
-        color: palette.text.primary,
-    },
-});
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+        root: { flex: 1 },
+        sheetArea: { flex: 1, justifyContent: 'flex-end' },
+        backdrop: {
+            flex: 1,
+            backgroundColor: withAlpha(theme.colors.background, 0.62),
+        },
+        sheetWrap: {
+            paddingHorizontal: spacing.xs,
+            // With the keyboard open the sheet may be taller than the space left;
+            // cap it so the inner ScrollView can scroll instead of clipping.
+            maxHeight: '100%',
+        },
+        sheet: { padding: spacing.md, gap: spacing.sm, maxHeight: '100%' },
+        grabber: {
+            alignSelf: 'center',
+            width: 42,
+            height: 4,
+            borderRadius: radii.full,
+            backgroundColor: theme.colors.borderStrong,
+            marginBottom: spacing.xxs,
+        },
+        title: {
+            textAlign: 'center',
+            color: theme.colors.text,
+        },
+    });

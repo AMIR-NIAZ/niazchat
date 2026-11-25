@@ -18,6 +18,7 @@ import {
     radii,
     spacing,
     typography,
+    AppText,
 } from '../../../../shared/components';
 import type { GroupMemberPermissionsConfig } from '../../../../features/groups/group-model';
 import {
@@ -33,6 +34,8 @@ import {
     useGroupMemberPermissionsEvents,
     useUpdateGroupMemberPermissions,
 } from '../../../../features/groups/use-group';
+import { useTheme, useThemedStyles } from '../../../../shared/theme';
+import type { AppTheme } from '../../../../shared/theme';
 
 /**
  * Member permissions editor (`/group-settings/:chatId/member-permissions`).
@@ -56,6 +59,7 @@ function parseChatId(value: string | string[] | undefined): number | null {
 const ACTION_BAR_HEIGHT = 76;
 
 export default function MemberPermissionsScreen(): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     const params = useLocalSearchParams<RouteParams>();
     const chatId = parseChatId(params.chatId);
 
@@ -78,6 +82,8 @@ function MemberPermissionsPanel({
 }: {
     chatId: number;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const insets = useSafeAreaInsets();
     const infoQuery = useGroupInfo(chatId);
     const permissionsQuery = useGroupMemberPermissions(chatId);
@@ -239,16 +245,16 @@ function MemberPermissionsPanel({
                     },
                 ]}
             >
-                <Text style={styles.headerTitle}>What members can do</Text>
-                <Text style={styles.headerCaption}>
+                <AppText style={styles.headerTitle}>What members can do</AppText>
+                <AppText style={styles.headerCaption}>
                     These switches apply to everyone with the member role.
                     Owners always keep full access and admins follow their own
                     permissions.
-                </Text>
+                </AppText>
 
                 {GROUP_MEMBER_PERMISSION_SECTIONS.map((section) => (
                     <View key={section.key} style={styles.section}>
-                        <Text style={styles.sectionLabel}>{section.title}</Text>
+                        <AppText style={styles.sectionLabel}>{section.title}</AppText>
                         <View style={styles.card}>
                             {section.permissions.map((key, index) => (
                                 <PermissionRow
@@ -290,7 +296,7 @@ function MemberPermissionsPanel({
                             pressed && dirty && !saving && styles.buttonPressed,
                         ]}
                     >
-                        <Text style={styles.secondaryText}>Reset</Text>
+                        <AppText style={styles.secondaryText}>Reset</AppText>
                     </Pressable>
                     <Pressable
                         accessibilityRole="button"
@@ -307,10 +313,10 @@ function MemberPermissionsPanel({
                         {saving ? (
                             <ActivityIndicator
                                 size="small"
-                                color={palette.text.onAccent}
+                                color={theme.colors.accentText}
                             />
                         ) : (
-                            <Text style={styles.primaryText}>Save changes</Text>
+                            <AppText style={styles.primaryText}>Save changes</AppText>
                         )}
                     </Pressable>
                 </View>
@@ -326,12 +332,14 @@ function PermissionRow(props: {
     divider: boolean;
     onToggle: () => void;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const meta = GROUP_MEMBER_PERMISSION_META[props.permissionKey];
     return (
         <View style={[styles.row, props.divider && styles.rowDivider]}>
             <View style={styles.rowBody}>
-                <Text style={styles.rowTitle}>{meta.title}</Text>
-                <Text style={styles.rowDescription}>{meta.description}</Text>
+                <AppText style={styles.rowTitle}>{meta.title}</AppText>
+                <AppText style={styles.rowDescription}>{meta.description}</AppText>
             </View>
             <Switch
                 accessibilityLabel={meta.title}
@@ -340,17 +348,18 @@ function PermissionRow(props: {
                 onValueChange={props.onToggle}
                 disabled={props.disabled}
                 trackColor={{
-                    false: palette.neutral[300],
-                    true: palette.primary[500],
+                    false: theme.colors.textMuted,
+                    true: theme.accent,
                 }}
-                thumbColor={palette.text.onAccent}
-                ios_backgroundColor={palette.neutral[300]}
+                thumbColor={theme.colors.accentText}
+                ios_backgroundColor={theme.colors.textMuted}
             />
         </View>
     );
 }
 
 function TopBar({ onBack }: { onBack: () => void }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.topBar}>
             <Pressable
@@ -359,21 +368,23 @@ function TopBar({ onBack }: { onBack: () => void }): React.ReactElement {
                 style={styles.backButton}
                 onPress={onBack}
             >
-                <Text style={styles.backText}>‹</Text>
+                <AppText style={styles.backText}>‹</AppText>
             </Pressable>
-            <Text style={styles.topBarTitle} numberOfLines={1}>
+            <AppText style={styles.topBarTitle} numberOfLines={1}>
                 Member permissions
-            </Text>
+            </AppText>
             <View style={styles.topBarSpacer} />
         </View>
     );
 }
 
 function LoadingState(): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.centered}>
-            <ActivityIndicator size="large" color={palette.primary[500]} />
-            <Text style={styles.caption}>Loading member permissions…</Text>
+            <ActivityIndicator size="large" color={theme.accent} />
+            <AppText style={styles.caption}>Loading member permissions…</AppText>
         </View>
     );
 }
@@ -383,10 +394,12 @@ function StateBlock(props: {
     detail: string;
     onRetry?: () => void;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.centered}>
-            <Text style={styles.stateTitle}>{props.title}</Text>
-            <Text style={styles.stateDetail}>{props.detail}</Text>
+            <AppText style={styles.stateTitle}>{props.title}</AppText>
+            <AppText style={styles.stateDetail}>{props.detail}</AppText>
             {props.onRetry !== undefined && (
                 <Pressable
                     accessibilityRole="button"
@@ -394,7 +407,7 @@ function StateBlock(props: {
                     style={styles.retryButton}
                     onPress={props.onRetry}
                 >
-                    <Text style={styles.retryText}>Retry</Text>
+                    <AppText style={styles.retryText}>Retry</AppText>
                 </Pressable>
             )}
             <Pressable
@@ -403,22 +416,23 @@ function StateBlock(props: {
                 style={styles.backLink}
                 onPress={(): void => router.back()}
             >
-                <Text style={styles.backLinkText}>Go back</Text>
+                <AppText style={styles.backLinkText}>Go back</AppText>
             </Pressable>
         </View>
     );
 }
 
-const styles = StyleSheet.create({
-    screen: { flex: 1, backgroundColor: palette.background },
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+    screen: { flex: 1, backgroundColor: theme.colors.background },
     topBar: {
         flexDirection: 'row',
         alignItems: 'center',
         minHeight: 52,
         paddingHorizontal: spacing.xs,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: palette.border.subtle,
-        backgroundColor: palette.surface,
+        borderBottomColor: theme.colors.border,
+        backgroundColor: theme.colors.glassSurface,
     },
     backButton: {
         width: 44,
@@ -426,31 +440,31 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    backText: { fontSize: 32, lineHeight: 34, color: palette.neutral[900] },
+    backText: { fontSize: 32, lineHeight: 34, color: theme.colors.text },
     topBarTitle: {
         flex: 1,
         textAlign: 'center',
         fontSize: 16,
         fontWeight: '700',
-        color: palette.neutral[900],
+        color: theme.colors.text,
     },
     topBarSpacer: { width: 44 },
     scroll: { flex: 1 },
     scrollContent: { paddingTop: spacing.md },
     headerTitle: {
-        ...typography.title,
+        ...theme.type.title,
         paddingHorizontal: spacing.md,
     },
     headerCaption: {
-        ...typography.caption,
+        ...theme.type.caption,
         paddingHorizontal: spacing.md,
         marginTop: spacing.xxs,
         marginBottom: spacing.sm,
     },
     section: { marginTop: spacing.sm },
     sectionLabel: {
-        ...typography.caption,
-        color: palette.text.muted,
+        ...theme.type.caption,
+        color: theme.colors.textMuted,
         textTransform: 'uppercase',
         letterSpacing: 0.8,
         paddingHorizontal: spacing.md,
@@ -459,9 +473,9 @@ const styles = StyleSheet.create({
     card: {
         marginHorizontal: spacing.md,
         borderRadius: radii.lg,
-        backgroundColor: palette.surface,
+        backgroundColor: theme.colors.glassSurface,
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
         overflow: 'hidden',
     },
     row: {
@@ -474,17 +488,17 @@ const styles = StyleSheet.create({
     },
     rowDivider: {
         borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: palette.border.subtle,
+        borderTopColor: theme.colors.border,
     },
     rowBody: { flex: 1, gap: 2 },
     rowTitle: {
         fontSize: 16,
         fontWeight: '600',
-        color: palette.neutral[900],
+        color: theme.colors.text,
     },
     rowDescription: {
-        ...typography.caption,
-        color: palette.text.muted,
+        ...theme.type.caption,
+        color: theme.colors.textMuted,
         paddingRight: spacing.xs,
     },
     actionBar: {
@@ -497,9 +511,9 @@ const styles = StyleSheet.create({
         gap: spacing.sm,
         paddingHorizontal: spacing.md,
         paddingTop: spacing.sm,
-        backgroundColor: palette.surface,
+        backgroundColor: theme.colors.glassSurface,
         borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: palette.border.subtle,
+        borderTopColor: theme.colors.border,
     },
     primaryButton: {
         flex: 1,
@@ -507,10 +521,10 @@ const styles = StyleSheet.create({
         borderRadius: radii.md,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
     },
     primaryText: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 15,
         fontWeight: '700',
     },
@@ -520,12 +534,12 @@ const styles = StyleSheet.create({
         borderRadius: radii.md,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: palette.primary[100],
+        backgroundColor: theme.colors.accentSoft,
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
     },
     secondaryText: {
-        color: palette.primary[700],
+        color: theme.accent,
         fontSize: 15,
         fontWeight: '600',
     },
@@ -538,13 +552,13 @@ const styles = StyleSheet.create({
         gap: spacing.xs,
         padding: spacing.lg,
     },
-    caption: { ...typography.caption, textAlign: 'center' },
+    caption: { ...theme.type.caption, textAlign: 'center' },
     stateTitle: {
-        ...typography.title,
+        ...theme.type.title,
         textAlign: 'center',
     },
     stateDetail: {
-        ...typography.caption,
+        ...theme.type.caption,
         textAlign: 'center',
     },
     retryButton: {
@@ -552,10 +566,10 @@ const styles = StyleSheet.create({
         borderRadius: radii.sm,
         paddingHorizontal: spacing.md,
         paddingVertical: spacing.xs,
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
     },
     retryText: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 14,
         fontWeight: '600',
     },
@@ -563,6 +577,6 @@ const styles = StyleSheet.create({
     backLinkText: {
         fontSize: 14,
         fontWeight: '600',
-        color: palette.primary[600],
+        color: theme.accent,
     },
 });

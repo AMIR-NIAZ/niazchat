@@ -2,8 +2,9 @@ import { StyleSheet, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { ReconnectingBanner } from '../../core/socket/connection-banner';
 import { useAuthScreenGuard, useIsRestoringSession } from '../../features/auth';
-import { GatePlaceholder, palette } from '../../shared/components';
+import { GatePlaceholder } from '../../shared/components';
 import { useReducedMotion } from '../../shared/hooks/use-reduced-motion';
+import { useTheme } from '../../shared/theme';
 
 /**
  * Protected zone. Guests are redirected to the signIn screens; the guard also
@@ -18,8 +19,18 @@ import { useReducedMotion } from '../../shared/hooks/use-reduced-motion';
 export default function ProtectedLayout(): React.ReactElement {
     const isRestoring = useIsRestoringSession();
     const reduceMotion = useReducedMotion();
+    const theme = useTheme();
     // Runs the guard effect: guests get redirected to /(auth)/login.
     useAuthScreenGuard('protected');
+
+    /**
+     * Profile routes (see `opaque-route.tsx`) cover the global app background
+     * with an opaque theme canvas. Set here, once per route, so the screens
+     * themselves stay background-agnostic.
+     */
+    const opaqueOptions = {
+        contentStyle: { backgroundColor: theme.colors.background },
+    };
 
     if (isRestoring) {
         return <GatePlaceholder />;
@@ -31,7 +42,8 @@ export default function ProtectedLayout(): React.ReactElement {
                 screenOptions={{
                     headerShown: false,
                     animation: reduceMotion ? 'none' : 'slide_from_right',
-                    contentStyle: { backgroundColor: palette.background },
+                    // Transparent: the root background layer is the canvas.
+                    contentStyle: { backgroundColor: 'transparent' },
                 }}
             >
                 <Stack.Screen name="(tabs)" />
@@ -39,16 +51,41 @@ export default function ProtectedLayout(): React.ReactElement {
                 <Stack.Screen name="create-group" />
                 <Stack.Screen name="new-chat" />
                 <Stack.Screen name="profile-edit" />
-                <Stack.Screen name="user/[userId]" />
-                <Stack.Screen name="group/[chatId]" />
-                <Stack.Screen name="group-settings/[chatId]/index" />
-                <Stack.Screen name="group-settings/[chatId]/info" />
-                <Stack.Screen name="group-settings/[chatId]/add-members" />
-                <Stack.Screen name="group-settings/[chatId]/invite-links" />
-                <Stack.Screen name="group-settings/[chatId]/banned" />
-                <Stack.Screen name="group-settings/[chatId]/admin-permissions" />
-                <Stack.Screen name="group-settings/[chatId]/member-permissions" />
-                <Stack.Screen name="group-settings/[chatId]/member-overrides" />
+                <Stack.Screen name="appearance" />
+                <Stack.Screen name="user/[userId]" options={opaqueOptions} />
+                <Stack.Screen name="group/[chatId]" options={opaqueOptions} />
+                <Stack.Screen
+                    name="group-settings/[chatId]/index"
+                    options={opaqueOptions}
+                />
+                <Stack.Screen
+                    name="group-settings/[chatId]/info"
+                    options={opaqueOptions}
+                />
+                <Stack.Screen
+                    name="group-settings/[chatId]/add-members"
+                    options={opaqueOptions}
+                />
+                <Stack.Screen
+                    name="group-settings/[chatId]/invite-links"
+                    options={opaqueOptions}
+                />
+                <Stack.Screen
+                    name="group-settings/[chatId]/banned"
+                    options={opaqueOptions}
+                />
+                <Stack.Screen
+                    name="group-settings/[chatId]/admin-permissions"
+                    options={opaqueOptions}
+                />
+                <Stack.Screen
+                    name="group-settings/[chatId]/member-permissions"
+                    options={opaqueOptions}
+                />
+                <Stack.Screen
+                    name="group-settings/[chatId]/member-overrides"
+                    options={opaqueOptions}
+                />
             </Stack>
             {/* Visible only when the socket has been down for more than 3 s. */}
             <ReconnectingBanner />
@@ -57,5 +94,5 @@ export default function ProtectedLayout(): React.ReactElement {
 }
 
 const styles = StyleSheet.create({
-    root: { flex: 1, backgroundColor: palette.background },
+    root: { flex: 1 },
 });

@@ -13,6 +13,9 @@ import {
     typography,
 } from '../../shared/theme';
 import { getLayoutDirection } from '../../shared/text-direction';
+import { useTheme, useThemedStyles } from '../../shared/theme';
+import type { AppTheme } from '../../shared/theme';
+import { AppText } from '../../shared/components';
 
 /**
  * Group-chat header subtitle: "N members" normally, an animated "… is typing"
@@ -69,6 +72,7 @@ function useReduceMotion(): boolean {
 }
 
 function TypingDots(): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     const reduceMotion = useReduceMotion();
     const values = useRef([
         new Animated.Value(0.3),
@@ -106,7 +110,7 @@ function TypingDots(): React.ReactElement {
     }, [reduceMotion, values]);
 
     if (reduceMotion) {
-        return <Text style={styles.dots}>…</Text>;
+        return <AppText style={styles.dots}>…</AppText>;
     }
 
     return (
@@ -153,6 +157,8 @@ export function GroupChatSubtitle(props: {
      */
     align?: 'layout' | 'center';
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const centered = (props.align ?? 'layout') === 'center';
     const layoutDirection = getLayoutDirection();
     const typingActive = props.typing === true || props.names.length > 0;
@@ -281,7 +287,8 @@ export function GroupChatSubtitle(props: {
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     row: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -295,8 +302,8 @@ const styles = StyleSheet.create({
     text: {
         flexShrink: 1,
         minWidth: 0,
-        ...typography.caption,
-        color: palette.neutral[500],
+        ...theme.type.caption,
+        color: theme.colors.textSecondary,
         // Android adds font padding that differs between Persian and Latin
         // glyphs; the explicit line height above owns the row's height.
         includeFontPadding: false,
@@ -307,12 +314,12 @@ const styles = StyleSheet.create({
         marginLeft: spacing.xxs / 2,
     },
     dot: {
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
         fontSize: 12,
         marginHorizontal: 0.5,
     },
     dots: {
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
         fontSize: 12,
         marginLeft: 2,
     },

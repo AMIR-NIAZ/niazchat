@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { StyleSheet, TextInput, View } from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 import type { TextInputProps } from 'react-native';
-import { blob } from './glass-input.styles';
 import { AppText } from './app-text';
-import { palette, radii, spacing } from '../theme';
+import { radii, spacing } from '../theme';
+import { useTheme, useThemedStyles } from '../theme/theme-provider';
+import type { AppTheme } from '../theme/theme-provider';
 
 interface GlassInputProps extends TextInputProps {
     label?: string;
@@ -24,8 +25,11 @@ export function GlassInput({
     style,
     onFocus,
     onBlur,
+    keyboardAppearance,
     ...rest
 }: GlassInputProps): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const [focused, setFocused] = useState(false);
     const invalid = error !== null && error !== undefined;
 
@@ -44,12 +48,23 @@ export function GlassInput({
                 ]}
             >
                 {leading !== undefined && (
-                    <View style={styles.leading}>{leading}</View>
+                    <View style={styles.leading}>
+                        {typeof leading === 'string' ||
+                        typeof leading === 'number' ? (
+                            <AppText>{leading}</AppText>
+                        ) : (
+                            leading
+                        )}
+                    </View>
                 )}
                 <TextInput
                     style={[styles.input, style]}
-                    placeholderTextColor={palette.text.muted}
-                    selectionColor={palette.primary[300]}
+                    placeholderTextColor={theme.colors.textMuted}
+                    selectionColor={theme.accent}
+                    keyboardAppearance={
+                        keyboardAppearance ??
+                        (theme.isDark ? 'dark' : 'light')
+                    }
                     onFocus={(event): void => {
                         setFocused(true);
                         onFocus?.(event);
@@ -70,31 +85,32 @@ export function GlassInput({
     );
 }
 
-const styles = StyleSheet.create({
-    container: { gap: spacing.xxs },
-    label: { color: palette.text.secondary },
-    field: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.xs,
-        minHeight: 50,
-        borderWidth: 1,
-        borderColor: palette.border.subtle,
-        borderRadius: radii.md,
-        backgroundColor: blob.field,
-        paddingHorizontal: spacing.sm,
-    },
-    fieldFocused: {
-        borderColor: palette.border.accent,
-        backgroundColor: blob.fieldFocused,
-    },
-    fieldInvalid: { borderColor: palette.semantic.danger },
-    leading: { flexShrink: 0 },
-    input: {
-        flex: 1,
-        paddingVertical: spacing.sm,
-        fontSize: 16,
-        color: palette.text.primary,
-    },
-    error: { color: palette.semantic.danger },
-});
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+        container: { gap: spacing.xxs },
+        label: { color: theme.colors.textSecondary },
+        field: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: spacing.xs,
+            minHeight: 50,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            borderRadius: radii.md,
+            backgroundColor: theme.colors.glassSurface,
+            paddingHorizontal: spacing.sm,
+        },
+        fieldFocused: {
+            borderColor: theme.colors.accentBorder,
+            backgroundColor: theme.colors.glassElevated,
+        },
+        fieldInvalid: { borderColor: theme.colors.danger },
+        leading: { flexShrink: 0 },
+        input: {
+            flex: 1,
+            paddingVertical: spacing.sm,
+            fontSize: 16,
+            color: theme.colors.text,
+        },
+        error: { color: theme.colors.danger },
+    });

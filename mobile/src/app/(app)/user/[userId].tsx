@@ -1,12 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ComponentRef } from 'react';
-import {
-    ActivityIndicator,
-    Pressable,
-    StyleSheet,
-    Text,
-    View,
-} from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -23,11 +17,11 @@ import {
     GlassHeader,
     SafeText,
     Screen,
-    palette,
     radii,
     spacing,
-    typography,
 } from '../../../shared/components';
+import { useTheme, useThemedStyles } from '../../../shared/theme';
+import type { AppTheme } from '../../../shared/theme';
 import { AvatarViewer } from '../../../features/users/avatar-gallery';
 import { presenceLabel } from '../../../features/users/public-profile-model';
 import { useRegisterOpenUserProfile } from '../../../features/users/profile-navigation';
@@ -124,6 +118,8 @@ function UserProfile({
     initialName,
     initialAvatar,
 }: UserProfileProps): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     // Guarded navigation must know this screen is the open one.
     useRegisterOpenUserProfile(userId);
     const query = useUserProfile(userId);
@@ -428,7 +424,9 @@ function UserProfile({
                         style={styles.backButton}
                         onPress={(): void => router.back()}
                     >
-                        <Text style={styles.backText}>‹</Text>
+                        <SafeText style={styles.backText} align="center">
+                            ‹
+                        </SafeText>
                     </Pressable>
                 }
                 trailing={
@@ -454,13 +452,13 @@ function UserProfile({
                             {actionPending ? (
                                 <ActivityIndicator
                                     size="small"
-                                    color={palette.primary[500]}
+                                    color={theme.accent}
                                 />
                             ) : (
                                 <EllipsisVertical
                                     size={20}
                                     strokeWidth={2}
-                                    color={palette.text.primary}
+                                    color={theme.colors.text}
                                 />
                             )}
                         </Pressable>
@@ -469,7 +467,9 @@ function UserProfile({
             >
                 <SafeText
                     lines={1}
-                    style={[typography.heading, styles.headerTitle]}
+                    variant="heading"
+                    align="center"
+                    style={styles.headerTitle}
                 >
                     {name}
                 </SafeText>
@@ -519,7 +519,8 @@ function UserProfile({
 
                             <SafeText
                                 lines={2}
-                                style={[typography.title, styles.name]}
+                                variant="title"
+                                style={styles.name}
                             >
                                 {name}
                             </SafeText>
@@ -563,12 +564,15 @@ function UserProfile({
                                     {messagePending ? (
                                         <ActivityIndicator
                                             size="small"
-                                            color={palette.text.onAccent}
+                                            color={theme.colors.accentText}
                                         />
                                     ) : (
-                                        <Text style={styles.messageButtonText}>
+                                        <SafeText
+                                            style={styles.messageButtonText}
+                                            align="center"
+                                        >
                                             Message
-                                        </Text>
+                                        </SafeText>
                                     )}
                                 </Pressable>
                             )}
@@ -583,7 +587,7 @@ function UserProfile({
                             <View style={styles.center}>
                                 <ActivityIndicator
                                     size="small"
-                                    color={palette.primary[500]}
+                                    color={theme.accent}
                                 />
                             </View>
                         )}
@@ -602,7 +606,9 @@ function UserProfile({
                                         pressed && styles.pressed,
                                     ]}
                                 >
-                                    <Text style={styles.retryText}>Retry</Text>
+                                    <SafeText style={styles.retryText}>
+                                        Retry
+                                    </SafeText>
                                 </Pressable>
                             </View>
                         )}
@@ -640,6 +646,7 @@ function UnavailableProfile({
 }: {
     userId: number;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <Screen style={styles.screen} withTopInset={true}>
             <GlassHeader
@@ -650,16 +657,20 @@ function UnavailableProfile({
                         style={styles.backButton}
                         onPress={(): void => router.back()}
                     >
-                        <Text style={styles.backText}>‹</Text>
+                        <SafeText style={styles.backText} align="center">
+                            ‹
+                        </SafeText>
                     </Pressable>
                 }
             >
-                <Text
-                    style={[typography.heading, styles.headerTitle]}
-                    numberOfLines={1}
+                <SafeText
+                    variant="heading"
+                    align="center"
+                    lines={1}
+                    style={styles.headerTitle}
                 >
                     Profile
-                </Text>
+                </SafeText>
             </GlassHeader>
             <View style={styles.center}>
                 <GlassCard
@@ -674,9 +685,9 @@ function UnavailableProfile({
                         size={96}
                         ring={true}
                     />
-                    <Text style={[typography.title, styles.name]}>
+                    <SafeText variant="title" style={styles.name}>
                         Profile isn&apos;t available
-                    </Text>
+                    </SafeText>
                     <AppText variant="caption" style={styles.errorText}>
                         This profile can no longer be shown.
                     </AppText>
@@ -695,7 +706,7 @@ function UnavailableProfile({
                             pressed && styles.pressed,
                         ]}
                     >
-                        <Text style={styles.retryText}>Back</Text>
+                        <SafeText style={styles.retryText}>Back</SafeText>
                     </Pressable>
                 </GlassCard>
             </View>
@@ -704,6 +715,7 @@ function UnavailableProfile({
 }
 
 function InvalidUser(): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <Screen style={styles.center} withTopInset={true}>
             <AppText variant="title">Invalid user</AppText>
@@ -722,13 +734,16 @@ function InvalidUser(): React.ReactElement {
                 }}
                 style={styles.retryButton}
             >
-                <Text style={styles.retryText}>Back</Text>
+                <SafeText style={styles.retryText}>Back</SafeText>
             </Pressable>
         </Screen>
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+    // Transparent canvas: the global app background (solid, gradient, circles
+    // or a photo) is the only layer painted behind the screen.
     screen: { paddingHorizontal: spacing.md },
     backButton: {
         width: 40,
@@ -736,7 +751,12 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    backText: { color: palette.primary[600], fontSize: 26, fontWeight: '700' },
+    backText: {
+        ...theme.type.title,
+        fontSize: 26,
+        lineHeight: 30,
+        color: theme.accent,
+    },
     headerTitle: { textAlign: 'center' },
     menuButton: {
         width: 40,
@@ -752,40 +772,49 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         marginTop: spacing.xs,
     },
-    userId: { color: palette.text.muted },
-    center: { alignItems: 'center', justifyContent: 'center', flex: 1 },
+    userId: { color: theme.colors.textMuted },
+    center: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        flex: 1,
+        paddingHorizontal: spacing.md,
+    },
     pressed: { opacity: 0.6 },
     errorBlock: { alignItems: 'center', gap: spacing.xs },
-    errorText: { color: palette.text.secondary, textAlign: 'center' },
+    errorText: { color: theme.colors.textSecondary, textAlign: 'center' },
     retryButton: {
         borderWidth: 1,
-        borderColor: palette.primary[500],
+        borderColor: theme.colors.accentBorder,
+        backgroundColor: theme.colors.glassSurface,
         borderRadius: radii.sm,
         paddingHorizontal: spacing.md,
         paddingVertical: spacing.xs,
     },
     retryText: {
-        color: palette.primary[600],
-        fontSize: 14,
-        fontWeight: '600',
+        ...theme.type.label,
+        color: theme.accent,
+        textAlign: 'center',
     },
     messageButton: {
         marginTop: spacing.xs,
         minWidth: 128,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
+        borderWidth: 1,
+        borderColor: theme.colors.accentBorder,
         borderRadius: radii.lg,
         paddingHorizontal: spacing.md,
         paddingVertical: spacing.xs,
     },
     messageButtonBusy: { opacity: 0.6 },
     messageButtonText: {
-        color: palette.text.onAccent,
+        ...theme.type.label,
         fontSize: 15,
-        fontWeight: '700',
+        color: theme.colors.accentText,
+        textAlign: 'center',
     },
     section: { gap: spacing.xxs },
-    sectionLabel: { color: palette.text.muted },
-    bio: { color: palette.text.primary, fontSize: 15, lineHeight: 21 },
+    sectionLabel: { color: theme.colors.textMuted },
+    bio: { ...theme.type.body, color: theme.colors.text },
 });

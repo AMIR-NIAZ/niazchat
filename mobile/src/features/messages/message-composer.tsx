@@ -16,8 +16,12 @@ import {
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
-import { blur, palette, radii, spacing } from '../../shared/theme';
-import { GlassSurface, SafeText } from '../../shared/components';
+import { blur, radii, spacing } from '../../shared/theme';
+import { useTheme, useThemedStyles, withAlpha } from '../../shared/theme/theme-provider';
+import type { AppTheme } from '../../shared/theme/theme-provider';
+import { GlassSurface, SafeText,
+    AppText,
+} from '../../shared/components';
 import { dialog } from '../../shared/dialog';
 import { isOwnMessage } from './messages-model';
 import type { ReplyPreview } from './messages-model';
@@ -108,6 +112,8 @@ function replySnippet(replyTo: ReplyPreview): string {
 export function MessageComposer(
     props: MessageComposerProps,
 ): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const [text, setText] = useState('');
     const [selected, setSelected] = useState<LocalAttachment[]>([]);
     const [sheetOpen, setSheetOpen] = useState(false);
@@ -593,9 +599,9 @@ export function MessageComposer(
                                 Replying to{' '}
                                 {replyName(replyTo, props.currentUserId)}
                             </SafeText>
-                            <Text style={styles.replySnippet} numberOfLines={1}>
+                            <AppText style={styles.replySnippet} numberOfLines={1}>
                                 {replySnippet(replyTo)}
-                            </Text>
+                            </AppText>
                         </View>
                         <Pressable
                             accessibilityRole="button"
@@ -603,7 +609,7 @@ export function MessageComposer(
                             style={styles.replyClose}
                             onPress={props.onCancelReply}
                         >
-                            <Text style={styles.replyCloseText}>✕</Text>
+                            <AppText style={styles.replyCloseText}>✕</AppText>
                         </Pressable>
                     </View>
                 )}
@@ -636,30 +642,30 @@ export function MessageComposer(
                             onPress={handleToggleDraft}
                             style={styles.draftPlay}
                         >
-                            <Text style={styles.draftPlayText}>
+                            <AppText style={styles.draftPlayText}>
                                 {draftPlayback.attachmentId === draftPlaybackId &&
                                     draftPlayback.playing ? (
                                     <Pause size={17} />
                                 ) : (
                                     <Play size={17} />
                                 )}
-                            </Text>
+                            </AppText>
                         </Pressable>
-                        <Text style={styles.draftTime}>
+                        <AppText style={styles.draftTime}>
                             {hasDuration(recorder.draft.duration)
                                 ? formatDuration(recorder.draft.duration)
                                 : '0:00'}
-                        </Text>
-                        <Text style={styles.draftLabel} numberOfLines={1}>
+                        </AppText>
+                        <AppText style={styles.draftLabel} numberOfLines={1}>
                             Voice draft
-                        </Text>
+                        </AppText>
                         <Pressable
                             accessibilityRole="button"
                             accessibilityLabel="Send voice message"
                             onPress={handleSendDraft}
                             style={styles.draftAction}
                         >
-                            <Text style={styles.draftActionText}>Send</Text>
+                            <AppText style={styles.draftActionText}>Send</AppText>
                         </Pressable>
                         <Pressable
                             accessibilityRole="button"
@@ -667,21 +673,21 @@ export function MessageComposer(
                             onPress={handleDiscardDraft}
                             style={styles.draftAction}
                         >
-                            <Text style={styles.draftDeleteText}>Delete</Text>
+                            <AppText style={styles.draftDeleteText}>Delete</AppText>
                         </Pressable>
                     </View>
                 )}
 
                 {recorderHint !== null && recorder.phase !== 'recording' && (
-                    <Text style={styles.voiceHint}>{recorderHint}</Text>
+                    <AppText style={styles.voiceHint}>{recorderHint}</AppText>
                 )}
 
                 {selected.length > 0 && (
                     <View style={styles.trayWrap}>
                         <View style={styles.trayHeader}>
-                            <Text style={styles.trayCount}>
+                            <AppText style={styles.trayCount}>
                                 {selected.length}/{MAX_ATTACHMENTS_PER_MESSAGE}
-                            </Text>
+                            </AppText>
                         </View>
                         <ScrollView
                             horizontal={true}
@@ -702,30 +708,30 @@ export function MessageComposer(
                                         />
                                     ) : item.kind === 'video' ? (
                                         <View style={styles.trayFile}>
-                                            <Text style={styles.trayFileIcon}>
+                                            <AppText style={styles.trayFileIcon}>
                                                 <Film size={20} />
-                                            </Text>
-                                            <Text
+                                            </AppText>
+                                            <AppText
                                                 style={styles.trayFileName}
                                                 numberOfLines={2}
                                             >
                                                 {item.name}
-                                            </Text>
+                                            </AppText>
                                         </View>
                                     ) : (
                                         <View style={styles.trayFile}>
-                                            <Text
+                                            <AppText
                                                 style={styles.trayFileIcon}
                                                 numberOfLines={1}
                                             >
                                                 <Paperclip size={20} />
-                                            </Text>
-                                            <Text
+                                            </AppText>
+                                            <AppText
                                                 style={styles.trayFileName}
                                                 numberOfLines={2}
                                             >
                                                 {item.name}
-                                            </Text>
+                                            </AppText>
                                         </View>
                                     )}
                                     <Pressable
@@ -743,9 +749,9 @@ export function MessageComposer(
                                             )
                                         }
                                     >
-                                        <Text style={styles.trayRemoveText}>
+                                        <AppText style={styles.trayRemoveText}>
                                             <X size={16} />
-                                        </Text>
+                                        </AppText>
                                     </Pressable>
                                 </View>
                             ))}
@@ -772,9 +778,9 @@ export function MessageComposer(
                             props.disabled && styles.attachDisabled,
                         ]}
                     >
-                        <Text style={styles.attachText}>
+                        <AppText style={styles.attachText}>
                             <Plus size={20} />
-                        </Text>
+                        </AppText>
                     </Pressable>
                     <TextInput
                         ref={inputRef}
@@ -786,7 +792,10 @@ export function MessageComposer(
                         }}
                         onBlur={props.onBlur}
                         placeholder="Message…"
-                        placeholderTextColor={palette.neutral[300]}
+                        placeholderTextColor={theme.colors.textMuted}
+                        keyboardAppearance={
+                            theme.isDark ? 'dark' : 'light'
+                        }
                         multiline={true}
                         numberOfLines={4}
                         // The input is never disabled and never blurred on
@@ -829,9 +838,9 @@ export function MessageComposer(
                             ]}
                             onPress={submit}
                         >
-                            <Text style={styles.sendText}>
+                            <AppText style={styles.sendText}>
                                 <Send size={18} />
-                            </Text>
+                            </AppText>
                         </Pressable>
                     )}
                 </GlassSurface>
@@ -848,7 +857,7 @@ export function MessageComposer(
                     onPress={(): void => setSheetOpen(false)}
                 >
                     <Pressable style={styles.sheetCard}>
-                        <Text style={styles.sheetTitle}>Attach</Text>
+                        <AppText style={styles.sheetTitle}>Attach</AppText>
                         <Pressable
                             accessibilityRole="button"
                             accessibilityLabel="Choose photos"
@@ -857,7 +866,7 @@ export function MessageComposer(
                                 void runPicker(pickPhotos);
                             }}
                         >
-                            <Text style={styles.sheetAction}>Photos</Text>
+                            <AppText style={styles.sheetAction}>Photos</AppText>
                         </Pressable>
                         <Pressable
                             accessibilityRole="button"
@@ -867,7 +876,7 @@ export function MessageComposer(
                                 void runPicker(takePhoto);
                             }}
                         >
-                            <Text style={styles.sheetAction}>Camera</Text>
+                            <AppText style={styles.sheetAction}>Camera</AppText>
                         </Pressable>
                         <Pressable
                             accessibilityRole="button"
@@ -877,7 +886,7 @@ export function MessageComposer(
                                 void runPicker(pickVideos);
                             }}
                         >
-                            <Text style={styles.sheetAction}>Video</Text>
+                            <AppText style={styles.sheetAction}>Video</AppText>
                         </Pressable>
                         <Pressable
                             accessibilityRole="button"
@@ -887,7 +896,7 @@ export function MessageComposer(
                                 void runPicker(pickMusic);
                             }}
                         >
-                            <Text style={styles.sheetAction}>Music</Text>
+                            <AppText style={styles.sheetAction}>Music</AppText>
                         </Pressable>
                         <Pressable
                             accessibilityRole="button"
@@ -897,7 +906,7 @@ export function MessageComposer(
                                 void runPicker(pickFiles);
                             }}
                         >
-                            <Text style={styles.sheetAction}>File</Text>
+                            <AppText style={styles.sheetAction}>File</AppText>
                         </Pressable>
                         <View style={styles.sheetDivider} />
                         <Pressable
@@ -906,7 +915,7 @@ export function MessageComposer(
                             style={styles.sheetButton}
                             onPress={(): void => setSheetOpen(false)}
                         >
-                            <Text style={styles.sheetCancel}>Cancel</Text>
+                            <AppText style={styles.sheetCancel}>Cancel</AppText>
                         </Pressable>
                     </Pressable>
                 </Pressable>
@@ -915,7 +924,8 @@ export function MessageComposer(
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     avoid: { flexShrink: 1 },
     replyBar: {
         flexDirection: 'row',
@@ -923,25 +933,25 @@ const styles = StyleSheet.create({
         gap: spacing.xs,
         paddingVertical: spacing.xs,
         paddingHorizontal: spacing.xs,
-        backgroundColor: palette.glass.elevated,
+        backgroundColor: theme.colors.glassElevated,
         borderRadius: radii.md,
         borderWidth: 1,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
         marginTop: spacing.xxs,
     },
     replyDivider: {
         width: 3,
         alignSelf: 'stretch',
         borderRadius: radii.full,
-        backgroundColor: palette.primary[500],
+        backgroundColor: theme.accent,
     },
     replyTextWrap: { flex: 1, minWidth: 0 },
     replyTitle: {
-        color: palette.primary[700],
+        color: theme.colors.text,
         fontSize: 12,
         fontWeight: '600',
     },
-    replySnippet: { color: palette.text.secondary, fontSize: 12 },
+    replySnippet: { color: theme.colors.textSecondary, fontSize: 12 },
     replyClose: {
         width: 28,
         height: 28,
@@ -949,14 +959,14 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         borderRadius: radii.full,
     },
-    replyCloseText: { color: palette.neutral[500], fontSize: 14 },
+    replyCloseText: { color: theme.colors.textMuted, fontSize: 14 },
     trayWrap: { marginTop: spacing.xxs },
     trayHeader: {
         flexDirection: 'row',
         justifyContent: 'flex-end',
         paddingHorizontal: spacing.xxs,
     },
-    trayCount: { color: palette.neutral[500], fontSize: 11 },
+    trayCount: { color: theme.colors.textMuted, fontSize: 11 },
     tray: {
         flexDirection: 'row',
         gap: spacing.xs,
@@ -967,7 +977,7 @@ const styles = StyleSheet.create({
         height: 56,
         borderRadius: radii.sm,
         overflow: 'hidden',
-        backgroundColor: palette.neutral[100],
+        backgroundColor: theme.colors.glassElevated,
     },
     trayImage: { width: '100%', height: '100%' },
     trayFile: {
@@ -978,7 +988,7 @@ const styles = StyleSheet.create({
     },
     trayFileIcon: { fontSize: 18 },
     trayFileName: {
-        color: palette.neutral[700],
+        color: theme.colors.text,
         fontSize: 8,
         textAlign: 'center',
     },
@@ -989,11 +999,11 @@ const styles = StyleSheet.create({
         width: 18,
         height: 18,
         borderRadius: radii.full,
-        backgroundColor: 'rgba(28, 32, 36, 0.75)',
+        backgroundColor: withAlpha(theme.colors.background, 0.75),
         alignItems: 'center',
         justifyContent: 'center',
     },
-    trayRemoveText: { color: palette.text.onAccent, fontSize: 10 },
+    trayRemoveText: { color: theme.colors.accentText, fontSize: 10 },
     composer: {
         flexDirection: 'row',
         alignItems: 'flex-end',
@@ -1008,13 +1018,13 @@ const styles = StyleSheet.create({
         borderRadius: 20,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: palette.glass.accent,
+        backgroundColor: theme.colors.glassAccent,
         borderWidth: 1,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
     },
     attachDisabled: { opacity: 0 },
     attachText: {
-        color: palette.primary[600],
+        color: theme.colors.text,
         fontSize: 22,
         fontWeight: '600',
         lineHeight: 24,
@@ -1024,12 +1034,12 @@ const styles = StyleSheet.create({
         minHeight: 40,
         maxHeight: 120,
         borderWidth: 1,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
         borderRadius: radii.lg,
         paddingHorizontal: spacing.sm,
         paddingVertical: spacing.xs + 2,
-        color: palette.text.primary,
-        backgroundColor: palette.glass.highlight,
+        color: theme.colors.text,
+        backgroundColor: theme.colors.accentSoft,
         textAlignVertical: 'center',
     },
     send: {
@@ -1039,10 +1049,10 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    sendActive: { backgroundColor: palette.primary[500] },
-    sendInactive: { backgroundColor: palette.neutral[300] },
-    micActive: { backgroundColor: palette.primary[100] },
-    sendText: { color: palette.text.onAccent, fontSize: 16 },
+    sendActive: { backgroundColor: theme.accent },
+    sendInactive: { backgroundColor: theme.colors.textMuted },
+    micActive: { backgroundColor: theme.colors.accentSoft },
+    sendText: { color: theme.colors.accentText, fontSize: 16 },
     micText: { fontSize: 17 },
     draftRow: {
         flexDirection: 'row',
@@ -1051,9 +1061,9 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.xs,
         paddingHorizontal: spacing.xs,
         borderRadius: radii.lg,
-        backgroundColor: palette.glass.elevated,
+        backgroundColor: theme.colors.glassElevated,
         borderWidth: 1,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
     },
     draftPlay: {
         width: 34,
@@ -1061,53 +1071,53 @@ const styles = StyleSheet.create({
         borderRadius: radii.full,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: palette.primary[100],
+        backgroundColor: theme.colors.accentSoft,
     },
-    draftPlayText: { color: palette.primary[600], fontSize: 13 },
+    draftPlayText: { color: theme.colors.text, fontSize: 13 },
     draftTime: {
-        color: palette.neutral[900],
+        color: theme.colors.text,
         fontSize: 13,
         fontVariant: ['tabular-nums'],
     },
-    draftLabel: { flex: 1, color: palette.neutral[500], fontSize: 11 },
+    draftLabel: { flex: 1, color: theme.colors.textMuted, fontSize: 11 },
     draftAction: {
         paddingHorizontal: spacing.xs,
         paddingVertical: 4,
         borderRadius: radii.sm,
-        backgroundColor: 'rgba(28, 32, 36, 0.10)',
+        backgroundColor: theme.colors.quoteOther,
     },
     draftActionText: {
-        color: palette.primary[700],
+        color: theme.colors.text,
         fontSize: 11,
         fontWeight: '700',
     },
     draftDeleteText: {
-        color: palette.semantic.danger,
+        color: theme.colors.danger,
         fontSize: 11,
         fontWeight: '700',
     },
     voiceHint: {
-        color: palette.neutral[500],
+        color: theme.colors.textMuted,
         fontSize: 11,
         paddingHorizontal: spacing.xs,
         paddingVertical: spacing.xxs,
     },
     sheetBackdrop: {
         flex: 1,
-        backgroundColor: 'rgba(28, 32, 36, 0.45)',
+        backgroundColor: withAlpha(theme.colors.background, 0.45),
         justifyContent: 'flex-end',
     },
     sheetCard: {
-        backgroundColor: palette.elevated,
+        backgroundColor: theme.colors.glassElevated,
         borderTopLeftRadius: radii.xl,
         borderTopRightRadius: radii.xl,
         padding: spacing.md,
         gap: spacing.xxs,
         borderWidth: 1,
-        borderColor: palette.border.subtle,
+        borderColor: theme.colors.border,
     },
     sheetTitle: {
-        color: palette.neutral[500],
+        color: theme.colors.textMuted,
         fontSize: 12,
         fontWeight: '600',
         paddingVertical: spacing.xs,
@@ -1117,18 +1127,18 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.xs,
     },
     sheetAction: {
-        color: palette.text.primary,
+        color: theme.colors.text,
         fontSize: 16,
         fontWeight: '500',
     },
     sheetCancel: {
-        color: palette.neutral[700],
+        color: theme.colors.text,
         fontSize: 16,
         fontWeight: '500',
     },
     sheetDivider: {
         height: 1,
-        backgroundColor: palette.neutral[100],
+        backgroundColor: theme.colors.glassElevated,
         marginVertical: spacing.xxs,
     },
 });

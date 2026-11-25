@@ -209,10 +209,7 @@ describe('reactionSnapshotForViewer', () => {
     it('marks a no-op clear as unchanged', async () => {
         const ctx = build();
 
-        const result = await ctx.service.toggle(
-            dto({ emoji: null }),
-            caller,
-        );
+        const result = await ctx.service.toggle(dto({ emoji: null }), caller);
 
         expect(result.changed).toBe(false);
     });
@@ -276,9 +273,7 @@ describe('ReactionsService page queries', () => {
         // matching builder so the assertion sees the real call.
         const createQueryBuilder = jest
             .fn()
-            .mockReturnValue(
-                options.myRows !== undefined ? myQb : summaryQb,
-            );
+            .mockReturnValue(options.myRows !== undefined ? myQb : summaryQb);
         const messageReactRepository = {
             createQueryBuilder,
             find: jest.fn().mockResolvedValue(options.reactorRows ?? []),

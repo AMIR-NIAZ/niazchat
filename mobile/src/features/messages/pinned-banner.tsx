@@ -7,9 +7,13 @@ import {
     spacing,
     typography,
 } from '../../shared/theme';
-import { SafeText } from '../../shared/components';
+import { SafeText,
+    AppText,
+} from '../../shared/components';
 import { pinnedPreviewText } from './pinned-messages';
 import type { ChatMessage } from './messages-model';
+import { useTheme, useThemedStyles } from '../../shared/theme';
+import type { AppTheme } from '../../shared/theme';
 
 interface PinnedMessageBannerProps {
     /** Newest pin first (server order). Empty hides the banner. */
@@ -32,6 +36,8 @@ export function PinnedMessageBanner({
     onPress,
     onClose,
 }: PinnedMessageBannerProps): React.ReactElement | null {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     if (pinned.length === 0) {
         return null;
     }
@@ -60,7 +66,7 @@ export function PinnedMessageBanner({
                 <View style={styles.accent} />
                 <Pin
                     size={15}
-                    color={palette.primary[600]}
+                    color={theme.accent}
                     style={styles.icon}
                 />
                 <View style={styles.body}>
@@ -100,14 +106,15 @@ export function PinnedMessageBanner({
                         pressed && styles.pressed,
                     ]}
                 >
-                    <Text style={styles.closeText}>×</Text>
+                    <AppText style={styles.closeText}>×</AppText>
                 </Pressable>
             </Pressable>
         </View>
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     wrap: {
         marginTop: spacing.xs,
     },
@@ -117,9 +124,9 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.xs,
         paddingHorizontal: spacing.sm,
         borderRadius: radii.md,
-        backgroundColor: palette.glass.elevated,
+        backgroundColor: theme.colors.glassElevated,
         borderWidth: 1,
-        borderColor: palette.border.accent,
+        borderColor: theme.colors.accentBorder,
         // Never a fixed height: the title + preview lines decide it. A fixed
         // 40 px (24 px content box) made the SafeText preview shrink to zero
         // height under flexShrink, so the pinned text disappeared.
@@ -135,7 +142,7 @@ const styles = StyleSheet.create({
         top: 0,
         bottom: 0,
         width: 3,
-        backgroundColor: palette.primary[300],
+        backgroundColor: theme.accent,
     },
     icon: {
         marginRight: spacing.xs,
@@ -154,20 +161,20 @@ const styles = StyleSheet.create({
         minWidth: 0,
     },
     title: {
-        ...typography.micro,
+        ...theme.type.micro,
         flexShrink: 1,
         minWidth: 0,
-        color: palette.primary[600],
+        color: theme.accent,
     },
     counter: {
-        ...typography.micro,
+        ...theme.type.micro,
         flexShrink: 0,
         fontWeight: '500',
-        color: palette.text.muted,
+        color: theme.colors.textMuted,
     },
     preview: {
-        ...typography.caption,
-        color: palette.text.primary,
+        ...theme.type.caption,
+        color: theme.colors.text,
     },
     close: {
         width: 26,
@@ -178,7 +185,7 @@ const styles = StyleSheet.create({
         marginLeft: spacing.xxs,
     },
     closeText: {
-        color: palette.text.muted,
+        color: theme.colors.textMuted,
         fontSize: 18,
         lineHeight: 20,
     },

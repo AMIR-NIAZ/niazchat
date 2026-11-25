@@ -11,6 +11,9 @@ import { textDirectionStyle } from '../../shared/text-direction';
 import { useReducedMotion } from '../../shared/hooks/use-reduced-motion';
 import type { ChatMessage } from './messages-model';
 import { serviceMessageParts } from './service-message';
+import { useTheme, useThemedStyles } from '../../shared/theme';
+import type { AppTheme } from '../../shared/theme';
+import { AppText } from '../../shared/components';
 
 /**
  * Telegram-style membership service message: a centered, small glass pill.
@@ -33,6 +36,8 @@ export function ServiceMessagePill({
     animate,
     onOpenProfile,
 }: ServiceMessageProps): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const reduceMotion = useReducedMotion();
     const entrance = useSharedValue(animate ? 0 : 1);
 
@@ -69,7 +74,7 @@ export function ServiceMessagePill({
     return (
         <View style={styles.row}>
             <Reanimated.View style={[styles.pill, animatedStyle]}>
-                <Text
+                <AppText
                     style={[
                         styles.text,
                         textDirectionStyle(sentence, 'center'),
@@ -83,13 +88,13 @@ export function ServiceMessagePill({
                             onOpenProfile !== undefined;
                         if (!tappable && !part.isYou) {
                             return (
-                                <Text key={`${index}-${part.text}`}>
+                                <AppText key={`${index}-${part.text}`}>
                                     {part.text}
-                                </Text>
+                                </AppText>
                             );
                         }
                         return (
-                            <Text
+                            <AppText
                                 key={`${index}-${part.text}`}
                                 style={styles.name}
                                 accessibilityRole={tappable ? 'link' : 'text'}
@@ -104,16 +109,17 @@ export function ServiceMessagePill({
                                     : {})}
                             >
                                 {part.text}
-                            </Text>
+                            </AppText>
                         );
                     })}
-                </Text>
+                </AppText>
             </Reanimated.View>
         </View>
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     row: {
         alignItems: 'center',
         justifyContent: 'center',
@@ -124,8 +130,8 @@ const styles = StyleSheet.create({
         maxWidth: '80%',
         borderRadius: radii.full,
         borderWidth: 1,
-        borderColor: palette.glass.systemPillBorder,
-        backgroundColor: palette.glass.systemPill,
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.glassSurface,
         paddingHorizontal: spacing.sm,
         paddingVertical: 6,
     },
@@ -134,10 +140,10 @@ const styles = StyleSheet.create({
         fontWeight: '500',
         lineHeight: 17,
         textAlign: 'center',
-        color: palette.text.service,
+        color: theme.colors.textSecondary,
     },
     name: {
         fontWeight: '600',
-        color: palette.text.serviceName,
+        color: theme.colors.text,
     },
 });

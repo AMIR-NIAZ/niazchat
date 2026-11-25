@@ -21,6 +21,9 @@ import {
     toggleVoice,
     useVoicePlayback,
 } from './voice-playback';
+import { useTheme, useThemedStyles } from '../../shared/theme';
+import type { AppTheme } from '../../shared/theme';
+import { AppText } from '../../shared/components';
 
 /** Pending (local) voices get a stable negative id derived from their key. */
 function playbackIdOf(attachment: AttachmentView): number {
@@ -46,6 +49,8 @@ export function VoiceBubble({
     mine: boolean;
     onLongPress?: (() => void) | undefined;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const playback = useVoicePlayback();
     const [downloading, setDownloading] = useState(false);
     const [downloadProgress, setDownloadProgress] = useState(0);
@@ -126,8 +131,8 @@ export function VoiceBubble({
             ? formatDuration(duration)
             : '0:00';
 
-    const playedColor = mine ? palette.neutral[0] : palette.primary[500];
-    const restColor = mine ? 'rgba(255,255,255,0.45)' : palette.neutral[300];
+    const playedColor = mine ? theme.colors.background : theme.accent;
+    const restColor = mine ? theme.colors.bubbleOwnMuted : theme.colors.textMuted;
 
     return (
         <View style={styles.container}>
@@ -154,42 +159,42 @@ export function VoiceBubble({
                 >
                     {loading ? (
                         downloading ? (
-                            <Text
+                            <AppText
                                 style={[
                                     styles.progressText,
                                     mine && styles.progressTextMine,
                                 ]}
                             >
                                 {`${Math.round(downloadProgress * 100)}%`}
-                            </Text>
+                            </AppText>
                         ) : (
                             <ActivityIndicator
                                 size="small"
                                 color={
                                     mine
-                                        ? palette.neutral[0]
-                                        : palette.primary[600]
+                                        ? theme.colors.background
+                                        : theme.accent
                                 }
                             />
                         )
                     ) : error !== null || attachment.status === 'failed' ? (
-                        <Text
+                        <AppText
                             style={[
                                 styles.errorIcon,
                                 mine && styles.errorIconMine,
                             ]}
                         >
                             !
-                        </Text>
+                        </AppText>
                     ) : (
-                        <Text
+                        <AppText
                             style={[
                                 styles.buttonText,
                                 mine && styles.buttonTextMine,
                             ]}
                         >
                             {playing ? '❚❚' : '▶'}
-                        </Text>
+                        </AppText>
                     )}
                 </Pressable>
 
@@ -236,11 +241,11 @@ export function VoiceBubble({
                     delayLongPress={LONG_PRESS_DELAY_MS}
                     style={styles.speed}
                 >
-                    <Text
+                    <AppText
                         style={[styles.speedText, mine && styles.speedTextMine]}
                     >
                         {speedLabel(active ? playback.rate : 1)}
-                    </Text>
+                    </AppText>
                 </Pressable>
 
                 <Pressable
@@ -249,22 +254,23 @@ export function VoiceBubble({
                     onLongPress={onLongPress}
                     delayLongPress={LONG_PRESS_DELAY_MS}
                 >
-                    <Text style={[styles.time, mine && styles.timeMine]}>
+                    <AppText style={[styles.time, mine && styles.timeMine]}>
                         {timeLabel}
-                    </Text>
+                    </AppText>
                 </Pressable>
             </View>
 
             {error !== null && (
-                <Text style={[styles.error, mine && styles.errorMine]}>
+                <AppText style={[styles.error, mine && styles.errorMine]}>
                     {error} Tap to retry.
-                </Text>
+                </AppText>
             )}
         </View>
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     container: { gap: 2 },
     row: {
         flexDirection: 'row',
@@ -278,22 +284,22 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    buttonMine: { backgroundColor: 'rgba(255,255,255,0.16)' },
-    buttonTheirs: { backgroundColor: palette.primary[100] },
-    buttonText: { color: palette.primary[600], fontSize: 13 },
-    buttonTextMine: { color: palette.text.onAccent },
+    buttonMine: { backgroundColor: theme.colors.quoteOwn },
+    buttonTheirs: { backgroundColor: theme.colors.accentSoft },
+    buttonText: { color: theme.accent, fontSize: 13 },
+    buttonTextMine: { color: theme.colors.accentText },
     progressText: {
-        color: palette.primary[600],
+        color: theme.accent,
         fontSize: 9,
         fontWeight: '700',
     },
-    progressTextMine: { color: palette.text.onAccent },
+    progressTextMine: { color: theme.colors.accentText },
     errorIcon: {
-        color: palette.semantic.danger,
+        color: theme.colors.danger,
         fontSize: 15,
         fontWeight: '700',
     },
-    errorIconMine: { color: palette.text.onAccent },
+    errorIconMine: { color: theme.colors.accentText },
     waveform: {
         flex: 1,
         minWidth: 100,
@@ -313,18 +319,18 @@ const styles = StyleSheet.create({
         paddingHorizontal: 4,
         paddingVertical: 2,
         borderRadius: radii.sm,
-        backgroundColor: 'rgba(28,32,36,0.10)',
+        backgroundColor: theme.colors.quoteOther,
     },
-    speedText: { color: palette.primary[700], fontSize: 10, fontWeight: '700' },
-    speedTextMine: { color: palette.text.onAccent },
+    speedText: { color: theme.accent, fontSize: 10, fontWeight: '700' },
+    speedTextMine: { color: theme.colors.accentText },
     time: {
-        color: palette.neutral[500],
+        color: theme.colors.textSecondary,
         fontSize: 10,
         fontVariant: ['tabular-nums'],
         minWidth: 30,
         textAlign: 'right',
     },
-    timeMine: { color: 'rgba(255,255,255,0.82)' },
-    error: { color: palette.semantic.danger, fontSize: 10 },
-    errorMine: { color: 'rgba(255,255,255,0.82)' },
+    timeMine: { color: theme.colors.bubbleOwnMuted },
+    error: { color: theme.colors.danger, fontSize: 10 },
+    errorMine: { color: theme.colors.bubbleOwnMuted },
 });

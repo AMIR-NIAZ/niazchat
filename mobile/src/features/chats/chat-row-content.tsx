@@ -1,14 +1,19 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
 import { EllipsisVertical } from 'lucide-react-native';
-import { SafeText, UserAvatar } from '../../shared/components';
+import { SafeText, UserAvatar,
+    AppText,
+} from '../../shared/components';
 import {
     MAX_FONT_SCALE,
-    palette,
     radii,
     spacing,
-    typography,
 } from '../../shared/theme';
+import {
+    useTheme,
+    useThemedStyles,
+} from '../../shared/theme/theme-provider';
+import type { AppTheme } from '../../shared/theme/theme-provider';
 import { getChatDisplay } from './chats-model';
 import type { ChatPreview } from './chats-model';
 
@@ -16,6 +21,11 @@ import type { ChatPreview } from './chats-model';
  * The visual body of one chat row. Extracted so the long-press lifted preview
  * renders EXACTLY the same row (same width, avatar, title, preview, badge and
  * time) without mounting the live row's press handlers.
+ *
+ * All colors come from the theme. Title and preview use the scaled typography
+ * (`textScale` + capped system font scale) so 130% grows the row instead of
+ * clipping it: the row has no fixed height and every variable part is
+ * single-line with ellipsis.
  */
 export function ChatRowContent({
     chat,
@@ -31,6 +41,8 @@ export function ChatRowContent({
     /** Opens the chat action menu. Omitted in the popup's lifted copy. */
     onMenuPress?: (() => void) | undefined;
 }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const display = getChatDisplay(chat);
     const unread = chat.unreadCount;
     const unreadLabel = unread > 99 ? '99+' : String(unread);
@@ -39,7 +51,7 @@ export function ChatRowContent({
         <EllipsisVertical
             size={18}
             strokeWidth={2}
-            color={palette.text.secondary}
+            color={theme.colors.textSecondary}
         />
     );
 
@@ -56,26 +68,26 @@ export function ChatRowContent({
             <View style={styles.body}>
                 <View style={styles.titleRow}>
                     <SafeText
-                        style={[typography.heading, styles.titleText]}
+                        style={[theme.type.chatTitle, styles.titleText]}
                         lines={1}
                         maxFontSizeMultiplier={MAX_FONT_SCALE}
                     >
                         {display.title}
                     </SafeText>
                     {pinned && (
-                        <Text
+                        <AppText
                             style={styles.pinGlyph}
                             numberOfLines={1}
                             maxFontSizeMultiplier={MAX_FONT_SCALE}
                             accessibilityLabel="Pinned chat"
                         >
                             📌
-                        </Text>
+                        </AppText>
                     )}
                 </View>
                 <SafeText
                     style={[
-                        typography.caption,
+                        theme.type.chatPreview,
                         styles.preview,
                         unread > 0 && styles.unreadPreview,
                     ]}
@@ -91,17 +103,17 @@ export function ChatRowContent({
                         style={styles.unreadBadge}
                         accessibilityLabel={`${unread} unread messages`}
                     >
-                        <Text
+                        <AppText
                             style={styles.unreadBadgeText}
                             numberOfLines={1}
                             maxFontSizeMultiplier={MAX_FONT_SCALE}
                         >
                             {unreadLabel}
-                        </Text>
+                        </AppText>
                     </View>
                 )}
                 <SafeText
-                    style={[typography.caption, styles.time]}
+                    style={[theme.type.micro, styles.time]}
                     lines={1}
                     maxFontSizeMultiplier={MAX_FONT_SCALE}
                 >
@@ -140,77 +152,84 @@ export function ChatRowContent({
     );
 }
 
-const styles = StyleSheet.create({
-    row: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.sm,
-        paddingVertical: spacing.xs,
-        paddingHorizontal: spacing.xxs,
-        borderRadius: radii.sm,
-    },
-    // The one flex child of the row: it owns every pixel the fixed avatar,
-    // trailing column and menu button leave over.
-    avatarSlot: { width: 44, height: 44, flexShrink: 0 },
-    body: { flex: 1, minWidth: 0, gap: 2 },
-    titleRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.xxs,
-        flexShrink: 1,
-        minWidth: 0,
-    },
-    // `flex: 1` (not only flexShrink) is what makes the name use the WHOLE
-    // remaining title width; the pin glyph keeps its intrinsic size.
-    titleText: {
-        flex: 1,
-        minWidth: 0,
-        includeFontPadding: false,
-    },
-    pinGlyph: { ...typography.micro, flexShrink: 0 },
-    preview: {
-        color: palette.text.secondary,
-        minWidth: 0,
-        includeFontPadding: false,
-    },
-    unreadPreview: { color: palette.text.primary, fontWeight: '700' },
-    // Fixed trailing column: its width never shrinks because of a long name,
-    // and a localised/oversized time string can never steal the text's width.
-    meta: {
-        alignItems: 'flex-end',
-        flexShrink: 0,
-        gap: 2,
-        maxWidth: 72,
-    },
-    time: { flexShrink: 0 },
-    unreadBadge: {
-        minWidth: 18,
-        paddingHorizontal: 5,
-        paddingVertical: 1,
-        borderRadius: radii.full / 2,
-        backgroundColor: palette.primary[500],
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    unreadBadgeText: {
-        ...typography.micro,
-        color: palette.text.onAccent,
-    },
-    banBadge: { ...typography.micro, color: palette.semantic.danger },
-    // 32 px visual with an 8 px hitSlop: a comfortable iOS target inside the
-    // row without widening the trailing column too much.
-    menuSlot: {
-        width: 32,
-        height: 32,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    menuButton: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    menuButtonPressed: { backgroundColor: palette.glass.elevated },
-});
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+        row: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: spacing.sm,
+            paddingVertical: spacing.xs,
+            paddingHorizontal: spacing.xxs,
+            borderRadius: radii.md,
+            // Theme-aware surface: the global background can be a photo, so
+            // every row keeps a readable base behind its text.
+            backgroundColor: theme.colors.glassSurface,
+        },
+        // The one flex child of the row: it owns every pixel the fixed avatar,
+        // trailing column and menu button leave over.
+        avatarSlot: { width: 44, height: 44, flexShrink: 0 },
+        body: { flex: 1, minWidth: 0, gap: 2 },
+        titleRow: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: spacing.xxs,
+            flexShrink: 1,
+            minWidth: 0,
+        },
+        // `flex: 1` (not only flexShrink) is what makes the name use the WHOLE
+        // remaining title width; the pin glyph keeps its intrinsic size.
+        titleText: {
+            flex: 1,
+            minWidth: 0,
+            includeFontPadding: false,
+        },
+        pinGlyph: { ...theme.type.micro, flexShrink: 0 },
+        preview: {
+            color: theme.colors.textSecondary,
+            minWidth: 0,
+            includeFontPadding: false,
+        },
+        unreadPreview: {
+            color: theme.colors.text,
+            fontWeight: '700',
+        },
+        // Fixed trailing column: its width never shrinks because of a long name,
+        // and a localised/oversized time string can never steal the text's width.
+        meta: {
+            alignItems: 'flex-end',
+            flexShrink: 0,
+            gap: 2,
+            maxWidth: 72,
+        },
+        time: { flexShrink: 0 },
+        unreadBadge: {
+            minWidth: 18,
+            paddingHorizontal: 5,
+            paddingVertical: 1,
+            borderRadius: radii.full / 2,
+            backgroundColor: theme.colors.badge,
+            alignItems: 'center',
+            justifyContent: 'center',
+        },
+        unreadBadgeText: {
+            ...theme.type.micro,
+            color: theme.colors.badgeText,
+        },
+        banBadge: { ...theme.type.micro, color: theme.colors.danger },
+        // 32 px visual with an 8 px hitSlop: a comfortable iOS target inside the
+        // row without widening the trailing column too much.
+        menuSlot: {
+            width: 32,
+            height: 32,
+            alignItems: 'center',
+            justifyContent: 'center',
+        },
+        menuButton: {
+            width: 32,
+            height: 32,
+            borderRadius: 16,
+            alignItems: 'center',
+            justifyContent: 'center',
+        },
+        menuButtonPressed: { backgroundColor: theme.colors.glassElevated },
+    });

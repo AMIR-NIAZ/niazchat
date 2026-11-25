@@ -5,9 +5,11 @@ import Animated from 'react-native-reanimated';
 import type { AnimatedStyle } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AppText } from '../components/app-text';
-import { palette, spacing } from '../theme';
+import { shadows, spacing } from '../theme';
+import { useTheme, useThemedStyles } from '../theme/theme-provider';
+import type { AppTheme } from '../theme/theme-provider';
 import { DialogButtons } from './dialog-buttons';
-import { TONE_STYLES } from './dialog-tones';
+import { toneStyle as resolveToneStyle } from './dialog-tones';
 import type { DialogButton, DialogTone } from './dialog-types';
 
 /** ~6 lines of body copy before the message starts scrolling. */
@@ -46,7 +48,9 @@ export const DialogCard = memo(function DialogCard({
     iconStyle,
     onButtonPress,
 }: DialogCardProps): React.ReactElement {
-    const toneStyle = TONE_STYLES[tone];
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
+    const toneStyle = resolveToneStyle(tone, theme);
     const Icon = toneStyle.icon;
 
     return (
@@ -56,7 +60,7 @@ export const DialogCard = memo(function DialogCard({
         >
             <LinearGradient
                 pointerEvents="none"
-                colors={['#1A1127', palette.surface]}
+                colors={[theme.colors.surfaceElevated, theme.colors.surface]}
                 start={{ x: 0.5, y: 0 }}
                 end={{ x: 0.5, y: 1 }}
                 style={StyleSheet.absoluteFill}
@@ -99,49 +103,46 @@ export const DialogCard = memo(function DialogCard({
     );
 });
 
-const styles = StyleSheet.create({
-    card: {
-        borderRadius: 24,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.08)',
-        paddingHorizontal: spacing.lg,
-        paddingTop: spacing.lg,
-        paddingBottom: spacing.md,
-        gap: spacing.md,
-        overflow: 'hidden',
-        backgroundColor: palette.surface,
-        shadowColor: '#7545B8',
-        shadowOpacity: 0.45,
-        shadowRadius: 28,
-        shadowOffset: { width: 0, height: 14 },
-        elevation: 24,
-    },
-    header: {
-        alignItems: 'center',
-        gap: spacing.sm,
-    },
-    badge: {
-        width: 56,
-        height: 56,
-        borderRadius: 28,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    title: {
-        fontSize: 18,
-        fontWeight: '700',
-        letterSpacing: -0.2,
-        color: palette.text.primary,
-        textAlign: 'center',
-        writingDirection: 'auto',
-    },
-    messageScroll: { maxHeight: MESSAGE_MAX_HEIGHT },
-    messageContent: { paddingVertical: 0 },
-    message: {
-        fontSize: 15,
-        lineHeight: 21,
-        color: palette.text.secondary,
-        textAlign: 'center',
-        writingDirection: 'auto',
-    },
-});
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+        card: {
+            borderRadius: 24,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            paddingHorizontal: spacing.lg,
+            paddingTop: spacing.lg,
+            paddingBottom: spacing.md,
+            gap: spacing.md,
+            overflow: 'hidden',
+            backgroundColor: theme.colors.surface,
+            ...shadows.glass,
+            shadowRadius: 28,
+            shadowOffset: { width: 0, height: 14 },
+            elevation: 24,
+        },
+        header: {
+            alignItems: 'center',
+            gap: spacing.sm,
+        },
+        badge: {
+            width: 56,
+            height: 56,
+            borderRadius: 28,
+            alignItems: 'center',
+            justifyContent: 'center',
+        },
+        title: {
+            ...theme.type.heading,
+            color: theme.colors.text,
+            textAlign: 'center',
+            writingDirection: 'auto',
+        },
+        messageScroll: { maxHeight: MESSAGE_MAX_HEIGHT },
+        messageContent: { paddingVertical: 0 },
+        message: {
+            ...theme.type.body,
+            color: theme.colors.textSecondary,
+            textAlign: 'center',
+            writingDirection: 'auto',
+        },
+    });

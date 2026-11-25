@@ -1,7 +1,22 @@
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import type { ViewProps } from 'react-native';
 import { GlassSurface } from './glass-surface';
 import { blur, radii, spacing } from '../theme';
+import { AppText } from './app-text';
+
+/**
+ * Slot content is normally an element, but `ReactNode` also allows a bare
+ * string/number. Those must be wrapped in `<AppText>`: a raw string child of a
+ * `<View>` throws on the new architecture ("Text strings must be rendered
+ * within a <AppText> component").
+ */
+function slotContent(content: React.ReactNode): React.ReactNode {
+    return typeof content === 'string' || typeof content === 'number' ? (
+        <AppText>{content}</AppText>
+    ) : (
+        content
+    );
+}
 
 interface GlassHeaderProps extends ViewProps {
     /** Content pinned to the start side (e.g. a back button). */
@@ -46,7 +61,9 @@ export function GlassHeader({
         >
             <View style={styles.row}>
                 {leading !== undefined && (
-                    <View style={styles.leading}>{leading}</View>
+                    <View style={styles.leading}>
+                        {slotContent(leading)}
+                    </View>
                 )}
                 <View
                     style={[
@@ -54,10 +71,12 @@ export function GlassHeader({
                         layout === 'row' && styles.centerRow,
                     ]}
                 >
-                    {children}
+                    {slotContent(children)}
                 </View>
                 {trailing !== undefined && (
-                    <View style={styles.trailing}>{trailing}</View>
+                    <View style={styles.trailing}>
+                        {slotContent(trailing)}
+                    </View>
                 )}
             </View>
         </GlassSurface>

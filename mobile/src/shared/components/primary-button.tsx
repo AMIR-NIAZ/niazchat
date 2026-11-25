@@ -8,7 +8,10 @@ import {
 } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
 import { useReducedMotion } from '../hooks/use-reduced-motion';
-import { motion, palette, radii, shadows, spacing, typography } from '../theme';
+import { motion, radii, shadows, spacing } from '../theme';
+import { useTheme, useThemedStyles } from '../theme/theme-provider';
+import type { AppTheme } from '../theme/theme-provider';
+import { AppText } from './app-text';
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
 
@@ -29,6 +32,9 @@ interface PrimaryButtonProps {
 /**
  * Brand button with a spring press response. The scale animates on the native
  * driver; reduced-motion users only get the opacity feedback.
+ *
+ * The primary fill is the active accent and its label uses the automatically
+ * computed readable color, so every accent preset stays legible.
  */
 export function PrimaryButton({
     label,
@@ -41,6 +47,8 @@ export function PrimaryButton({
     accessibilityLabel,
     style,
 }: PrimaryButtonProps): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const scale = useRef(new Animated.Value(1)).current;
     const reduceMotion = useReducedMotion();
     const inactive = disabled || loading;
@@ -86,56 +94,62 @@ export function PrimaryButton({
                         size="small"
                         color={
                             variant === 'primary' || variant === 'danger'
-                                ? palette.text.onAccent
-                                : palette.primary[600]
+                                ? variant === 'primary'
+                                    ? theme.colors.accentText
+                                    : theme.colors.danger
+                                : theme.accent
                         }
                     />
                 ) : (
-                    <Text style={[styles.label, styles[`${variant}Label`]]}>
+                    <AppText style={[styles.label, styles[`${variant}Label`]]}>
                         {label}
-                    </Text>
+                    </AppText>
                 )}
             </Pressable>
         </Animated.View>
     );
 }
 
-const styles = StyleSheet.create({
-    fullWidth: { alignSelf: 'stretch' },
-    base: {
-        minHeight: 50,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: spacing.lg,
-        borderRadius: radii.lg,
-        borderWidth: 1,
-    },
-    compact: {
-        minHeight: 36,
-        paddingHorizontal: spacing.sm,
-        borderRadius: radii.full,
-    },
-    primary: {
-        backgroundColor: palette.primary[500],
-        borderColor: 'rgba(220,197,255,0.32)',
-    },
-    secondary: {
-        backgroundColor: palette.glass.elevated,
-        borderColor: palette.border.strong,
-    },
-    ghost: {
-        backgroundColor: 'transparent',
-        borderColor: 'transparent',
-    },
-    danger: {
-        backgroundColor: 'rgba(255,122,138,0.16)',
-        borderColor: 'rgba(255,122,138,0.38)',
-    },
-    disabled: { opacity: 0.45 },
-    pressedOpacity: { opacity: 0.9 },
-    label: { ...typography.label, fontSize: 16, fontWeight: '700' },
-    primaryLabel: { color: palette.text.onAccent },
-    secondaryLabel: { color: palette.text.primary },
-    ghostLabel: { color: palette.primary[600] },
-    dangerLabel: { color: palette.semantic.danger },
-});
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
+        fullWidth: { alignSelf: 'stretch' },
+        base: {
+            minHeight: 50,
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingHorizontal: spacing.lg,
+            borderRadius: radii.lg,
+            borderWidth: 1,
+        },
+        compact: {
+            minHeight: 36,
+            paddingHorizontal: spacing.sm,
+            borderRadius: radii.full,
+        },
+        primary: {
+            backgroundColor: theme.accent,
+            borderColor: theme.colors.accentBorder,
+        },
+        secondary: {
+            backgroundColor: theme.colors.glassElevated,
+            borderColor: theme.colors.borderStrong,
+        },
+        ghost: {
+            backgroundColor: 'transparent',
+            borderColor: 'transparent',
+        },
+        danger: {
+            backgroundColor: theme.colors.dangerSoft,
+            borderColor: theme.colors.danger,
+        },
+        disabled: { opacity: 0.45 },
+        pressedOpacity: { opacity: 0.9 },
+        label: {
+            ...theme.type.label,
+            fontSize: 16,
+        },
+        primaryLabel: { color: theme.colors.accentText },
+        secondaryLabel: { color: theme.colors.text },
+        ghostLabel: { color: theme.accent },
+        dangerLabel: { color: theme.colors.danger },
+    });

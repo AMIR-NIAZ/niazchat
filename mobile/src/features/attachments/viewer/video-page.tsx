@@ -90,30 +90,33 @@ export const ViewerVideoPage = memo(function ViewerVideoPage({
     const reduceMotion = useReducedMotion();
     const [playError, setPlayError] = useState<string | null>(null);
     const [showPlayer, setShowPlayer] = useState(false);
-    const wasReady = useRef(video.state === 'ready');
     const id = attachment.id;
 
-    // Ready → short check window → cross-fade to the player. A video that is
-    // already ready when the page mounts plays immediately.
+    // A player may only exist for the CURRENT page, and only once its file is
+    // ready. Both halves matter: the old code turned the player off when a
+    // page left the screen but only turned it on when `video.state` changed,
+    // so an already-downloaded next video (state stays 'ready') never got a
+    // player again and only showed a dead poster/play button.
+    const ready = video.state === 'ready' && video.localUri !== null;
+    const showedPlayerOnce = useRef(false);
     useEffect((): (() => void) => {
-        const previous = wasReady.current;
-        wasReady.current = video.state === 'ready';
-        if (video.state !== 'ready') {
+        if (!ready || !active) {
             setShowPlayer(false);
             return (): void => undefined;
         }
-        if (reduceMotion || previous) {
+        // The first reveal keeps the short check window and cross-fade; a page
+        // that becomes current again mounts its player right away.
+        if (reduceMotion || showedPlayerOnce.current) {
+            showedPlayerOnce.current = true;
             setShowPlayer(true);
             return (): void => undefined;
         }
-        const timer = setTimeout((): void => setShowPlayer(true), 350);
+        const timer = setTimeout((): void => {
+            showedPlayerOnce.current = true;
+            setShowPlayer(true);
+        }, 350);
         return (): void => clearTimeout(timer);
-    }, [video.state, reduceMotion]);
-
-    // A page that is not the current one must not keep playing.
-    useEffect((): void => {
-        if (!active) setShowPlayer(false);
-    }, [active]);
+    }, [ready, active, reduceMotion]);
 
     const handlePlayerError = useCallback((): void => {
         if (id !== null) syncVideoDownloadFromDisk(id);
@@ -141,7 +144,7 @@ export const ViewerVideoPage = memo(function ViewerVideoPage({
         );
     }
 
-    if (video.state === 'ready' && video.localUri !== null && showPlayer) {
+    if (ready && video.localUri !== null && showPlayer) {
         return (
             <View style={[styles.page, { width, height }]}>
                 <PlayerSurface
@@ -149,6 +152,7 @@ export const ViewerVideoPage = memo(function ViewerVideoPage({
                     url={video.localUri}
                     width={width}
                     height={height}
+                    active={active}
                     muted={muted}
                     paused={paused}
                     controlsBottom={controlsBottom}
@@ -284,6 +288,7 @@ function PlayerSurface({
     url,
     width,
     height,
+    active,
     muted,
     paused,
     controlsBottom,
@@ -296,6 +301,8 @@ function PlayerSurface({
     url: string;
     width: number;
     height: number;
+    /** Only the visible page is allowed to play. */
+    active: boolean;
     muted: boolean;
     paused: boolean;
     controlsBottom: number;
@@ -314,24 +321,35 @@ function PlayerSurface({
     });
     const onPlayerErrorRef = useRef(onPlayerError);
     onPlayerErrorRef.current = onPlayerError;
+    const [status, setStatus] = useState(player.status);
+    /** Autoplay runs once per player, never again on later status changes. */
+    const started = useRef(false);
 
     useEffect((): void => {
         player.muted = muted;
     }, [player, muted]);
 
-    // The viewer is closing: silence playback while the exit animation runs.
+    // The page stopped being current, or the viewer is closing: stop at once.
     useEffect((): void => {
-        if (paused) player.pause();
-    }, [paused, player]);
+        if (!active || paused) player.pause();
+    }, [active, paused, player]);
 
     // Status errors and playback state are forwarded, never thrown at React.
-    useEventListener(player, 'statusChange', ({ status }): void => {
-        if (status === 'error') onPlayerErrorRef.current();
+    useEventListener(player, 'statusChange', ({ status: next }): void => {
+        setStatus(next);
+        if (next === 'error') onPlayerErrorRef.current();
     });
 
-    // Autoplay once mounted (the file is local and verified).
-    useEffect((): (() => void) => {
+    // Autoplay the visible page once the local file is actually playable.
+    useEffect((): void => {
+        if (started.current || !active || paused) return;
+        if (status !== 'readyToPlay') return;
+        started.current = true;
         player.play();
+    }, [active, paused, player, status]);
+
+    // Releasing the player (unmount) must never leave audio behind.
+    useEffect((): (() => void) => {
         return (): void => {
             player.pause();
         };

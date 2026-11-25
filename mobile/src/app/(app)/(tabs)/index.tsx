@@ -66,6 +66,8 @@ import Animated, {
     withSpring,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
+import { useTheme, useThemedStyles } from '../../../shared/theme';
+import type { AppTheme } from '../../../shared/theme';
 
 /**
  * Chats screen — renders the WS-provided chat list.
@@ -85,6 +87,8 @@ type ChatRow = import('../../../features/chats').ChatPreview;
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 export default function ChatsScreen(): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const chatsQuery = useChats();
     const queryClient = useQueryClient();
     const popup = useContextPopup();
@@ -381,7 +385,7 @@ export default function ChatsScreen(): React.ReactElement {
                     {!hasCachedChats && chatsQuery.isPending ? (
                         <ActivityIndicator
                             size="large"
-                            color={palette.primary[500]}
+                            color={theme.accent}
                         />
                     ) : !hasCachedChats && chatsQuery.isError ? (
                         <StateBlock
@@ -434,7 +438,7 @@ export default function ChatsScreen(): React.ReactElement {
                         router.push('/(app)/create-group');
                     }}
                 >
-                    <Text style={styles.fabText}>＋ Group</Text>
+                    <AppText style={styles.fabText}>＋ Group</AppText>
                 </Pressable>
             </GlassSurface>
         </Screen>
@@ -443,6 +447,8 @@ export default function ChatsScreen(): React.ReactElement {
 
 /** One search button in the header's trailing slot — no other header controls. */
 function SearchIconButton(): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const scale = useSharedValue(1);
     const animatedStyle = useAnimatedStyle(() => ({
         transform: [{ scale: scale.value }],
@@ -468,7 +474,7 @@ function SearchIconButton(): React.ReactElement {
                 router.push('/(app)/search');
             }}
         >
-            <Search size={20} color="rgba(255,255,255,0.92)" strokeWidth={2} />
+            <Search size={20} color={theme.colors.accentText} strokeWidth={2} />
         </AnimatedPressable>
     );
 }
@@ -557,6 +563,7 @@ function ChatRowItem(props: ChatRowItemProps): React.ReactElement {
 }
 
 function RowSeparator(): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return <View style={styles.separator} />;
 }
 
@@ -565,6 +572,7 @@ function StateBlock(props: {
     detail: string;
     retry?: (() => void) | undefined;
 }): React.ReactElement {
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.center}>
             <AppText variant="title">{props.title}</AppText>
@@ -575,18 +583,21 @@ function StateBlock(props: {
 }
 
 function RetryButton({ onPress }: { onPress: () => void }): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     return (
         <Pressable
             accessibilityRole="button"
             style={styles.buttonGhost}
             onPress={onPress}
         >
-            <Text style={styles.buttonGhostText}>Retry</Text>
+            <AppText style={styles.buttonGhostText}>Retry</AppText>
         </Pressable>
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     screen: { flex: 1 },
     headerLayer: {
         position: 'absolute',
@@ -601,9 +612,9 @@ const styles = StyleSheet.create({
         borderRadius: 20,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(20,10,40,0.55)',
+        backgroundColor: theme.colors.glassSurface,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.14)',
+        borderColor: theme.colors.border,
     },
     // Explicit fill: `StyleSheet.absoluteFillObject` is gone in RN 0.88 and
     // spreading it left this layer without any position or size.
@@ -615,8 +626,8 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         gap: spacing.xs,
     },
-    stateDetail: { textAlign: 'center', color: palette.neutral[500] },
-    separator: { height: 1, backgroundColor: palette.border.subtle },
+    stateDetail: { textAlign: 'center', color: theme.colors.textSecondary },
+    separator: { height: 1, backgroundColor: theme.colors.border },
     fabWrap: {
         position: 'absolute',
         end: spacing.lg,
@@ -626,20 +637,20 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.sm,
     },
     fabText: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontWeight: '700',
         fontSize: 14,
     },
     buttonGhost: {
         borderWidth: 1,
-        borderColor: palette.border.strong,
+        borderColor: theme.colors.borderStrong,
         borderRadius: radii.full,
         paddingHorizontal: spacing.sm,
         paddingVertical: 6,
-        backgroundColor: palette.glass.elevated,
+        backgroundColor: theme.colors.glassElevated,
     },
     buttonGhostText: {
-        color: palette.primary[600],
+        color: theme.accent,
         fontSize: 13,
         fontWeight: '600',
     },

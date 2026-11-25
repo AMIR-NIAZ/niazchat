@@ -30,6 +30,8 @@ import {
 } from '../../shared/components';
 import { dialog } from '../../shared/dialog';
 import type { ProfileAvatar } from './use-profile';
+import { useTheme, useThemedStyles, withAlpha } from '../../shared/theme';
+import type { AppTheme } from '../../shared/theme';
 
 /**
  * Multi-avatar UI for the profile screen:
@@ -75,6 +77,8 @@ export function AvatarGallery({
     onLongPressAvatar,
     onPressAdd,
 }: AvatarGalleryProps): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const longPressed = useRef(false);
     const atLimit = avatars.length >= maxAvatars;
 
@@ -127,16 +131,16 @@ export function AvatarGallery({
                         />
                         {index === 0 && (
                             <View style={styles.currentBadge}>
-                                <Text style={styles.currentBadgeText}>
+                                <AppText style={styles.currentBadgeText}>
                                     Current
-                                </Text>
+                                </AppText>
                             </View>
                         )}
                         {pending && (
                             <View style={styles.tileBusy}>
                                 <ActivityIndicator
                                     size="small"
-                                    color={palette.text.onAccent}
+                                    color={theme.colors.accentText}
                                 />
                             </View>
                         )}
@@ -152,7 +156,7 @@ export function AvatarGallery({
                 >
                     <ActivityIndicator
                         size="small"
-                        color={palette.primary[500]}
+                        color={theme.accent}
                     />
                 </View>
             )}
@@ -173,7 +177,7 @@ export function AvatarGallery({
                             disabled && styles.tileDisabled,
                         ]}
                     >
-                        <Text style={styles.addGlyph}>+</Text>
+                        <AppText style={styles.addGlyph}>+</AppText>
                     </Pressable>
                 )}
 
@@ -183,10 +187,10 @@ export function AvatarGallery({
                     accessibilityLabel={`${maxAvatars} of ${maxAvatars} ${subject.toLowerCase()}s used`}
                     style={[styles.tile, styles.limitTile]}
                 >
-                    <Text style={styles.limitText}>
+                    <AppText style={styles.limitText}>
                         {maxAvatars}/{maxAvatars}
-                    </Text>
-                    <Text style={styles.limitCaption}>Limit</Text>
+                    </AppText>
+                    <AppText style={styles.limitCaption}>Limit</AppText>
                 </View>
             )}
         </ScrollView>
@@ -232,6 +236,8 @@ export function AvatarViewer({
     onSetMain,
     onDelete,
 }: AvatarViewerProps): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     const { width, height } = useWindowDimensions();
     const insets = useSafeAreaInsets();
     const listRef = useRef<FlatList<ProfileAvatar>>(null);
@@ -391,7 +397,7 @@ export function AvatarViewer({
                         onPress={onClose}
                         style={styles.viewerClose}
                     >
-                        <Text style={styles.viewerCloseText}>✕</Text>
+                        <AppText style={styles.viewerCloseText}>✕</AppText>
                     </Pressable>
                 </View>
 
@@ -401,19 +407,19 @@ export function AvatarViewer({
                         { paddingBottom: insets.bottom + spacing.md },
                     ]}
                 >
-                    <Text
+                    <AppText
                         style={styles.viewerCounter}
                         accessibilityLiveRegion="polite"
                         accessibilityLabel={`${subject} ${index + 1} of ${avatars.length}`}
                     >
                         {index + 1} of {avatars.length}
-                    </Text>
+                    </AppText>
 
                     {!readOnly &&
                         (busy || pending ? (
                             <ActivityIndicator
                                 size="small"
-                                color={palette.text.onAccent}
+                                color={theme.colors.accentText}
                             />
                         ) : (
                             <View style={styles.viewerActions}>
@@ -448,9 +454,9 @@ export function AvatarViewer({
                                             styles.viewerButtonPrimary,
                                         ]}
                                     >
-                                        <Text style={styles.viewerButtonText}>
+                                        <AppText style={styles.viewerButtonText}>
                                             {setMainLabel}
-                                        </Text>
+                                        </AppText>
                                     </Pressable>
                                 )}
                                 {onDelete !== undefined && (
@@ -463,14 +469,14 @@ export function AvatarViewer({
                                             styles.viewerButtonDanger,
                                         ]}
                                     >
-                                        <Text
+                                        <AppText
                                             style={[
                                                 styles.viewerButtonText,
                                                 styles.viewerDangerText,
                                             ]}
                                         >
                                             {deleteLabel}
-                                        </Text>
+                                        </AppText>
                                     </Pressable>
                                 )}
                             </View>
@@ -498,6 +504,8 @@ export function AvatarActionSheet({
     onDelete,
     onDismiss,
 }: AvatarActionSheetProps): React.ReactElement {
+    const theme = useTheme();
+    const styles = useThemedStyles(createStyles);
     if (avatar === null) {
         return <View />;
     }
@@ -516,7 +524,7 @@ export function AvatarActionSheet({
                     {busy ? (
                         <ActivityIndicator
                             size="small"
-                            color={palette.primary[500]}
+                            color={theme.accent}
                         />
                     ) : (
                         <>
@@ -527,9 +535,9 @@ export function AvatarActionSheet({
                                     style={styles.sheetButton}
                                     onPress={onSetMain}
                                 >
-                                    <Text style={styles.sheetActionText}>
+                                    <AppText style={styles.sheetActionText}>
                                         Set as profile photo
-                                    </Text>
+                                    </AppText>
                                 </Pressable>
                             )}
                             <Pressable
@@ -538,9 +546,9 @@ export function AvatarActionSheet({
                                 style={styles.sheetButton}
                                 onPress={onDelete}
                             >
-                                <Text style={styles.sheetDeleteText}>
+                                <AppText style={styles.sheetDeleteText}>
                                     Delete photo
-                                </Text>
+                                </AppText>
                             </Pressable>
                             <View style={styles.sheetDivider} />
                             <Pressable
@@ -549,9 +557,9 @@ export function AvatarActionSheet({
                                 style={styles.sheetButton}
                                 onPress={onDismiss}
                             >
-                                <Text style={styles.sheetCancelText}>
+                                <AppText style={styles.sheetCancelText}>
                                     Cancel
-                                </Text>
+                                </AppText>
                             </Pressable>
                         </>
                     )}
@@ -561,7 +569,8 @@ export function AvatarActionSheet({
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) =>
+    StyleSheet.create({
     galleryRow: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -574,7 +583,7 @@ const styles = StyleSheet.create({
         height: 64,
         borderRadius: radii.md,
         overflow: 'hidden',
-        backgroundColor: palette.neutral[100],
+        backgroundColor: theme.colors.glassElevated,
     },
     tileDisabled: { opacity: 0.5 },
     thumb: { width: '100%', height: '100%' },
@@ -583,12 +592,12 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         bottom: 0,
-        backgroundColor: 'rgba(28, 32, 36, 0.72)',
+        backgroundColor: withAlpha(theme.colors.background, 0.72),
         paddingVertical: 2,
         alignItems: 'center',
     },
     currentBadgeText: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 9,
         fontWeight: '700',
     },
@@ -600,18 +609,18 @@ const styles = StyleSheet.create({
         bottom: 0,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(28, 32, 36, 0.45)',
+        backgroundColor: withAlpha(theme.colors.background, 0.45),
     },
     addTile: {
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 1,
-        borderColor: palette.primary[300],
+        borderColor: theme.accent,
         borderStyle: 'dashed',
-        backgroundColor: palette.primary[100],
+        backgroundColor: theme.colors.accentSoft,
     },
     addGlyph: {
-        color: palette.primary[600],
+        color: theme.accent,
         fontSize: 28,
         fontWeight: '600',
         lineHeight: 30,
@@ -619,16 +628,16 @@ const styles = StyleSheet.create({
     limitTile: {
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: palette.neutral[100],
+        backgroundColor: theme.colors.glassElevated,
         gap: 2,
     },
     limitText: {
-        color: palette.neutral[700],
+        color: theme.colors.text,
         fontSize: 14,
         fontWeight: '700',
     },
-    limitCaption: { ...typography.caption, fontSize: 9 },
-    viewerRoot: { flex: 1, backgroundColor: palette.neutral[900] },
+    limitCaption: { ...theme.type.caption, fontSize: 9 },
+    viewerRoot: { flex: 1, backgroundColor: theme.colors.text },
     viewerPage: {
         alignItems: 'center',
         justifyContent: 'center',
@@ -648,10 +657,10 @@ const styles = StyleSheet.create({
         borderRadius: radii.full,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(255, 255, 255, 0.16)',
+        backgroundColor: theme.colors.quoteOwn,
     },
     viewerCloseText: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 18,
         fontWeight: '600',
     },
@@ -665,7 +674,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     viewerCounter: {
-        color: palette.neutral[100],
+        color: theme.colors.surfaceElevated,
         fontSize: 13,
         fontWeight: '600',
     },
@@ -680,24 +689,24 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.md,
         paddingVertical: spacing.sm,
     },
-    viewerButtonPrimary: { backgroundColor: palette.primary[500] },
+    viewerButtonPrimary: { backgroundColor: theme.accent },
     viewerButtonDanger: {
         borderWidth: 1,
-        borderColor: palette.semantic.danger,
+        borderColor: theme.colors.danger,
     },
     viewerButtonText: {
-        color: palette.text.onAccent,
+        color: theme.colors.accentText,
         fontSize: 14,
         fontWeight: '600',
     },
-    viewerDangerText: { color: '#FF8A80' },
+    viewerDangerText: { color: theme.colors.danger },
     sheetBackdrop: {
         flex: 1,
-        backgroundColor: 'rgba(28, 32, 36, 0.45)',
+        backgroundColor: withAlpha(theme.colors.background, 0.45),
         justifyContent: 'flex-end',
     },
     sheetCard: {
-        backgroundColor: palette.neutral[0],
+        backgroundColor: theme.colors.background,
         borderTopLeftRadius: radii.lg,
         borderTopRightRadius: radii.lg,
         padding: spacing.md,
@@ -709,23 +718,23 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.xs,
     },
     sheetActionText: {
-        color: palette.neutral[900],
+        color: theme.colors.text,
         fontSize: 16,
         fontWeight: '500',
     },
     sheetDeleteText: {
-        color: palette.semantic.danger,
+        color: theme.colors.danger,
         fontSize: 16,
         fontWeight: '500',
     },
     sheetCancelText: {
-        color: palette.neutral[700],
+        color: theme.colors.text,
         fontSize: 16,
         fontWeight: '500',
     },
     sheetDivider: {
         height: 1,
-        backgroundColor: palette.neutral[100],
+        backgroundColor: theme.colors.glassElevated,
         marginVertical: spacing.xxs,
     },
 });
