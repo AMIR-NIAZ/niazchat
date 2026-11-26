@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { Controller, useForm } from 'react-hook-form';
+import { useLocalSearchParams, router } from 'expo-router';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
     AppText,
@@ -27,7 +28,9 @@ import type { AppTheme } from '../../shared/theme';
 export default function LoginScreen(): React.ReactElement {
     const theme = useTheme();
     const styles = useThemedStyles(createStyles);
-    const { requestOtp, requesting } = useAuthFlow();
+    const params = useLocalSearchParams<{ mode?: string }>();
+    const addingAccount = params.mode === 'add';
+    const { requestOtp, requesting } = useAuthFlow({ addingAccount });
     const sessionNotice = useAuthStore((state) => state.sessionNotice);
     const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -69,7 +72,9 @@ export default function LoginScreen(): React.ReactElement {
                         {sessionNotice}
                     </AppText>
                 )}
-                <AppText variant="heading">Sign in</AppText>
+                <AppText variant="heading">
+                    {addingAccount ? 'Add account' : 'Sign in'}
+                </AppText>
                 <AppText variant="caption" style={styles.hint}>
                     Enter your Iranian mobile number. We&apos;ll send a one-time
                     code by SMS.
@@ -111,6 +116,13 @@ export default function LoginScreen(): React.ReactElement {
                                 void onSubmit();
                             }}
                             label="Send code"
+                        />
+                    )}
+                    {addingAccount && (
+                        <FormButton
+                            intent="secondary"
+                            label="Cancel"
+                            onPress={(): void => router.back()}
                         />
                     )}
                 </View>

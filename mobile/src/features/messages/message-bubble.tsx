@@ -1171,7 +1171,12 @@ const createStyles = (theme: AppTheme) =>
         borderRadius: radii.lg,
         paddingHorizontal: spacing.sm,
         paddingVertical: spacing.xs,
-        backgroundColor: theme.colors.glassElevated,
+        // Incoming bubbles used the translucent `glassElevated` token
+        // (rgba alpha 0.66), so they were painted permanently semi-transparent
+        // over the app background and looked dimmed — own bubbles overrode it
+        // with the opaque accent. Use the opaque bubble surface token (the
+        // one the Appearance preview and its color setting already use).
+        backgroundColor: theme.colors.bubbleOther,
         borderColor: theme.colors.border,
         borderWidth: 1,
     },
@@ -1254,7 +1259,9 @@ const createStyles = (theme: AppTheme) =>
     quoteText: { color: theme.colors.textSecondary, fontSize: 12 },
     quoteTextMine: { color: theme.colors.bubbleOwnMuted },
     quoteDeleted: { fontStyle: 'italic' },
-    content: { color: theme.colors.text, fontSize: 15 },
+    // Match the opaque incoming surface (readable for any custom bubble color);
+    // keep it independent of message fields so no status can dim the text.
+    content: { color: theme.colors.bubbleOtherText, fontSize: 15 },
     contentMine: { color: theme.colors.accentText },
     link: {
         color: theme.accent,

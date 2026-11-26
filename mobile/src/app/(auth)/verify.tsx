@@ -28,7 +28,7 @@ import type { AppTheme } from '../../shared/theme';
  * while a code is still live returns the documented 429 `{ message: 'code sent' }`.
  */
 
-type VerifyRouteParams = { phone?: string | string[] };
+type VerifyRouteParams = { phone?: string | string[]; mode?: string };
 
 export default function VerifyScreen(): React.ReactElement {
     const theme = useTheme();
@@ -37,7 +37,9 @@ export default function VerifyScreen(): React.ReactElement {
     const phone: string = typeof params.phone === 'string' ? params.phone : '';
     const validPhone = phoneSchema.safeParse(phone).success;
 
-    const { confirmOtp, resend, verifying } = useAuthFlow();
+    const { confirmOtp, resend, verifying } = useAuthFlow({
+        addingAccount: params.mode === 'add',
+    });
     const [submitError, setSubmitError] = useState<string | null>(null);
     const [notice, setNotice] = useState<string | null>(null);
 
@@ -57,8 +59,10 @@ export default function VerifyScreen(): React.ReactElement {
             phone: values.phone,
             code: values.code,
         });
-        if (!result.success && result.message !== undefined) {
-            setSubmitError(result.message);
+        if (!result.success) {
+            setSubmitError(
+                result.message ?? 'Sign-in failed. Please try again.',
+            );
         }
     });
 

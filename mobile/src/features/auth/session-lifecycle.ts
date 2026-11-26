@@ -264,6 +264,15 @@ export function startSessionLifecycle(): Stop {
     stopStore = useAuthStore.subscribe((state, previous) => {
         if (state.status !== previous.status) {
             handleStatusChange(state.status);
+            return;
+        }
+        // Account switch: status stays authenticated but the token changed, so
+        // the proactive refresh must be re-armed for the new session.
+        if (
+            state.status === 'authenticated' &&
+            state.userId !== previous.userId
+        ) {
+            handleStatusChange('authenticated');
         }
     });
 

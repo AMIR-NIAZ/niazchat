@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
+import { secureKey } from '../../core/storage/secure-kv';
 
 /**
  * Device-local chat preferences.
@@ -15,10 +16,15 @@ import * as SecureStore from 'expo-secure-store';
  * is ample for a chat pin list but not for arbitrary data.
  */
 
-const PINNED_KEY_PREFIX = 'niazchat.pinnedChats.v1:';
+const PINNED_KEY_PREFIX = 'niazchat.pinnedChats.v1';
 
 function pinnedKey(userId: number): string {
-    return `${PINNED_KEY_PREFIX}${userId}`;
+    if (!Number.isInteger(userId) || userId <= 0) {
+        throw new Error(
+            `Cannot build a pinned-chats key for user id ${String(userId)}.`,
+        );
+    }
+    return secureKey(PINNED_KEY_PREFIX, userId);
 }
 
 function parseIds(raw: string | null): Set<number> {

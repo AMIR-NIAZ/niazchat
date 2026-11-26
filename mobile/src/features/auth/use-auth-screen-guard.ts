@@ -8,15 +8,16 @@ import { takePendingInviteCode } from '../groups/pending-invite';
  *
  * - `guard: 'protected'` — redirects guests to `(auth)/login`, waits while restoring.
  * - `guard: 'guest-only'` — redirects authenticated users to `(app)`.
+ * - `guard: 'none'` — no redirect (the auth screens opened as "Add account").
  */
 
-export type AuthGuard = 'protected' | 'guest-only';
+export type AuthGuard = 'protected' | 'guest-only' | 'none';
 
 export function useAuthScreenGuard(guard: AuthGuard): boolean {
     const status = useAuthStore((state) => state.status);
 
     useEffect(() => {
-        if (status === 'restoring') {
+        if (guard === 'none' || status === 'restoring') {
             return;
         }
         if (guard === 'protected' && status === 'guest') {

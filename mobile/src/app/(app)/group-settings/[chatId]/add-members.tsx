@@ -1,39 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     FlatList,
     Pressable,
     StyleSheet,
-    Text,
     TextInput,
     View,
-    useWindowDimensions,
 } from 'react-native';
 import type { ListRenderItemInfo } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import Animated, {
-    Easing,
-    interpolate,
-    runOnJS,
-    useAnimatedStyle,
-    useSharedValue,
-    withTiming,
-} from 'react-native-reanimated';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
     AppText,
     SafeText,
     UserAvatar,
-    palette,
     radii,
-    shadows,
     spacing,
-    typography,
 } from '../../../../shared/components';
-import { useReducedMotion } from '../../../../shared/hooks/use-reduced-motion';
-import { measureInWindow } from '../../../../shared/context-popup/measure';
-import type { ViewInstance } from '../../../../shared/context-popup/measure';
-import type { PopupRect } from '../../../../shared/context-popup/popup-layout';
 import { dialog, toast } from '../../../../shared/dialog';
 import { ApiError } from '../../../../core/api';
 import { useContacts } from '../../../../features/contacts/use-contacts';
@@ -44,7 +26,6 @@ import {
     failuresText,
     filterAddContactOptions,
     mergeAddMembersResults,
-    publicUserIdLabel,
     selectedCountLabel,
     toggleContactSelection,
 } from '../../../../features/groups/add-members-model';
@@ -79,11 +60,6 @@ import type { AppTheme } from '../../../../shared/theme';
  */
 
 type AddMembersRouteParams = { chatId?: string | string[] };
-
-interface MissingIdHintState {
-    id: number;
-    anchor: PopupRect | null;
-}
 
 function parseChatId(value: string | string[] | undefined): number | null {
     const raw = Array.isArray(value) ? value[0] : value;
@@ -123,9 +99,6 @@ function AddMembers({ chatId }: { chatId: number }): React.ReactElement {
     const [addedUserIds, setAddedUserIds] = useState<ReadonlySet<number>>(
         new Set(),
     );
-    const [missingIdHint, setMissingIdHint] =
-        useState<MissingIdHintState | null>(null);
-    const hintSequence = useRef(0);
 
     const markAdded = useCallback((result: AddMembersResult): void => {
         if (result.added.length === 0) return;
@@ -134,17 +107,6 @@ function AddMembers({ chatId }: { chatId: number }): React.ReactElement {
             for (const member of result.added) next.add(member.userId);
             return next;
         });
-    }, []);
-
-    const showMissingIdHint = useCallback((anchor: PopupRect | null): void => {
-        hintSequence.current += 1;
-        setMissingIdHint({ id: hintSequence.current, anchor });
-    }, []);
-
-    const hideMissingIdHint = useCallback((id: number): void => {
-        setMissingIdHint((current) =>
-            current !== null && current.id === id ? null : current,
-        );
     }, []);
 
     if (infoQuery.isPending && info === undefined) {
@@ -197,18 +159,10 @@ function AddMembers({ chatId }: { chatId: number }): React.ReactElement {
                 addedUserIds={addedUserIds}
                 busy={addMutation.isPending}
                 onAdded={markAdded}
-                onMissingId={showMissingIdHint}
                 onSubmit={(userIds): Promise<AddMembersResult> =>
                     addMutation.mutateAsync(userIds)
                 }
             />
-            {missingIdHint !== null && (
-                <MissingIdHint
-                    key={missingIdHint.id}
-                    hint={missingIdHint}
-                    onHide={hideMissingIdHint}
-                />
-            )}
         </View>
     );
 }
@@ -220,7 +174,6 @@ function ContactsPicker(props: {
     addedUserIds: ReadonlySet<number>;
     busy: boolean;
     onAdded: (result: AddMembersResult) => void;
-    onMissingId: (anchor: PopupRect | null) => void;
     onSubmit: (userIds: number[]) => Promise<AddMembersResult>;
 }): React.ReactElement {
     const theme = useTheme();
@@ -320,7 +273,6 @@ function ContactsPicker(props: {
             selected={selected.has(item.userId)}
             disabled={props.busy || submitting}
             onPress={(): void => toggle(item)}
-            onMissingId={props.onMissingId}
         />
     );
 
@@ -457,31 +409,11 @@ function ContactRow(props: {
     selected: boolean;
     disabled: boolean;
     onPress: () => void;
-    onMissingId: (anchor: PopupRect | null) => void;
 }): React.ReactElement {
     const theme = useTheme();
     const styles = useThemedStyles(createStyles);
     const { option } = props;
     const isDisabled = option.isMember || props.disabled;
-    const idRef = useRef<ViewInstance | null>(null);
-    const publicId = publicUserIdLabel(option.userId);
-
-    // The ID is its OWN pressable: opening the profile must never toggle the
-    // row's selection. The child claims the touch, so the row's `onPress`
-    // stays silent (no nested-Pressable double fire).
-    const handleIdPress = (): void => {
-        if (publicId !== null) {
-            openUserProfile({
-                userId: option.userId,
-                name: option.displayName,
-                avatar: option.avatarUrl,
-            });
-            return;
-        }
-        void measureInWindow(idRef).then((anchor): void => {
-            props.onMissingId(anchor);
-        });
-    };
 
     return (
         <Pressable
@@ -499,12 +431,25 @@ function ContactRow(props: {
                 pressed && !isDisabled && styles.contactRowPressed,
             ]}
         >
-            <UserAvatar
-                userId={option.userId}
-                name={option.displayName}
-                uri={option.avatarUrl}
-                size={44}
-            />
+            <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Open profile of ${option.displayName}`}
+                hitSlop={4}
+                onPress={(): void => {
+                    openUserProfile({
+                        userId: option.userId,
+                        name: option.displayName,
+                        avatar: option.avatarUrl,
+                    });
+                }}
+            >
+                <UserAvatar
+                    userId={option.userId}
+                    name={option.displayName}
+                    uri={option.avatarUrl}
+                    size={44}
+                />
+            </Pressable>
             <View style={styles.rowBody}>
                 <SafeText
                     style={[
@@ -520,37 +465,6 @@ function ContactRow(props: {
                         @{option.username}
                     </AppText>
                 )}
-                <Pressable
-                    ref={idRef}
-                    accessibilityRole="button"
-                    accessibilityLabel={
-                        publicId !== null
-                            ? `Open profile of ${option.displayName}`
-                            : `No public ID for ${option.displayName}`
-                    }
-                    accessibilityHint={
-                        publicId !== null
-                            ? 'Opens this user’s profile'
-                            : 'Shows why this ID cannot open a profile'
-                    }
-                    hitSlop={8}
-                    style={({ pressed }) => [
-                        styles.idChip,
-                        publicId === null && styles.idChipMissing,
-                        pressed && styles.idChipPressed,
-                    ]}
-                    onPress={handleIdPress}
-                >
-                    <AppText
-                        style={[
-                            styles.idText,
-                            publicId === null && styles.idTextMissing,
-                        ]}
-                        numberOfLines={1}
-                    >
-                        {publicId !== null ? `ID ${publicId}` : 'No public ID'}
-                    </AppText>
-                </Pressable>
                 {option.isMember && (
                     <AppText style={styles.memberLabel}>Already in group</AppText>
                 )}
@@ -576,115 +490,6 @@ function ContactRow(props: {
                 </View>
             )}
         </Pressable>
-    );
-}
-
-// ── missing public ID hint ─────────────────────────────────────────────────
-
-const HINT_WIDTH = 216;
-const HINT_HEIGHT = 42;
-const HINT_VISIBLE_MS = 1800;
-const HINT_ENTER_MS = 160;
-const HINT_EXIT_MS = 140;
-const HINT_MARGIN = 12;
-
-/**
- * Compact tooltip shown next to the tapped ID area when the contact has no
- * public User ID. It fades/scales in above everything (pointer-events off, so
- * it never blocks the list), then fades out and unmounts itself — no modal.
- */
-function MissingIdHint(props: {
-    hint: MissingIdHintState;
-    onHide: (id: number) => void;
-}): React.ReactElement {
-    const styles = useThemedStyles(createStyles);
-    const insets = useSafeAreaInsets();
-    const window = useWindowDimensions();
-    const reducedMotion = useReducedMotion();
-    const progress = useSharedValue(0);
-    const hintId = props.hint.id;
-    const anchor = props.hint.anchor;
-    const onHide = props.onHide;
-
-    useEffect((): (() => void) => {
-        progress.value = reducedMotion
-            ? 1
-            : withTiming(1, {
-                  duration: HINT_ENTER_MS,
-                  easing: Easing.out(Easing.cubic),
-              });
-
-        const timeout = setTimeout((): void => {
-            if (reducedMotion) {
-                onHide(hintId);
-                return;
-            }
-            progress.value = withTiming(
-                0,
-                {
-                    duration: HINT_EXIT_MS,
-                    easing: Easing.in(Easing.cubic),
-                },
-                (finished): void => {
-                    if (finished) runOnJS(onHide)(hintId);
-                },
-            );
-        }, HINT_VISIBLE_MS);
-
-        return (): void => clearTimeout(timeout);
-    }, [progress, reducedMotion, hintId, onHide]);
-
-    const position = useMemo(() => {
-        const minLeft = insets.left + HINT_MARGIN;
-        const maxLeft = Math.max(
-            minLeft,
-            window.width - insets.right - HINT_MARGIN - HINT_WIDTH,
-        );
-        if (anchor === null) {
-            return {
-                left: Math.max(minLeft, (window.width - HINT_WIDTH) / 2),
-                top: window.height - insets.bottom - HINT_HEIGHT - 96,
-            };
-        }
-        const left = Math.min(
-            Math.max(anchor.x + anchor.width / 2 - HINT_WIDTH / 2, minLeft),
-            maxLeft,
-        );
-        const below = anchor.y + anchor.height + 8;
-        const above = anchor.y - HINT_HEIGHT - 8;
-        const fitsBelow =
-            below + HINT_HEIGHT <= window.height - insets.bottom - HINT_MARGIN;
-        return {
-            left,
-            top: Math.max(insets.top + HINT_MARGIN, fitsBelow ? below : above),
-        };
-    }, [anchor, insets, window]);
-
-    const animatedStyle = useAnimatedStyle(() => ({
-        opacity: progress.value,
-        transform: [{ scale: interpolate(progress.value, [0, 1], [0.94, 1]) }],
-    }));
-
-    return (
-        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-            <Animated.View
-                accessibilityRole="alert"
-                accessibilityLabel="This user doesn’t have a public ID."
-                style={[
-                    styles.hintBubble,
-                    {
-                        left: position.left,
-                        top: position.top,
-                        width: HINT_WIDTH,
-                    },
-                    animatedStyle,
-                ]}
-            >
-                <AppText style={styles.hintText}>
-                    {"This user doesn't have a public ID."}
-                </AppText>
-            </Animated.View>
-        </View>
     );
 }
 
@@ -773,7 +578,6 @@ function describeInfoError(error: Error | null): string {
 }
 
 function reportResult(result: AddMembersResult): void {
-    const theme = useTheme();
     if (result.added.length === 0 && result.failed.length === 0) return;
     const failures: readonly AddMemberFailure[] = result.failed;
     if (failures.length === 0) {
@@ -872,53 +676,6 @@ const createStyles = (theme: AppTheme) =>
     },
     rowNameMuted: { color: theme.colors.textSecondary },
     rowMeta: { ...theme.type.caption, color: theme.colors.textSecondary },
-    idChip: {
-        alignSelf: 'flex-start',
-        flexDirection: 'row',
-        alignItems: 'center',
-        minHeight: 24,
-        marginTop: 2,
-        paddingHorizontal: 8,
-        paddingVertical: 2,
-        borderRadius: radii.full,
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: theme.colors.accentBorder,
-        backgroundColor: theme.colors.glassAccent,
-    },
-    idChipPressed: { backgroundColor: theme.colors.accentSoft },
-    idChipMissing: {
-        borderColor: theme.colors.borderStrong,
-        backgroundColor: 'transparent',
-    },
-    idText: {
-        fontSize: 11,
-        fontWeight: '700',
-        letterSpacing: 0.2,
-        color: theme.accent,
-    },
-    idTextMissing: {
-        fontWeight: '600',
-        color: theme.colors.textMuted,
-    },
-    hintBubble: {
-        position: 'absolute',
-        minHeight: HINT_HEIGHT,
-        justifyContent: 'center',
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.xs,
-        borderRadius: radii.md,
-        backgroundColor: theme.colors.glassElevated,
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: theme.colors.accentBorder,
-        ...shadows.glass,
-    },
-    hintText: {
-        fontSize: 12,
-        fontWeight: '600',
-        lineHeight: 17,
-        textAlign: 'center',
-        color: theme.colors.text,
-    },
     memberLabel: {
         fontSize: 11,
         fontWeight: '600',

@@ -5,7 +5,6 @@ import { BullModule } from '@nestjs/bullmq';
 import { OtpConsumer } from './processor/otp.processor';
 import { MessageService } from 'src/common/services/message.service';
 import { CacheService } from 'src/common/services/cache.service';
-import { CacheModule } from '@nestjs/cache-manager';
 import { OtpService } from './services/otp.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from './entities/user.entity';
@@ -31,7 +30,6 @@ import { RateLimitService } from 'src/common/services/rate-limit.service';
         BullModule.registerQueue({
             name: 'otp',
         }),
-        CacheModule.register(),
         TypeOrmModule.forFeature([
             User,
             UserProfile,

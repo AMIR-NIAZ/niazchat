@@ -14,6 +14,7 @@
  * and `startSessionLifecycle()` mounts the foreground/proactive refresh.
  */
 export * from './auth-store';
+export * from './account-switch';
 export * from './access-token-subject';
 export * from './auth-bootstrap';
 export * from './logout';

@@ -1,21 +1,24 @@
 import { create } from 'zustand';
 import {
-    clearTokens,
-    readAccessToken,
-    readRefreshToken,
-    writeTokens,
-} from '../../core/storage/secure-token.storage';
+    addAccount,
+    getAccounts,
+    getActiveAccount,
+    removeAccount,
+    setActiveAccount,
+} from '../../core/accounts';
 import { setCurrentCacheUserId } from '../../core/query/query-persister';
 import { connectSocket } from '../../core/socket';
 import { accessTokenSubject } from './access-token-subject';
 import { refreshSession } from './session-refresh';
 import { decideColdStart } from './session-refresh-model';
+import { resetInMemorySession } from './session-teardown';
 import { isTokenExpired } from './token-expiry';
 import { forgetCachedTokens, setCachedAccessToken } from './token-service';
 
 /**
  * Session state (client-side only; the backend has no logout/revocation).
- * Holds status only — the token pair lives in SecureStore, never in React state.
+ * Holds status only — the token pairs live in SecureStore per account, never in
+ * React state.
  *
  * `unreachable` is the cold-start state where the refresh could not run
  * (network/timeout/5xx) AND the stored access token is unusable: the UI shows
@@ -42,12 +45,19 @@ export interface AuthState {
     userId: number | null;
     /** Non-blocking banner on the login screen (expired session). */
     sessionNotice: string | null;
-    /** Restores tokens from SecureStore at startup, refreshing first. */
+    /** Restores the active account from SecureStore at startup. */
     restoreSession: () => Promise<void>;
     /** Retry after an `unreachable` cold start (also used by the retry button). */
     retryRestore: () => Promise<void>;
-    /** Persists the JWT pair (from `POST /auth/verify-otp` data) and opens the socket. */
-    storeSession: (accessToken: string, refreshToken: string) => Promise<void>;
+    /**
+     * Persists a JWT pair as a (new or refreshed) account and activates it.
+     * `name` is the phone number used until `GET /auth/getme` fills the profile.
+     */
+    storeSession: (
+        accessToken: string,
+        refreshToken: string,
+        name?: string,
+    ) => Promise<void>;
     /** Used by the logout flow after storage/socket/cache cleanup. */
     resetSessionState: (reason: 'expired' | 'manual') => void;
     clearSessionNotice: () => void;
@@ -65,18 +75,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         const generation = ++restoreGeneration;
         set({ status: 'restoring' });
 
-        const storedAccessToken = await readAccessToken();
-        const storedRefreshToken = await readRefreshToken();
+        const active = await getActiveAccount();
         if (generation !== restoreGeneration) {
             return;
         }
 
-        if (storedAccessToken === null && storedRefreshToken === null) {
+        if (active === null) {
             forgetCachedTokens();
             setCurrentCacheUserId(null);
             set({ status: 'guest', userId: null });
             return;
         }
+
+        const storedAccessToken =
+            active.accessToken === '' ? null : active.accessToken;
+        const storedRefreshToken =
+            active.refreshToken === '' ? null : active.refreshToken;
 
         if (storedAccessToken !== null) {
             setCachedAccessToken(storedAccessToken);
@@ -115,10 +129,21 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         });
 
         if (outcome.kind === 'guest') {
-            // Definitive end of the session (or unusable + no refresh token).
-            await clearTokens();
+            // Definitive end of this account: delete its tokens, then try the
+            // next saved account before falling back to the login screen.
+            await removeAccount(active.userId);
             forgetCachedTokens();
             setCurrentCacheUserId(null);
+            const remaining = await getAccounts();
+            if (generation !== restoreGeneration) {
+                return;
+            }
+            const next = remaining[0];
+            if (next !== undefined) {
+                await setActiveAccount(next.userId);
+                await get().restoreSession();
+                return;
+            }
             set({ status: 'guest', userId: null });
             return;
         }
@@ -143,12 +168,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     retryRestore: async () => {
         await get().restoreSession();
     },
-    storeSession: async (accessToken, refreshToken) => {
+    storeSession: async (accessToken, refreshToken, name) => {
         // Invalidate any restore still in flight (a fresh login wins).
         restoreGeneration += 1;
-        await writeTokens(accessToken, refreshToken);
-        setCachedAccessToken(accessToken);
         const userId = accessTokenSubject(accessToken);
+        if (userId === null) {
+            throw new Error('Sign-in did not return a valid user.');
+        }
+        await addAccount({
+            userId,
+            name: name ?? `Account ${userId}`,
+            accessToken,
+            refreshToken,
+        });
+        await setActiveAccount(userId);
+        resetInMemorySession();
+        setCachedAccessToken(accessToken);
         setCurrentCacheUserId(userId);
         connectSocket(accessToken);
         set({

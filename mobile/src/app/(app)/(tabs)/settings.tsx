@@ -1,16 +1,24 @@
-import { useCallback, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import {
+    ActivityIndicator,
+    Pressable,
+    StyleSheet,
+    Text,
+    View,
+} from 'react-native';
 import type { LayoutChangeEvent } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import Animated from 'react-native-reanimated';
 import {
     Bell,
+    Check,
     ChevronRight,
     Info,
     Languages,
     LogOut,
     Palette,
+    Plus,
     ShieldCheck,
     UserRound,
 } from 'lucide-react-native';
@@ -30,8 +38,16 @@ import {
 import type { AppTheme } from '../../../shared/theme';
 import { FadingScrollEdges } from '../../../shared/edge-fade';
 import { useTabBarInset } from '../../../shared/tab-bar';
-import { logout } from '../../../features/auth';
+import { dialog, toast } from '../../../shared/dialog';
+import { logoutAccount, switchAccount } from '../../../features/auth';
 import { useProfile } from '../../../features/users';
+import {
+    MAX_ACCOUNTS,
+    getAccounts,
+    getActiveAccountId,
+    updateAccountProfile,
+} from '../../../core/accounts';
+import type { StoredAccount } from '../../../core/accounts';
 
 /**
  * App settings.
@@ -65,6 +81,10 @@ export default function SettingsScreen(): React.ReactElement {
     // Same full-screen geometry as the chats list: floating header, the
     // measured header height feeds both the content padding and the fade.
     const [headerHeight, setHeaderHeight] = useState(0);
+    const [accounts, setAccounts] = useState<StoredAccount[]>([]);
+    const [activeAccountId, setActiveAccountId] = useState<number | null>(null);
+    // Account whose tokens are being switched/removed: row-level loading state.
+    const [busyAccountId, setBusyAccountId] = useState<number | null>(null);
     const measureHeader = useCallback((event: LayoutChangeEvent): void => {
         const height = event.nativeEvent.layout.height;
         if (height <= 0) {
@@ -74,6 +94,127 @@ export default function SettingsScreen(): React.ReactElement {
             Math.abs(previous - height) < 0.5 ? previous : height,
         );
     }, []);
+
+    const loadAccounts = useCallback(async (): Promise<void> => {
+        const [list, activeId] = await Promise.all([
+            getAccounts(),
+            getActiveAccountId(),
+        ]);
+        setAccounts(list);
+        setActiveAccountId(activeId);
+    }, []);
+
+    // Reload on focus: a switch/add/logout elsewhere must be reflected here.
+    useFocusEffect(
+        useCallback((): void => {
+            void loadAccounts();
+        }, [loadAccounts]),
+    );
+
+    // Keep the stored avatar/name in sync with the active profile when it
+    // loads (accounts start with the phone number, the profile has the name).
+    useEffect((): void => {
+        if (
+            me === null ||
+            activeAccountId === null ||
+            Number(me.id) !== activeAccountId
+        ) {
+            return;
+        }
+        const stored = accounts.find(
+            (account) => account.userId === activeAccountId,
+        );
+        if (stored === undefined) {
+            return;
+        }
+        const username = me.username ?? null;
+        const avatarUrl = profile.view.currentAvatarUrl;
+        if (
+            stored.name === me.name &&
+            stored.username === username &&
+            stored.avatarUrl === avatarUrl
+        ) {
+            return;
+        }
+        void updateAccountProfile(activeAccountId, {
+            name: me.name,
+            username,
+            avatarUrl,
+        }).then(loadAccounts);
+    }, [
+        me,
+        accounts,
+        activeAccountId,
+        profile.view.currentAvatarUrl,
+        loadAccounts,
+    ]);
+
+    const openAddAccount = (): void => {
+        if (accounts.length >= MAX_ACCOUNTS) {
+            return;
+        }
+        router.push({ pathname: '/(auth)/login', params: { mode: 'add' } });
+    };
+
+    const handleSwitchAccount = async (account: StoredAccount): Promise<void> => {
+        if (busyAccountId !== null || account.userId === activeAccountId) {
+            return;
+        }
+        setBusyAccountId(account.userId);
+        const result = await switchAccount(account.userId);
+        if (result.ok) {
+            setBusyAccountId(null);
+            // The switch reset every cache; land on the chat list.
+            router.replace('/(app)');
+            return;
+        }
+        setBusyAccountId(null);
+        if (result.reason === 'expired') {
+            dialog.show({
+                title: 'Session expired',
+                message: `Sign in again to use ${account.name}.`,
+                tone: 'warning',
+                buttons: [
+                    { text: 'Not now', style: 'cancel' },
+                    { text: 'Log in again', onPress: openAddAccount },
+                ],
+            });
+            return;
+        }
+        if (result.reason === 'unavailable') {
+            dialog.show({
+                title: 'Could not switch account',
+                message: 'Check your connection and try again.',
+                tone: 'warning',
+            });
+            return;
+        }
+        await loadAccounts();
+        toast.show('That account is no longer saved.', { tone: 'danger' });
+    };
+
+    const handleLogoutAccount = (account: StoredAccount): void => {
+        void dialog
+            .confirm({
+                title: `Log out of ${account.name}?`,
+                message:
+                    'This removes the saved sign-in for this account. You can log back in at any time.',
+                confirmText: 'Log out',
+                destructive: true,
+            })
+            .then(async (confirmed): Promise<void> => {
+                if (!confirmed) {
+                    return;
+                }
+                setBusyAccountId(account.userId);
+                try {
+                    await logoutAccount(account.userId);
+                } finally {
+                    setBusyAccountId(null);
+                    await loadAccounts();
+                }
+            });
+    };
 
     const rows: readonly SettingsRowConfig[] = [
         { id: 'account', label: 'Account', icon: UserRound },
@@ -141,34 +282,131 @@ export default function SettingsScreen(): React.ReactElement {
                     </Pressable>
 
                     <View style={styles.section}>
+                        <View style={styles.sectionHeader}>
+                            <AppText style={styles.sectionTitle}>
+                                Accounts
+                            </AppText>
+                            <AppText style={styles.accountCount}>
+                                {accounts.length}/{MAX_ACCOUNTS}
+                            </AppText>
+                        </View>
+                        {accounts.map(
+                            (account): React.ReactElement => {
+                                const isActive =
+                                    account.userId === activeAccountId;
+                                const isBusy =
+                                    busyAccountId === account.userId;
+                                return (
+                                    <View
+                                        key={account.userId}
+                                        style={styles.accountRow}
+                                    >
+                                        <Pressable
+                                            accessibilityRole="button"
+                                            accessibilityLabel={`Switch to ${account.name}`}
+                                            accessibilityState={{
+                                                selected: isActive,
+                                            }}
+                                            disabled={
+                                                busyAccountId !== null ||
+                                                isActive
+                                            }
+                                            onPress={(): void => {
+                                                void handleSwitchAccount(
+                                                    account,
+                                                );
+                                            }}
+                                            style={({ pressed }) => [
+                                                styles.accountMain,
+                                                pressed && styles.cardPressed,
+                                            ]}
+                                        >
+                                            <UserAvatar
+                                                userId={account.userId}
+                                                name={account.name}
+                                                uri={account.avatarUrl}
+                                                size={38}
+                                            />
+                                            <View style={styles.accountBody}>
+                                                <SafeText
+                                                    lines={1}
+                                                    style={styles.accountName}
+                                                >
+                                                    {account.name}
+                                                </SafeText>
+                                                <AppText
+                                                    style={styles.accountHandle}
+                                                    numberOfLines={1}
+                                                >
+                                                    {account.username === null
+                                                        ? 'Saved account'
+                                                        : `@${account.username}`}
+                                                </AppText>
+                                            </View>
+                                            {isBusy ? (
+                                                <ActivityIndicator
+                                                    size="small"
+                                                    color={theme.accent}
+                                                />
+                                            ) : isActive ? (
+                                                <Check
+                                                    size={20}
+                                                    color={theme.accent}
+                                                    strokeWidth={2.5}
+                                                />
+                                            ) : null}
+                                        </Pressable>
+                                        <Pressable
+                                            accessibilityRole="button"
+                                            accessibilityLabel={`Log out of ${account.name}`}
+                                            disabled={busyAccountId !== null}
+                                            onPress={(): void =>
+                                                handleLogoutAccount(account)
+                                            }
+                                            style={({ pressed }) => [
+                                                styles.accountLogout,
+                                                pressed && styles.cardPressed,
+                                            ]}
+                                        >
+                                            <LogOut
+                                                size={18}
+                                                color={theme.colors.danger}
+                                                strokeWidth={2}
+                                            />
+                                        </Pressable>
+                                    </View>
+                                );
+                            },
+                        )}
+                        {accounts.length < MAX_ACCOUNTS && (
+                            <Pressable
+                                accessibilityRole="button"
+                                accessibilityLabel="Add account"
+                                disabled={busyAccountId !== null}
+                                onPress={openAddAccount}
+                                style={({ pressed }) => [
+                                    styles.row,
+                                    pressed && styles.cardPressed,
+                                ]}
+                            >
+                                <Plus
+                                    size={20}
+                                    color={theme.accent}
+                                    strokeWidth={2}
+                                />
+                                <AppText style={styles.rowLabel}>
+                                    Add account
+                                </AppText>
+                            </Pressable>
+                        )}
+                    </View>
+
+                    <View style={styles.section}>
                         {rows.map(
                             (row): React.ReactElement => (
                                 <SettingsRow key={row.id} row={row} />
                             ),
                         )}
-                    </View>
-
-                    <View style={styles.section}>
-                        <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel="Log out"
-                            onPress={(): void => {
-                                void logout('manual');
-                            }}
-                            style={({ pressed }) => [
-                                styles.row,
-                                pressed && styles.cardPressed,
-                            ]}
-                        >
-                            <LogOut
-                                size={20}
-                                color={theme.colors.danger}
-                                strokeWidth={2}
-                            />
-                            <AppText style={[styles.rowLabel, styles.logoutLabel]}>
-                                Log out
-                            </AppText>
-                        </Pressable>
                     </View>
 
                     <AppText style={styles.footer}>
@@ -302,7 +540,57 @@ const createStyles = (theme: AppTheme) =>
             fontSize: 15,
             fontWeight: '600',
         },
-        logoutLabel: { color: theme.colors.danger },
+        sectionHeader: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            paddingHorizontal: spacing.md,
+            paddingVertical: spacing.xs,
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: theme.colors.border,
+        },
+        sectionTitle: {
+            color: theme.colors.textMuted,
+            fontSize: 11,
+            fontWeight: '700',
+            letterSpacing: 0.6,
+            textTransform: 'uppercase',
+        },
+        accountCount: {
+            color: theme.colors.textMuted,
+            fontSize: 11,
+            fontWeight: '600',
+        },
+        accountRow: {
+            flexDirection: 'row',
+            alignItems: 'stretch',
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: theme.colors.border,
+        },
+        accountMain: {
+            flex: 1,
+            minWidth: 0,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: spacing.sm,
+            paddingHorizontal: spacing.md,
+            paddingVertical: spacing.sm,
+        },
+        accountBody: { flex: 1, minWidth: 0, gap: 2 },
+        accountName: {
+            color: theme.colors.text,
+            fontSize: 15,
+            fontWeight: '700',
+        },
+        accountHandle: {
+            ...theme.type.caption,
+            color: theme.colors.textSecondary,
+        },
+        accountLogout: {
+            width: 52,
+            alignItems: 'center',
+            justifyContent: 'center',
+        },
         soonChip: {
             paddingHorizontal: 8,
             paddingVertical: 3,

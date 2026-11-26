@@ -13,7 +13,6 @@ import { DataSource, Not, Repository } from 'typeorm';
 import { JwtPayload } from 'src/common/types/jwt-payload.type';
 import { JwtAppService } from './jwt.service';
 import { PhoneDto } from '../dtos/phone.dto';
-import { CacheService } from 'src/common/services/cache.service';
 import { OtpService } from './otp.service';
 import { VerifyDto } from '../dtos/verify.dto';
 import { UserStatusEnum } from 'src/common/enums/UserStatus.enum';
@@ -37,7 +36,6 @@ export class AuthService {
         private readonly userProfileRepository: Repository<UserProfile>,
         private readonly userService: UserService,
         private readonly jwtService: JwtAppService,
-        private readonly cacheService: CacheService,
         private readonly otpService: OtpService,
         private readonly dataSource: DataSource,
     ) {}
@@ -45,10 +43,9 @@ export class AuthService {
     async register(dto: PhoneDto) {
         const { phone } = dto;
 
-        const isOtpSend: unknown = await this.cacheService.get(
-            `phone:${phone}`,
-        );
-        if (isOtpSend)
+        // Same normalised key the OTP service writes, so the throttle cannot
+        // miss a pending code written from a different phone spelling.
+        if (await this.otpService.hasActiveCode(phone))
             throw new HttpException('code sent', HttpStatus.TOO_MANY_REQUESTS);
 
         await this.otpService.sendOtp(dto);
